@@ -2,6 +2,7 @@
   import Icon from './Icon.svelte'
   import PasswordGenerator from './PasswordGenerator.svelte'
   import { generatePassword, loadOpts } from './passwordgen.js'
+  import { getAutocompleteSuggestion } from '../wasm.js'
 
   let { record, isNew, isDesktop, oncancel, onsave } = $props()
 
@@ -16,10 +17,59 @@
   let showPw  = $state(isNew)
   let genOpen = $state(false)
 
-  let dirty  = $derived(!record || Object.keys(draft).some(k => (record[k] ?? '') !== draft[k]))
+  let groupGhost    = $state('')
+  let usernameGhost = $state('')
+
+  let dirty   = $derived(!record || Object.keys(draft).some(k => (record[k] ?? '') !== draft[k]))
   let canSave = $derived(dirty && !!draft.Title)
 
   function set(k, v) { draft = { ...draft, [k]: v } }
+
+  // Returns just the suffix to append, or '' if no useful suggestion
+  function ghostFor(field, value) {
+    if (!value) return ''
+    const suggestion = getAutocompleteSuggestion(field, value)
+    if (!suggestion) return ''
+    // Only offer if suggestion starts with what the user typed (case-insensitive)
+    if (!suggestion.toLowerCase().startsWith(value.toLowerCase())) return ''
+    // Don't offer if already an exact match
+    if (suggestion.toLowerCase() === value.toLowerCase()) return ''
+    return suggestion.slice(value.length)
+  }
+
+  function onGroupInput(e) {
+    const v = e.target.value
+    set('Group', v)
+    groupGhost = ghostFor('group', v)
+  }
+
+  function onGroupKeydown(e) {
+    if (e.key === 'Tab' && groupGhost) {
+      e.preventDefault()
+      const suggestion = getAutocompleteSuggestion('group', draft.Group)
+      set('Group', suggestion)
+      groupGhost = ''
+    } else if (e.key === 'Escape') {
+      groupGhost = ''
+    }
+  }
+
+  function onUsernameInput(e) {
+    const v = e.target.value
+    set('Username', v)
+    usernameGhost = ghostFor('username', v)
+  }
+
+  function onUsernameKeydown(e) {
+    if (e.key === 'Tab' && usernameGhost) {
+      e.preventDefault()
+      const suggestion = getAutocompleteSuggestion('username', draft.Username)
+      set('Username', suggestion)
+      usernameGhost = ''
+    } else if (e.key === 'Escape') {
+      usernameGhost = ''
+    }
+  }
 
   function quickGenerate() {
     set('Password', generatePassword(loadOpts()))
@@ -61,16 +111,42 @@
         placeholder="e.g. Bank of America" autofocus={isNew}/>
     </label>
 
-    <label class="field">
+    <div class="field">
       <span class="field-label muted">Group</span>
-      <input class="input" value={draft.Group} oninput={e => set('Group', e.target.value)}
-        placeholder="e.g. Banking"/>
-    </label>
+      <div class="ac-wrap">
+        {#if groupGhost}
+          <div class="ac-ghost" aria-hidden="true">
+            <span class="ac-typed">{draft.Group}</span><span class="ac-suffix">{groupGhost}</span>
+          </div>
+        {/if}
+        <input
+          class="input"
+          value={draft.Group}
+          placeholder="e.g. Banking"
+          oninput={onGroupInput}
+          onkeydown={onGroupKeydown}
+          onblur={() => groupGhost = ''}
+        />
+      </div>
+    </div>
 
-    <label class="field">
+    <div class="field">
       <span class="field-label muted">Username</span>
-      <input class="input" value={draft.Username} oninput={e => set('Username', e.target.value)}/>
-    </label>
+      <div class="ac-wrap">
+        {#if usernameGhost}
+          <div class="ac-ghost" aria-hidden="true">
+            <span class="ac-typed">{draft.Username}</span><span class="ac-suffix">{usernameGhost}</span>
+          </div>
+        {/if}
+        <input
+          class="input"
+          value={draft.Username}
+          oninput={onUsernameInput}
+          onkeydown={onUsernameKeydown}
+          onblur={() => usernameGhost = ''}
+        />
+      </div>
+    </div>
 
     <div class="field">
       <span class="field-label muted">Password</span>
@@ -107,6 +183,30 @@
 {/if}
 
 <style>
+  .ac-wrap {
+    position: relative;
+  }
+
+  .ac-ghost {
+    position: absolute;
+    inset: 0;
+    padding: 12px 14px;
+    pointer-events: none;
+    font-size: 17px;
+    font-family: var(--font-ui);
+    line-height: 1.45;
+    white-space: pre;
+    overflow: hidden;
+    border: 1px solid transparent;
+    border-radius: var(--r-input);
+    display: flex;
+    align-items: center;
+    z-index: 1;
+  }
+
+  .ac-typed  { color: transparent; }
+  .ac-suffix { color: var(--text-soft); }
+
   .pw-gen-row {
     display: flex;
     align-items: center;
