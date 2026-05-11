@@ -1,0 +1,83 @@
+/* Design tokens — two themes × four accents
+   Light = warm paper; dark = ink with warmth */
+
+:root {
+  --font-ui:   'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --s-1: 4px;  --s-2: 8px;  --s-3: 12px; --s-4: 16px;
+  --s-5: 24px; --s-6: 32px; --s-7: 48px;
+
+  --r-input: 8px;
+  --r-card:  14px;
+  --r-pill:  9999px;
+
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+.theme-light {
+  --bg:           #f6f3ee;
+  --surface:      #fbfaf7;
+  --surface-2:    #efece5;
+  --border:       #e3ddd1;
+  --border-strong:#c9c0ad;
+  --text:         #1c1f24;
+  --text-muted:   #5a5d65;
+  --text-soft:    #87898f;
+  --shadow: 0 1px 2px rgba(28,31,36,0.04), 0 1px 1px rgba(28,31,36,0.03);
+  color-scheme: light;
+}
+
+.theme-dark {
+  --bg:           #14161a;
+  --surface:      #1c1f24;
+  --surface-2:    #262a31;
+  --border:       #2c3038;
+  --border-strong:#3e434c;
+  --text:         #f1ede4;
+  --text-muted:   #a6a39b;
+  --text-soft:    #757279;
+  --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 4px 12px rgba(0,0,0,0.25);
+  color-scheme: dark;
+}
+
+.accent-amber { --accent:#b07418; --accent-strong:#8c5c12; --accent-soft:#f3e6c9; --accent-on:#ffffff; }
+.accent-amber.theme-dark { --accent:#d9a358; --accent-strong:#e6b572; --accent-soft:#3a2e1a; --accent-on:#1a1407; }
+
+.accent-sage  { --accent:#5a7a4f; --accent-strong:#466239; --accent-soft:#dde6d4; --accent-on:#ffffff; }
+.accent-sage.theme-dark  { --accent:#97b386; --accent-strong:#a8c298; --accent-soft:#2c3a26; --accent-on:#11160d; }
+
+.accent-slate { --accent:#4a5d82; --accent-strong:#364770; --accent-soft:#dee3ee; --accent-on:#ffffff; }
+.accent-slate.theme-dark { --accent:#8da3c8; --accent-strong:#9fb6da; --accent-soft:#25304a; --accent-on:#0f1320; }
+
+.accent-burgundy { --accent:#8a3a3a; --accent-strong:#6b2828; --accent-soft:#ead4d4; --accent-on:#ffffff; }
+.accent-burgundy.theme-dark { --accent:#c98a8a; --accent-strong:#d99b9b; --accent-soft:#3a2222; --accent-on:#1a0d0d; }
+
+.theme-light { --danger:#b3361f; --success:#2c7a4e; }
+.theme-dark  { --danger:#e08673; --success:#6cba8a; }
+
+.vault-app, .vault-app * { box-sizing: border-box; }
+.vault-app {
+  font-family: var(--font-ui);
+  font-size: 17px;
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+}
+.vault-app button { font-family: inherit; font-size: inherit; color: inherit; }
+.vault-app input, .vault-app textarea { font-family: inherit; font-size: inherit; color: var(--text); }
+
+.mono { font-family: var(--font-mono); letter-spacing: -0.005em; }
+
+.vault-app .row   { display: flex; align-items: center; }
+.vault-app .col   { display: flex; flex-direction: column; }
+.vault-app .gap-1 { gap: var(--s-1); } .vault-app .gap-2 { gap: var(--s-2); }
+.vault-app .gap-3 { gap: var(--s-3); } .vault-app .gap-4 { gap: var(--s-4); }
+.vault-app .grow  { flex: 1 1 auto; min-width: 0; }
+.vault-app .muted { color: var(--text-muted); }
+.vault-app .soft  { color: var(--text-soft); }

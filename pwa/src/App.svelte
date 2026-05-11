@@ -1,12 +1,26 @@
 <script>
   import { onMount } from 'svelte'
   import { loadWasm } from './wasm.js'
+  import StartPage from './lib/StartPage.svelte'
+  import Dashboard from './lib/Dashboard.svelte'
+  import Toast from './lib/Toast.svelte'
 
   let wasmReady = $state(false)
   let wasmError = $state(null)
-  let view = $state('start') // start | dashboard
+  let view = $state('start') // 'start' | 'dashboard'
+
+  let theme  = $state(localStorage.getItem('theme')  || 'dark')
+  let accent = $state(localStorage.getItem('accent') || 'amber')
+  let isDesktop = $state(false)
+
+  $effect(() => { localStorage.setItem('theme',  theme)  })
+  $effect(() => { localStorage.setItem('accent', accent) })
 
   onMount(async () => {
+    const mq = window.matchMedia('(min-width: 768px)')
+    isDesktop = mq.matches
+    mq.addEventListener('change', e => { isDesktop = e.matches })
+
     try {
       await loadWasm()
       wasmReady = true
@@ -17,36 +31,29 @@
   })
 </script>
 
-<main>
+<div
+  class="vault-app theme-{theme} accent-{accent}"
+  class:is-desktop={isDesktop}
+>
   {#if wasmError}
-    <div class="status error">Failed to load: {wasmError}</div>
+    <div style="height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;padding:24px;text-align:center;">
+      <span style="font-size:14px;color:var(--danger)">Failed to load engine: {wasmError}</span>
+    </div>
   {:else if !wasmReady}
-    <div class="status">Loading…</div>
+    <div style="height:100%;display:flex;align-items:center;justify-content:center;opacity:0.4;font-size:14px;">
+      Loading…
+    </div>
   {:else if view === 'start'}
-    <div class="status">Start page (todo)</div>
+    <StartPage onopened={() => view = 'dashboard'} />
   {:else}
-    <div class="status">Dashboard (todo)</div>
+    <Dashboard
+      onclosed={() => view = 'start'}
+      {theme}
+      {accent}
+      {isDesktop}
+      ontheme={t => theme = t}
+      onaccent={a => accent = a}
+    />
   {/if}
-</main>
-
-<style>
-  main {
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .status {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1rem;
-    opacity: 0.5;
-  }
-
-  .error {
-    color: red;
-    opacity: 1;
-  }
-</style>
+  <Toast />
+</div>
