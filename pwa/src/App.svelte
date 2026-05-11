@@ -33,7 +33,7 @@
 
 <div
   class="vault-app theme-{theme} accent-{accent}"
-  class:is-desktop={isDesktop}
+  class:is-desktop={isDesktop && view === 'dashboard'}
 >
   {#if wasmError}
     <div style="height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;padding:24px;text-align:center;">

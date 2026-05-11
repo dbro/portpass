@@ -423,6 +423,19 @@
   color: var(--text-soft); font-size: 15px;
 }
 
+/* DESKTOP — centered unlock/start screens */
+@media (min-width: 768px) {
+  .vault-app .unlock-screen {
+    align-items: center;
+    justify-content: center;
+  }
+  .vault-app .unlock-stack {
+    width: 100%;
+    max-width: 400px;
+    padding-top: 0;
+  }
+}
+
 /* MOBILE — record screen slides in over the list */
 @media (max-width: 767px) {
   .vault-app .record-screen {
