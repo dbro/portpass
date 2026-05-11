@@ -88,7 +88,7 @@
             {record.Username}
           </button>
           <div class="copy-row-actions">
-            <button class="icon-btn-flat" onclick={() => oncopy(record.Username, 'Username')} aria-label="Copy username">
+            <button class="icon-btn-flat copy-btn" onclick={() => oncopy(record.Username, 'Username')} aria-label="Copy username">
               <Icon name="copy" size={18}/>
             </button>
           </div>
@@ -107,7 +107,7 @@
             <button class="icon-btn-flat" onclick={() => { revealed = !revealed; if (!revealed) showHistory = false }} aria-label="Reveal password">
               <Icon name={revealed ? 'eye-off' : 'eye'} size={18}/>
             </button>
-            <button class="icon-btn-flat" onclick={() => oncopy(record.Password, 'Password')} aria-label="Copy password">
+            <button class="icon-btn-flat copy-btn" onclick={() => oncopy(record.Password, 'Password')} aria-label="Copy password">
               <Icon name="copy" size={18}/>
             </button>
           </div>
@@ -144,7 +144,7 @@
             <a class="icon-btn-flat" href={record.URL} target="_blank" rel="noreferrer" aria-label="Open URL">
               <Icon name="external" size={18}/>
             </a>
-            <button class="icon-btn-flat" onclick={() => oncopy(record.URL, 'URL')} aria-label="Copy URL">
+            <button class="icon-btn-flat copy-btn" onclick={() => oncopy(record.URL, 'URL')} aria-label="Copy URL">
               <Icon name="copy" size={18}/>
             </button>
           </div>

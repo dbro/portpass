@@ -35,6 +35,8 @@
   transition: background .12s var(--ease), color .12s var(--ease);
 }
 .vault-app .icon-btn-flat:hover { background: var(--surface-2); color: var(--text); }
+.vault-app .icon-btn-flat.copy-btn { color: var(--accent); }
+.vault-app .icon-btn-flat.copy-btn:hover { color: var(--accent-strong); }
 
 .vault-app .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;

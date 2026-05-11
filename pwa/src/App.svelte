@@ -16,6 +16,36 @@
   $effect(() => { localStorage.setItem('theme',  theme)  })
   $effect(() => { localStorage.setItem('accent', accent) })
 
+  const THEME_COLORS = {
+    light: { bg: '#f6f3ee', text: '#1c1f24' },
+    dark:  { bg: '#14161a', text: '#f1ede4' },
+  }
+
+  $effect(() => {
+    const colors = THEME_COLORS[theme] ?? THEME_COLORS.dark
+
+    // Update browser chrome color
+    let metaTheme = document.querySelector('meta[name="theme-color"]')
+    if (!metaTheme) {
+      metaTheme = document.createElement('meta')
+      metaTheme.setAttribute('name', 'theme-color')
+      document.head.appendChild(metaTheme)
+    }
+    metaTheme.setAttribute('content', colors.bg)
+
+    // Update favicon — replace dark theme colors with current theme colors
+    fetch(import.meta.env.BASE_URL + 'icon.svg')
+      .then(r => r.text())
+      .then(svg => {
+        const themed = svg
+          .replace(/#14161a/gi, colors.bg)
+          .replace(/#f1ede4/gi, colors.text)
+        const url = 'data:image/svg+xml,' + encodeURIComponent(themed)
+        document.querySelector('link[rel="icon"]')?.setAttribute('href', url)
+      })
+      .catch(() => {})
+  })
+
   onMount(async () => {
     const mq = window.matchMedia('(min-width: 768px)')
     isDesktop = mq.matches

@@ -2,6 +2,10 @@
 
 *A simple password manager that keeps your data in your control, across all your devices.*
 
+<img src="https://github.com/user-attachments/assets/a55dfbaf-ce96-44fd-9213-d45d46c68bad" width="25%" alt="Screenshots of mobile layouts">
+
+**Free and open source. Try it: [https://dbro.github.io/portpass](https://dbro.github.io/portpass)**
+
 Portpass is for people who take password security seriously but are frustrated by the options. Existing open-source tools often look and feel dated. Hosted services like 1Password and LastPass are polished, but require trusting a startup with your most sensitive data.
 
 Portpass is different: your passwords live in a file on your device, or in a cloud storage service you already trust. The encrypted vault is stored as a pwsafe v3 file, using the method invented by cryptographer [Bruce Schneier](https://www.schneier.com/) in the 1990s, open-sourced and audited for decades. No browser extensions, no proprietary sync, no new crypto to evaluate.
@@ -14,12 +18,13 @@ Portpass is different: your passwords live in a file on your device, or in a clo
 * organizes password records into groups for browsing
 * encrypts your vault using an established open source format (pwsafe v3)
 * stores your vault as a file on your device, for easy sync/backup
+* supports convenient alternate unlock methods: fingerprint, face recognition, and PIN
 
 ## Installation
 
 Portpass runs in your browser and can be installed as an app on any device. There installation method involves visiting a web page and then telling your browser to create an app icon (like a bookmark) on your homescreen. Not all mobile browsers support installing websites as app icons; Safari and Chrome do. There is no app store involved, and the process is the same on mobile and desktop.
 
-* Open https://dbro.github.io/portpass/ in your browser
+* Open [https://dbro.github.io/portpass/](https://dbro.github.io/portpass/) in your browser
 * When prompted, tap "Add to Home Screen" (iOS/Android) or "Install" (desktop)
 
 Portpass is now available as a standalone app. It works offline and uses your local vault file.
@@ -38,6 +43,10 @@ Portpass reads and writes the [Password Safe v3](https://github.com/pwsafe/pwsaf
 
 Portpass runs entirely in your browser using WebAssembly, a technology that lets compiled code run securely in the browser at near-native speed. All cryptography happens on your device. Your vault file and master password never leave it.
 There is no server, no account, and nothing to trust except the open source code, which is freely available to inspect on GitHub.
+
+**Fast unlock** uses your device's built-in authentication (fingerprint, face recognition, or PIN) so you don't have to type your master password on repeat visits. Your master password is encrypted with a key only your device can produce and stored locally, it is never transmitted anywhere.
+
+On Android, Chrome routes fast unlock setup through [Google Password Manager](https://passwords.google.com/), which requires a recovery PIN to have been set up previously. Google Password Manager stores a synced copy of the passkey in Google's cloud (but not your vault's master password, which always stays on your device). To set up or reset a Google Password Manager recovery PIN, visit [passwords.google.com/passkeys/reset/intro](https://passwords.google.com/passkeys/reset/intro).
 
 ## Credits
 
