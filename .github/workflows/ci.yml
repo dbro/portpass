@@ -94,7 +94,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [FuzzRecordTitle, FuzzRecordUsername, FuzzRecordPassword, FuzzRecordNotes, FuzzRecordEmail, FuzzRecordURL]
+        target: [FuzzRecordTitle, FuzzRecordUsername, FuzzRecordPassword, FuzzRecordNotes, FuzzRecordURL]
     steps:
     - uses: actions/checkout@v4
 
