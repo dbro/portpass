@@ -20,10 +20,15 @@
   let isNew        = $state(false)
   let sheetOpen    = $state(false)
   let isDirty      = $state(false)
-  let dbName       = $state('')
+  let dbName = $state('')
+  let dbKey  = $state('')
 
   onMount(() => {
-    try { dbName = getDatabaseInfo()?.name ?? '' } catch (e) {}
+    try {
+      const info = getDatabaseInfo()
+      dbName = info?.name ?? ''
+      dbKey  = info?.uuid ?? ''
+    } catch (e) {}
   })
 
   function showToast(message, action, duration = 4000) {
@@ -213,7 +218,7 @@
     {/if}
   </div>
 
-  <RecordList {query} {selectedUUID} ontap={selectRecord} oncopy={copyToClipboard}/>
+  <RecordList {query} {selectedUUID} storageKey={dbKey} ontap={selectRecord} oncopy={copyToClipboard}/>
 
   <!-- FAB (mobile) -->
   <button class="fab" onclick={startNew} aria-label="New record">

@@ -3,9 +3,24 @@
   import { searchRecords, getRecordData } from '../wasm.js'
   import Icon from './Icon.svelte'
 
-  let { selectedUUID = null, query = '', ontap, oncopy } = $props()
+  let { selectedUUID = null, query = '', ontap, oncopy, storageKey = null } = $props()
 
-  let openGroups  = $state({})
+  function loadGroupState() {
+    if (!storageKey) return {}
+    try { return JSON.parse(localStorage.getItem('groups-' + storageKey) ?? '{}') } catch { return {} }
+  }
+
+  function saveGroupState(state) {
+    if (!storageKey) return
+    try { localStorage.setItem('groups-' + storageKey, JSON.stringify(state)) } catch {}
+  }
+
+  let openGroups = $state({})
+
+  $effect(() => {
+    // Reload when storageKey becomes available (set after onMount in Dashboard)
+    openGroups = loadGroupState()
+  })
   let contextMenu = $state(null) // { x, y, rec }
 
   let groups = $derived.by(() => {
@@ -33,7 +48,9 @@
   })
 
   function toggle(group) {
-    openGroups = { ...openGroups, [group]: !isOpen(group) }
+    const next = { ...openGroups, [group]: !isOpen(group) }
+    openGroups = next
+    saveGroupState(next)
   }
 
   function isOpen(group) {
