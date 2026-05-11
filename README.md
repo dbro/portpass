@@ -2,7 +2,7 @@
 
 *A simple password manager that keeps your data in your control, across all your devices.*
 
-<img src="https://github.com/user-attachments/assets/a55dfbaf-ce96-44fd-9213-d45d46c68bad" width="60%" alt="Screenshots of mobile layouts">
+<img src="https://github.com/user-attachments/assets/bfa7c2cf-da97-46ca-9393-7f3d86b45640" width="65%" alt="Screenshots of mobile layouts">
 
 **Free and open source. Try it: [https://dbro.github.io/portpass](https://dbro.github.io/portpass)**
 
@@ -23,12 +23,13 @@ Portpass is different: your passwords live in a file on your device, or in a clo
 
 ## Installation
 
-Portpass runs in your browser and can be installed as an app on any device. There installation method involves visiting a web page and then telling your browser to create an app icon (like a bookmark) on your homescreen. Not all mobile browsers support installing websites as app icons; Safari and Chrome do. There is no app store involved, and the process is the same on mobile and desktop.
+Portpass runs in your browser and can be installed as an app on any device. Installation involves visiting a web page and then telling your browser to create an app icon (like a bookmark) on your homescreen. Safari and Chrome browsers support installing as standalone webpage apps like this, and maybe some other browsers do too. There is no app store involved, and the process is the same on mobile and desktop.
 
 * Open [https://dbro.github.io/portpass/](https://dbro.github.io/portpass/) in your browser
 * When prompted, tap "Add to Home Screen" (iOS/Android) or "Install" (desktop)
+* You might also want to pin the app to your app launcher dashboard on your desktop
 
-Portpass is now available as a standalone app. It works offline and uses your local vault file.
+Portpass will then be visible as a standalone app and can be launched with a tap. It works offline and uses your local vault file.
 
 ## Cross-platform + how to sync
 
