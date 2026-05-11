@@ -1,8 +1,9 @@
 <script>
+  import { onMount } from 'svelte'
   import { selectedFile, dbItems, toast } from '../store.js'
   import {
-    getRecordData, getDatabaseData, saveDatabase,
-    updateRecordFields, deleteRecord as wasmDeleteRecord,
+    getRecordData, getDatabaseData, saveDatabase, getDatabaseInfo,
+    updateRecordFields, updateDBFields, deleteRecord as wasmDeleteRecord,
   } from '../wasm.js'
   import Icon from './Icon.svelte'
   import RecordList from './RecordList.svelte'
@@ -14,11 +15,16 @@
 
   let query        = $state('')
   let selectedUUID = $state(null)
-  let record       = $state(null)     // full record from WASM
+  let record       = $state(null)
   let isEditing    = $state(false)
   let isNew        = $state(false)
   let sheetOpen    = $state(false)
-  let isDirty      = $state(false)    // unsaved DB changes
+  let isDirty      = $state(false)
+  let dbName       = $state('')
+
+  onMount(() => {
+    try { dbName = getDatabaseInfo()?.name ?? '' } catch (e) {}
+  })
 
   function showToast(message, action) {
     toast.set({ message, action, duration: 4000 })
@@ -126,6 +132,17 @@
     }
   }
 
+  async function saveDBFields(fields) {
+    try {
+      updateDBFields(fields)
+      await saveFile(true)
+      dbName = fields.Name ?? dbName  // fields uses PascalCase for the WASM write API
+      showToast('Vault info saved')
+    } catch (e) {
+      showToast('Failed to save vault info: ' + e.message)
+    }
+  }
+
   function lockVault() {
     sheetOpen = false
     onclosed()
@@ -144,7 +161,7 @@
     return () => window.removeEventListener('beforeunload', handler)
   })
 
-  let vaultName = $derived($selectedFile?.name ?? 'Vault')
+  let vaultName = $derived(dbName || $selectedFile?.name || 'Vault')
   let showRecord = $derived(!!record || isEditing)
 </script>
 
@@ -227,6 +244,7 @@
     onclose={() => sheetOpen = false}
     onlock={lockVault}
     onclosevault={closeVault}
+    ondbsave={saveDBFields}
     {ontheme}
     {onaccent}
   />

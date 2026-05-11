@@ -3,17 +3,30 @@
   import { selectedFile } from '../store.js'
   import Icon from './Icon.svelte'
 
-  let { onclose, onlock, onclosevault, theme, accent, ontheme, onaccent } = $props()
+  let { onclose, onlock, onclosevault, ondbsave, theme, accent, ontheme, onaccent } = $props()
 
   const ACCENTS = ['amber', 'sage', 'slate', 'burgundy']
   const SWATCH  = { amber: '#b07418', sage: '#5a7a4f', slate: '#4a5d82', burgundy: '#8a3a3a' }
 
-  let info = $state(null)
   let filename = $derived($selectedFile?.name ?? '')
 
-  $effect(() => {
-    try { info = getDatabaseInfo() } catch (e) { info = null }
-  })
+  // Fetch once on mount — VaultSheet is only rendered while vault is open
+  let info = (() => { try { return getDatabaseInfo() } catch { return null } })()
+
+  let draftName = $state(info?.name        ?? '')
+  let draftDesc = $state(info?.description ?? '')
+
+  let origName = info?.name        ?? ''
+  let origDesc = info?.description ?? ''
+
+  let dirty = $derived(origName !== draftName || origDesc !== draftDesc)
+
+  function save() {
+    ondbsave({ Name: draftName, Description: draftDesc })
+    origName = draftName
+    origDesc = draftDesc
+    onclose()
+  }
 </script>
 
 <div class="sheet-backdrop" role="dialog" aria-modal="true" onclick={onclose}>
@@ -22,27 +35,38 @@
     <div class="sheet-body">
 
       <div class="sheet-section">
-        {#if info}
-          <div class="sheet-row">
-            <span class="sheet-label muted">File</span>
-            <span class="sheet-value">{filename}</span>
-          </div>
-          {#if info.Name}
-            <div class="sheet-row">
-              <span class="sheet-label muted">Vault name</span>
-              <span class="sheet-value">{info.Name}</span>
-            </div>
-          {/if}
-          {#if info.Description}
-            <div class="sheet-row">
-              <span class="sheet-label muted">Description</span>
-              <span class="sheet-value">{info.Description}</span>
-            </div>
-          {/if}
-        {:else}
-          <div class="sheet-row">
-            <span class="sheet-value">{filename}</span>
-          </div>
+        <div class="sheet-section-title">Vault info</div>
+
+        <div class="sheet-field">
+          <span class="sheet-label muted">Name</span>
+          <input
+            class="input sheet-input"
+            value={draftName}
+            oninput={e => draftName = e.target.value}
+            placeholder="My vault"
+          />
+        </div>
+
+        <div class="sheet-field">
+          <span class="sheet-label muted">Notes</span>
+          <textarea
+            class="input sheet-input"
+            rows={3}
+            value={draftDesc}
+            oninput={e => draftDesc = e.target.value}
+            placeholder="Optional description"
+          ></textarea>
+        </div>
+
+        <div class="sheet-field">
+          <span class="sheet-label muted">File</span>
+          <span class="sheet-value">{filename}</span>
+        </div>
+
+        {#if dirty}
+          <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick={save}>
+            Save vault info
+          </button>
         {/if}
       </div>
 
@@ -71,9 +95,56 @@
         <button class="btn btn-ghost" onclick={onlock}>
           <Icon name="lock" size={16}/> Lock vault
         </button>
-        <button class="btn btn-ghost danger" onclick={onclosevault}>Close vault</button>
+      </div>
+
+      <div class="sheet-section">
+        <div class="sheet-section-title">About</div>
+        <div class="about-row">
+          <span class="about-name">Portpass</span>
+          <span class="about-version muted">{__APP_VERSION__}</span>
+        </div>
+        <a
+          class="about-url muted"
+          href="https://dbro.github.io/portpass"
+          target="_blank"
+          rel="noreferrer"
+        >dbro.github.io/portpass</a>
       </div>
 
     </div>
   </div>
 </div>
+
+<style>
+  .sheet-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .sheet-input {
+    font-size: 15px;
+    padding: 10px 12px;
+  }
+  .about-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .about-name {
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .about-version {
+    font-size: 13px;
+  }
+  .about-url {
+    font-size: 13px;
+    color: var(--text-soft);
+    text-decoration: none;
+    display: block;
+    margin-top: 2px;
+  }
+  .about-url:hover {
+    color: var(--accent);
+  }
+</style>
