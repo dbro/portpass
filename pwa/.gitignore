@@ -1,0 +1,6 @@
+dist/
+node_modules/
+public/portpass.wasm
+public/portpass.wasm.gz
+public/wasm_exec.js
+test-results/
