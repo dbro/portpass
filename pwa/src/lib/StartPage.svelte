@@ -132,7 +132,6 @@
 
       <div class="unlock-pw">
         <input
-          class="input"
           type={showPw ? 'text' : 'password'}
           bind:value={password}
           placeholder="Master password"
@@ -170,7 +169,6 @@
 
       <div class="unlock-pw">
         <input
-          class="input"
           type={showPw ? 'text' : 'password'}
           bind:value={password}
           placeholder="Master password"

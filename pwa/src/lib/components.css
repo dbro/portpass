@@ -31,7 +31,7 @@
 .vault-app .icon-btn-flat {
   width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center;
   border-radius: var(--r-input); border: none; background: transparent; cursor: pointer;
-  color: var(--text-muted);
+  color: var(--text-muted); appearance: none; -webkit-appearance: none;
   transition: background .12s var(--ease), color .12s var(--ease);
 }
 .vault-app .icon-btn-flat:hover { background: var(--surface-2); color: var(--text); }
@@ -85,7 +85,11 @@
   background: var(--surface); border: 1px solid var(--border-strong);
   border-radius: var(--r-input); padding: 0 6px 0 0;
 }
-.vault-app .unlock-pw .input { border: none; background: transparent; padding: 12px 14px; flex: 1; outline: none; }
+.vault-app .unlock-pw > input {
+  border: none; background: transparent; padding: 12px 14px; flex: 1; outline: none;
+  font-family: var(--font-ui); font-size: 17px; color: var(--text);
+  appearance: none; -webkit-appearance: none;
+}
 .vault-app .unlock-pw:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .vault-app .unlock-screen .btn-primary { width: 100%; margin-top: 4px; }
 .vault-app .unlock-screen .btn-text { width: 100%; padding: 16px 0; }
@@ -355,18 +359,6 @@
 }
 .vault-app .gen-output-value { flex: 1; font-size: 17px; word-break: break-all; line-height: 1.4; letter-spacing: 0.01em; }
 .vault-app .gen-regen { flex: 0 0 auto; color: var(--accent); }
-.vault-app .gen-strength { display: flex; flex-direction: column; gap: 6px; padding: 0 2px; }
-.vault-app .gen-strength-bar { height: 4px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
-.vault-app .gen-strength-fill { height: 100%; border-radius: 999px; transition: width .18s var(--ease); }
-.vault-app .gen-strength-fill.s-weak      { background: var(--danger); }
-.vault-app .gen-strength-fill.s-fair      { background: #d99b40; }
-.vault-app .gen-strength-fill.s-good      { background: var(--accent); }
-.vault-app .gen-strength-fill.s-excellent { background: var(--success); }
-.vault-app .gen-strength-label { display: flex; justify-content: space-between; font-size: 12px; font-weight: 500; }
-.vault-app .gen-strength-label .s-weak      { color: var(--danger); }
-.vault-app .gen-strength-label .s-fair      { color: #b07a30; }
-.vault-app .gen-strength-label .s-good      { color: var(--accent); }
-.vault-app .gen-strength-label .s-excellent { color: var(--success); }
 .vault-app .gen-controls { display: flex; flex-direction: column; gap: 18px; }
 .vault-app .gen-slider { display: flex; flex-direction: column; gap: 6px; }
 .vault-app .gen-row { display: flex; justify-content: space-between; align-items: baseline; }

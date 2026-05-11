@@ -48,16 +48,17 @@ export function openDatabase(fileData, password) {
     if (err) throw new Error(err)
 }
 
+function parseOrThrow(res) {
+    if (typeof res !== 'string') return res
+    try { return JSON.parse(res) } catch { throw new Error(res) }
+}
+
 export function getDatabaseData() {
-    const res = window.getDBData()
-    if (typeof res === 'string') throw new Error(res)
-    return JSON.parse(res) || []
+    return parseOrThrow(window.getDBData()) || []
 }
 
 export function getRecordData(uuid) {
-    const res = window.getRecord(uuid)
-    if (typeof res === 'string') throw new Error(res)
-    return JSON.parse(res)
+    return parseOrThrow(window.getRecord(uuid))
 }
 
 export function createDatabase(password) {
@@ -66,9 +67,7 @@ export function createDatabase(password) {
 }
 
 export function getDatabaseInfo() {
-    const res = window.getDBInfo()
-    if (typeof res === 'string') throw new Error(res)
-    return JSON.parse(res)
+    return parseOrThrow(window.getDBInfo())
 }
 
 export function saveDatabase() {
@@ -98,9 +97,7 @@ export function deleteRecord(uuid) {
 }
 
 export function searchRecords(query, namesOnly) {
-    const res = window.searchRecords(query, namesOnly)
-    if (typeof res === 'string') throw new Error(res)
-    return JSON.parse(res)
+    return parseOrThrow(window.searchRecords(query, namesOnly))
 }
 
 export function getAutocompleteSuggestion(field, prefix) {

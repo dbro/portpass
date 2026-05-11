@@ -1,6 +1,7 @@
 <script>
   import Icon from './Icon.svelte'
   import PasswordGenerator from './PasswordGenerator.svelte'
+  import { generatePassword, loadOpts } from './passwordgen.js'
 
   let { record, isNew, isDesktop, oncancel, onsave } = $props()
 
@@ -12,16 +13,18 @@
     URL:      record?.URL      ?? '',
     Notes:    record?.Notes    ?? '',
   })
-  let showPw   = $state(isNew)
-  let genOpen  = $state(false)
+  let showPw  = $state(isNew)
+  let genOpen = $state(false)
 
-  let dirty = $derived(
-    !record ||
-    Object.keys(draft).some(k => (record[k] ?? '') !== draft[k])
-  )
+  let dirty  = $derived(!record || Object.keys(draft).some(k => (record[k] ?? '') !== draft[k]))
   let canSave = $derived(dirty && !!draft.Title)
 
   function set(k, v) { draft = { ...draft, [k]: v } }
+
+  function quickGenerate() {
+    set('Password', generatePassword(loadOpts()))
+    showPw = true
+  }
 
   function usePassword(pw) {
     set('Password', pw)
@@ -82,7 +85,12 @@
           <Icon name={showPw ? 'eye-off' : 'eye'} size={18}/>
         </button>
       </div>
-      <button class="btn-text accent small" onclick={() => genOpen = true}>Generate password</button>
+      <div class="pw-gen-row">
+        <button class="btn-text accent small" onclick={quickGenerate}>Generate</button>
+        <button class="icon-btn-flat" onclick={() => genOpen = true} aria-label="Password options">
+          <Icon name="settings" size={16}/>
+        </button>
+      </div>
     </div>
 
     <label class="field">
@@ -97,3 +105,12 @@
     </label>
   </div>
 {/if}
+
+<style>
+  .pw-gen-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 2px;
+  }
+</style>

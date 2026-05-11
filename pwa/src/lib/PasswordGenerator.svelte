@@ -1,58 +1,28 @@
 <script>
   import Icon from './Icon.svelte'
+  import { SYMBOL_PALETTE, DEFAULT_SYMBOLS, generatePassword, loadOpts, saveOpts } from './passwordgen.js'
 
   let { onclose, onuse } = $props()
 
-  const POOLS = {
-    lowercase: 'abcdefghijklmnopqrstuvwxyz',
-    uppercase: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
-    digits:    '0123456789',
-    symbols:   '!@#$%^&*-_=+?',
-  }
+  let opts = $state(loadOpts())
+  let value = $state(generatePassword(opts))
 
-  let opts = $state({ length: 16, lowercase: true, uppercase: true, digits: true, symbols: true })
-  let value = $state(generate(opts))
+  let activeSymbols = $derived(new Set(opts.customSymbols.split('')))
 
-  function generate(o) {
-    let pool = ''
-    if (o.lowercase) pool += POOLS.lowercase
-    if (o.uppercase) pool += POOLS.uppercase
-    if (o.digits)    pool += POOLS.digits
-    if (o.symbols)   pool += POOLS.symbols
-    if (!pool) return ''
-    const arr = new Uint32Array(o.length)
-    crypto.getRandomValues(arr)
-    let out = ''
-    for (let i = 0; i < o.length; i++) out += pool[arr[i] % pool.length]
-    return out
+  function toggleSymbol(char) {
+    const s = new Set(opts.customSymbols.split(''))
+    if (s.has(char)) { s.delete(char) } else { s.add(char) }
+    const next = SYMBOL_PALETTE.split('').filter(c => s.has(c)).join('')
+    set('customSymbols', next || DEFAULT_SYMBOLS)
   }
 
   function set(k, v) {
     opts = { ...opts, [k]: v }
-    value = generate(opts)
+    saveOpts(opts)
+    value = generatePassword(opts)
   }
 
-  function regen() { value = generate(opts) }
-
-  function strengthBits(v, o) {
-    if (!v) return 0
-    let pool = 0
-    if (o.lowercase) pool += 26
-    if (o.uppercase) pool += 26
-    if (o.digits)    pool += 10
-    if (o.symbols)   pool += POOLS.symbols.length
-    return Math.min(128, Math.round(v.length * Math.log2(pool || 1)))
-  }
-
-  function strengthLabel(bits) {
-    if (bits < 40) return { label: 'weak',     pct: 0.25 }
-    if (bits < 60) return { label: 'fair',     pct: 0.50 }
-    if (bits < 80) return { label: 'good',     pct: 0.75 }
-    return              { label: 'excellent', pct: 1.0  }
-  }
-
-  let bits = $derived(strengthBits(value, opts))
-  let s    = $derived(strengthLabel(bits))
+  function regen() { value = generatePassword(opts) }
 </script>
 
 <div class="generator">
@@ -64,20 +34,10 @@
 
   <div class="gen-body">
     <div class="gen-output">
-      <div class="gen-output-value mono">{value || ' '}</div>
+      <div class="gen-output-value mono">{value || ' '}</div>
       <button class="icon-btn-flat gen-regen" onclick={regen} aria-label="Regenerate">
         <Icon name="refresh" size={20}/>
       </button>
-    </div>
-
-    <div class="gen-strength">
-      <div class="gen-strength-bar">
-        <div class="gen-strength-fill s-{s.label}" style="width:{s.pct * 100}%"></div>
-      </div>
-      <div class="gen-strength-label">
-        <span class="s-{s.label}">{s.label}</span>
-        <span class="muted">{bits} bits</span>
-      </div>
     </div>
 
     <div class="gen-controls">
@@ -92,10 +52,10 @@
 
       <div class="gen-chips">
         {#each [
-          { key: 'lowercase', glyph: 'a', label: 'lowercase' },
-          { key: 'uppercase', glyph: 'A', label: 'uppercase' },
-          { key: 'digits',    glyph: '9', label: 'digits' },
-          { key: 'symbols',   glyph: '!@', label: 'symbols' },
+          { key: 'lowercase', glyph: 'az', label: 'lowercase' },
+          { key: 'uppercase', glyph: 'AZ', label: 'uppercase' },
+          { key: 'digits',    glyph: '09', label: 'digits'    },
+          { key: 'symbols',   glyph: '!@', label: 'symbols'   },
         ] as chip}
           <button
             class="gen-chip"
@@ -107,6 +67,82 @@
           </button>
         {/each}
       </div>
+
+      {#if opts.symbols}
+        <div class="sym-picker">
+          {#each SYMBOL_PALETTE.split('') as char}
+            <button
+              class="sym-key mono"
+              class:on={activeSymbols.has(char)}
+              onclick={() => toggleSymbol(char)}
+              aria-label="{activeSymbols.has(char) ? 'Remove' : 'Add'} {char}"
+            >{char}</button>
+          {/each}
+        </div>
+      {/if}
+
+      <div class="gen-toggle-row">
+        <div>
+          <div class="gen-toggle-label">Exclude similar</div>
+          <div class="gen-toggle-hint mono">0O Il1 5S Z2</div>
+        </div>
+        <button
+          class="switch"
+          class:on={opts.excludeSimilar}
+          onclick={() => set('excludeSimilar', !opts.excludeSimilar)}
+          aria-label="Exclude similar characters"
+        ></button>
+      </div>
     </div>
   </div>
 </div>
+
+<style>
+  .sym-picker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .sym-key {
+    width: 36px;
+    height: 36px;
+    border-radius: 6px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--text-muted);
+    font-size: 15px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background .1s, border-color .1s, color .1s;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+
+  .sym-key.on {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent-strong);
+  }
+
+  .gen-toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 2px;
+  }
+
+  .gen-toggle-label {
+    font-size: 14px;
+    color: var(--text-muted);
+  }
+
+  .gen-toggle-hint {
+    font-size: 12px;
+    color: var(--text-soft);
+    letter-spacing: 0.04em;
+    margin-top: 2px;
+  }
+</style>
