@@ -14,8 +14,37 @@
     URL:      record?.URL      ?? '',
     Notes:    record?.Notes    ?? '',
   })
-  let showPw  = $state(isNew)
-  let genOpen = $state(false)
+  let showPw      = $state(isNew)
+  let genOpen     = $state(false)
+  let showHistory = $state(false)
+
+  function parseHistory(raw) {
+    if (!raw || raw.length < 5) return []
+    const count = parseInt(raw.slice(3, 5), 16)
+    const entries = []
+    let pos = 5
+    for (let i = 0; i < count; i++) {
+      if (pos + 12 > raw.length) break
+      const ts  = parseInt(raw.slice(pos, pos + 8), 16);  pos += 8
+      const len = parseInt(raw.slice(pos, pos + 4), 16);  pos += 4
+      if (pos + len > raw.length) break
+      entries.push({ ts, password: raw.slice(pos, pos + len) })
+      pos += len
+    }
+    return entries.reverse()
+  }
+
+  function relTimeUnix(ts) {
+    const d = new Date(ts * 1000), now = new Date(), diff = (now - d) / 1000
+    if (diff < 60)       return 'just now'
+    if (diff < 3600)     return `${Math.floor(diff/60)}m ago`
+    if (diff < 86400)    return `${Math.floor(diff/3600)}h ago`
+    if (diff < 86400*7)  return `${Math.floor(diff/86400)}d ago`
+    if (diff < 86400*30) return `${Math.floor(diff/(86400*7))}w ago`
+    return d.toLocaleDateString()
+  }
+
+  let history = $derived(parseHistory(record?.PasswordHistory))
 
   let groupGhost    = $state('')
   let usernameGhost = $state('')
@@ -166,7 +195,26 @@
         <button class="icon-btn-flat" onclick={() => genOpen = true} aria-label="Password options">
           <Icon name="settings" size={16}/>
         </button>
+        {#if history.length > 0}
+          <button class="history-toggle" onclick={() => showHistory = !showHistory}>
+            {showHistory ? 'Hide' : 'History'} · {history.length}
+          </button>
+        {/if}
       </div>
+      {#if showHistory}
+        <div class="history-list">
+          {#each history as entry}
+            <div class="history-entry">
+              <span class="history-time muted">{relTimeUnix(entry.ts)}</span>
+              <span class="history-pw mono">{entry.password}</span>
+              <button class="icon-btn-flat" onclick={() => set('Password', entry.password)}
+                title="Restore this password" aria-label="Restore">
+                <Icon name="check" size={15}/>
+              </button>
+            </div>
+          {/each}
+        </div>
+      {/if}
     </div>
 
     <label class="field">
@@ -212,5 +260,47 @@
     align-items: center;
     gap: 4px;
     margin-top: 2px;
+  }
+
+  .history-toggle {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-soft);
+    padding: 0 4px;
+    margin-left: auto;
+  }
+  .history-toggle:hover { color: var(--accent); }
+
+  .history-list {
+    margin-top: 6px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .history-entry {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  .history-entry:last-child { border-bottom: none; }
+
+  .history-time {
+    font-size: 12px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-width: 56px;
+  }
+
+  .history-pw {
+    flex: 1;
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 </style>

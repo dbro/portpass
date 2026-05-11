@@ -223,14 +223,16 @@
       onsave={saveRecord}
     />
   {:else if record}
-    <RecordRead
-      {record}
-      {isDesktop}
-      onback={() => { record = null; selectedUUID = null }}
-      onedit={startEdit}
-      ondelete={() => deleteRecord(selectedUUID)}
-      oncopy={copyToClipboard}
-    />
+    {#key selectedUUID}
+      <RecordRead
+        {record}
+        {isDesktop}
+        onback={() => { record = null; selectedUUID = null }}
+        onedit={startEdit}
+        ondelete={() => deleteRecord(selectedUUID)}
+        oncopy={copyToClipboard}
+      />
+    {/key}
   {:else if isDesktop}
     <div class="record-empty">Select a record</div>
   {/if}
