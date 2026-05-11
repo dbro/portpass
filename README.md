@@ -14,6 +14,7 @@ Portpass is different: your passwords live in a file on your device, or in a clo
 
 * streamlines login to apps and websites
 * works fully offline, no internet connection required
+* runs on all your devices: mobile, tablet, and desktop
 * generates strong passwords
 * organizes password records into groups for browsing
 * encrypts your vault using an established open source format (pwsafe v3)
