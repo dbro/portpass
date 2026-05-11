@@ -68,7 +68,7 @@
       openDatabase(new Uint8Array(buf), password)
       dbItems.set(getDatabaseData())
       selectedFile.set({ handle: fileHandle, name: fileHandle.name })
-      await idbSet('lastHandle', fileHandle)
+      try { await idbSet('lastHandle', fileHandle) } catch {}
       afterUnlock()
     } catch (e) {
       error = 'Wrong password or invalid file.'
