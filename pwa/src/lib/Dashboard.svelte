@@ -26,8 +26,8 @@
     try { dbName = getDatabaseInfo()?.name ?? '' } catch (e) {}
   })
 
-  function showToast(message, action) {
-    toast.set({ message, action, duration: 4000 })
+  function showToast(message, action, duration = 4000) {
+    toast.set({ message, action, duration })
   }
 
   // Load a record by UUID
@@ -123,14 +123,23 @@
     }
   }
 
+  let clearTimer = null
+
   async function copyToClipboard(value, label) {
     try {
       await navigator.clipboard.writeText(value)
       showToast(`${label} copied`)
+      if (clearTimer) clearTimeout(clearTimer)
+      clearTimer = setTimeout(async () => {
+        try { await navigator.clipboard.writeText('') } catch {}
+        showToast('Clipboard cleared', null, 2000)
+        clearTimer = null
+      }, 30000)
     } catch (e) {
       showToast('Copy failed')
     }
   }
+
 
   async function saveDBFields(fields) {
     try {
@@ -204,7 +213,7 @@
     {/if}
   </div>
 
-  <RecordList {query} {selectedUUID} ontap={selectRecord}/>
+  <RecordList {query} {selectedUUID} ontap={selectRecord} oncopy={copyToClipboard}/>
 
   <!-- FAB (mobile) -->
   <button class="fab" onclick={startNew} aria-label="New record">

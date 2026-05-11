@@ -1,11 +1,12 @@
 <script>
   import { dbItems } from '../store.js'
-  import { searchRecords } from '../wasm.js'
+  import { searchRecords, getRecordData } from '../wasm.js'
   import Icon from './Icon.svelte'
 
-  let { selectedUUID = null, query = '', ontap } = $props()
+  let { selectedUUID = null, query = '', ontap, oncopy } = $props()
 
-  let openGroups = $state({})
+  let openGroups  = $state({})
+  let contextMenu = $state(null) // { x, y, rec }
 
   let groups = $derived.by(() => {
     const items = $dbItems
@@ -41,14 +42,45 @@
     return true
   }
 
-  // Returns [{text, matched}] segments for inline highlighting.
-  // Splits query on whitespace so each term is highlighted independently.
+  function handleClick(uuid) {
+    if (contextMenu) { contextMenu = null; return }
+    if (uuid === selectedUUID) {
+      copyPassword(uuid)
+    } else {
+      ontap(uuid)
+    }
+  }
+
+  function handleDblClick(uuid) {
+    copyPassword(uuid)
+  }
+
+  function handleContextMenu(e, uuid) {
+    e.preventDefault()
+    try {
+      const rec = getRecordData(uuid)
+      // Clamp to viewport so menu doesn't appear off-screen
+      const menuW = 180, menuH = 160
+      const x = Math.min(e.clientX, window.innerWidth  - menuW - 8)
+      const y = Math.min(e.clientY, window.innerHeight - menuH - 8)
+      contextMenu = { x, y, rec }
+    } catch {}
+  }
+
+  function copyPassword(uuid) {
+    try {
+      const rec = getRecordData(uuid)
+      if (rec.Password) oncopy(rec.Password, 'Password')
+    } catch {}
+  }
+
+  function closeMenu() { contextMenu = null }
+
+  // Returns [{text, matched}] segments for inline highlighting
   function hl(text, q) {
     if (!q.trim() || !text) return [{ text: text || '', matched: false }]
     const terms = q.trim().split(/\s+/).filter(Boolean)
     const lower = text.toLowerCase()
-
-    // Collect all [start, end) ranges for every term
     const ranges = []
     for (const term of terms) {
       const lt = term.toLowerCase()
@@ -61,8 +93,6 @@
       }
     }
     if (ranges.length === 0) return [{ text, matched: false }]
-
-    // Sort then merge overlapping/adjacent ranges
     ranges.sort((a, b) => a[0] - b[0])
     const merged = [ranges[0].slice()]
     for (let i = 1; i < ranges.length; i++) {
@@ -70,8 +100,6 @@
       if (ranges[i][0] <= last[1]) last[1] = Math.max(last[1], ranges[i][1])
       else merged.push(ranges[i].slice())
     }
-
-    // Build segments
     const parts = []
     let pos = 0
     for (const [start, end] of merged) {
@@ -83,6 +111,11 @@
     return parts
   }
 </script>
+
+<svelte:window
+  onclick={e => { if (contextMenu && !e.target.closest('.ctx-menu')) closeMenu() }}
+  onkeydown={e => { if (e.key === 'Escape') closeMenu() }}
+/>
 
 <div class="list-collapsible">
   {#if groups.length === 0}
@@ -107,7 +140,9 @@
               <button
                 class="record-row"
                 class:is-selected={r.uuid === selectedUUID}
-                onclick={() => ontap(r.uuid)}
+                onclick={() => handleClick(r.uuid)}
+                ondblclick={() => handleDblClick(r.uuid)}
+                oncontextmenu={e => handleContextMenu(e, r.uuid)}
               >
                 <div class="record-row-main">
                   <span class="record-row-title">
@@ -129,8 +164,34 @@
   {/if}
 </div>
 
+{#if contextMenu}
+  <div
+    class="ctx-menu"
+    role="menu"
+    style="left:{contextMenu.x}px; top:{contextMenu.y}px"
+  >
+    {#if contextMenu.rec.Username}
+      <button onclick={() => { oncopy(contextMenu.rec.Username, 'Username'); closeMenu() }}>
+        Copy username
+      </button>
+    {/if}
+    {#if contextMenu.rec.Password}
+      <button onclick={() => { oncopy(contextMenu.rec.Password, 'Password'); closeMenu() }}>
+        Copy password
+      </button>
+    {/if}
+    {#if contextMenu.rec.URL}
+      <button onclick={() => { oncopy(contextMenu.rec.URL, 'URL'); closeMenu() }}>
+        Copy URL
+      </button>
+      <button onclick={() => { window.open(contextMenu.rec.URL, '_blank'); closeMenu() }}>
+        Visit URL
+      </button>
+    {/if}
+  </div>
+{/if}
+
 <style>
-  /* Title match: accent-soft background pill */
   :global(.hl-primary) {
     background: var(--accent-soft);
     color: var(--accent-strong);
@@ -139,9 +200,38 @@
     font-style: normal;
   }
 
-  /* Group header match: bold + accent, no background */
   :global(.hl-secondary) {
     color: var(--accent);
     font-weight: 700;
+  }
+
+  .ctx-menu {
+    position: fixed;
+    z-index: 100;
+    min-width: 160px;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-input);
+    box-shadow: var(--shadow), 0 8px 24px rgba(0,0,0,0.18);
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .ctx-menu button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 9px 12px;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--text);
+  }
+
+  .ctx-menu button:hover {
+    background: var(--surface-2);
   }
 </style>

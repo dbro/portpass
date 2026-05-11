@@ -123,6 +123,7 @@
   transition: border-color .12s var(--ease), box-shadow .12s var(--ease);
 }
 .vault-app .searchbar:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.vault-app .searchbar > svg { flex-shrink: 0; }
 .vault-app .search-input {
   flex: 1; border: none; background: transparent; outline: none; font-size: 16px; padding: 8px 0;
 }
