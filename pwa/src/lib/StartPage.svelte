@@ -3,33 +3,38 @@
   import { get as idbGet, set as idbSet } from 'idb-keyval'
   import { openDatabase, createDatabase, getDatabaseData } from '../wasm.js'
   import { selectedFile, dbItems } from '../store.js'
+  import {
+    isBiometricSupported, isBiometricEnrolled,
+    enrollBiometric, unlockWithBiometric,
+  } from './biometric.js'
   import Icon from './Icon.svelte'
 
   let { onopened } = $props()
 
-  // 'landing' | 'unlock' | 'creating'
-  let mode = $state('landing')
-  let fileHandle = $state(null)  // FileSystemFileHandle
-  let password = $state('')
-  let showPw = $state(false)
-  let error = $state('')
-  let busy = $state(false)
+  // 'landing' | 'unlock' | 'creating' | 'offer-biometric'
+  let mode       = $state('landing')
+  let fileHandle = $state(null)
+  let password   = $state('')
+  let showPw     = $state(false)
+  let error      = $state('')
+  let busy       = $state(false)
+
+  let biometricAvailable = $state(false)
+  let biometricEnrolled  = $state(false)
 
   const supportsFilePicker = typeof window !== 'undefined' && 'showOpenFilePicker' in window
 
   onMount(async () => {
+    biometricAvailable = await isBiometricSupported()
+    biometricEnrolled  = await isBiometricEnrolled()
+
     if (!supportsFilePicker) return
     try {
       const handle = await idbGet('lastHandle')
       if (!handle) return
       const perm = await handle.queryPermission({ mode: 'read' })
-      if (perm === 'granted') {
-        fileHandle = handle
-        mode = 'unlock'
-      }
-    } catch (e) {
-      // ignore — browser may not support stored handles
-    }
+      if (perm === 'granted') { fileHandle = handle; mode = 'unlock' }
+    } catch {}
   })
 
   async function pickFile() {
@@ -45,20 +50,26 @@
     }
   }
 
+  // After a successful vault open, check whether to offer biometric enrollment
+  function afterUnlock() {
+    if (biometricAvailable && !biometricEnrolled) {
+      mode = 'offer-biometric'
+    } else {
+      onopened()
+    }
+  }
+
   async function unlock() {
     if (!password || !fileHandle) return
-    busy = true
-    error = ''
+    busy = true; error = ''
     try {
       const file = await fileHandle.getFile()
       const buf  = await file.arrayBuffer()
       openDatabase(new Uint8Array(buf), password)
-
-      const items = getDatabaseData()
-      dbItems.set(items)
+      dbItems.set(getDatabaseData())
       selectedFile.set({ handle: fileHandle, name: fileHandle.name })
       await idbSet('lastHandle', fileHandle)
-      onopened()
+      afterUnlock()
     } catch (e) {
       error = 'Wrong password or invalid file.'
       console.error(e)
@@ -67,14 +78,49 @@
     }
   }
 
+  async function unlockBiometric() {
+    busy = true; error = ''
+    try {
+      const pw = await unlockWithBiometric()
+      const file = await fileHandle.getFile()
+      const buf  = await file.arrayBuffer()
+      openDatabase(new Uint8Array(buf), pw)
+      dbItems.set(getDatabaseData())
+      selectedFile.set({ handle: fileHandle, name: fileHandle.name })
+      await idbSet('lastHandle', fileHandle)
+      onopened()
+    } catch (e) {
+      if (e.name === 'NotAllowedError') {
+        error = 'Biometric authentication cancelled.'
+      } else {
+        error = e.message
+      }
+      console.error(e)
+    } finally {
+      busy = false
+    }
+  }
+
+  async function enableBiometric() {
+    busy = true; error = ''
+    try {
+      await enrollBiometric(password)
+      biometricEnrolled = true
+      onopened()
+    } catch (e) {
+      error = e.message
+      console.error(e)
+    } finally {
+      busy = false
+    }
+  }
+
   async function create() {
     if (!password) return
-    busy = true
-    error = ''
+    busy = true; error = ''
     try {
       createDatabase(password)
-      const items = getDatabaseData()
-      dbItems.set(items)
+      dbItems.set(getDatabaseData())
       selectedFile.set({ handle: null, name: 'New vault' })
       onopened()
     } catch (e) {
@@ -85,32 +131,24 @@
   }
 
   function switchFile() {
-    fileHandle = null
-    password = ''
-    error = ''
-    mode = 'landing'
+    fileHandle = null; password = ''; error = ''; mode = 'landing'
   }
 </script>
 
 {#if mode === 'landing'}
   <div class="start-landing">
-    <div class="start-mark">
-      <Icon name="lock" size={32}/>
-    </div>
+    <div class="start-mark"><Icon name="lock" size={32}/></div>
     <div class="start-title">Portpass</div>
     <div class="start-sub muted">Your passwords, on your device.</div>
 
-    {#if error}
-      <div class="unlock-error">{error}</div>
-    {/if}
+    {#if error}<div class="unlock-error">{error}</div>{/if}
 
     <div class="start-actions">
       {#if supportsFilePicker}
         <button class="btn btn-primary" onclick={pickFile}>Open vault file</button>
       {:else}
         <div class="unlock-error" style="font-size:13px;text-align:center">
-          Your browser doesn't support file picker.<br>
-          Try Chrome or Safari.
+          Your browser doesn't support file picker.<br>Try Chrome or Safari.
         </div>
       {/if}
     </div>
@@ -124,11 +162,17 @@
 {:else if mode === 'unlock'}
   <div class="unlock-screen">
     <div class="unlock-stack">
-      <div class="unlock-mark">
-        <Icon name="lock" size={28}/>
-      </div>
+      <div class="unlock-mark"><Icon name="lock" size={28}/></div>
       <div class="unlock-vault">{fileHandle?.name ?? 'Vault'}</div>
       <div class="unlock-sub muted">Vault is locked</div>
+
+      {#if biometricEnrolled}
+        <button class="btn btn-biometric" disabled={busy} onclick={unlockBiometric}>
+          <Icon name="face-id" size={22}/>
+          <span>Fast unlock</span>
+        </button>
+        <div class="unlock-or muted">or use master password</div>
+      {/if}
 
       <div class="unlock-pw">
         <input
@@ -136,16 +180,14 @@
           bind:value={password}
           placeholder="Master password"
           onkeydown={e => { if (e.key === 'Enter' && password) unlock() }}
-          autofocus
+          autofocus={!biometricEnrolled}
         />
         <button class="icon-btn-flat" onclick={() => showPw = !showPw} aria-label="Toggle password visibility">
           <Icon name={showPw ? 'eye-off' : 'eye'} size={18}/>
         </button>
       </div>
 
-      {#if error}
-        <div class="unlock-error">{error}</div>
-      {/if}
+      {#if error}<div class="unlock-error">{error}</div>{/if}
 
       <button class="btn btn-primary" disabled={!password || busy} onclick={unlock}>
         {busy ? 'Unlocking…' : 'Unlock'}
@@ -157,13 +199,36 @@
     </div>
   </div>
 
+{:else if mode === 'offer-biometric'}
+  <div class="unlock-screen">
+    <div class="unlock-stack">
+      <div class="unlock-mark"><Icon name="face-id" size={28}/></div>
+      <div class="unlock-vault">Enable fast unlock?</div>
+      <div class="unlock-sub muted" style="text-align:left;max-width:320px">
+        Skip typing your master password each time you open Portpass. Your device will offer one or more options:
+      </div>
+      <ul class="offer-list muted">
+        <li>Fingerprint or face recognition</li>
+        <li>Device PIN</li>
+        <li>iCloud Keychain / Google Password Manager <span class="offer-note">(syncs a key to the cloud)</span></li>
+      </ul>
+      <div class="offer-footer muted">You can disable this at any time from the vault settings.</div>
+
+      {#if error}<div class="unlock-error">{error}</div>{/if}
+
+      <button class="btn btn-primary" disabled={busy} onclick={enableBiometric}>
+        {busy ? 'Setting up…' : 'Enable fast unlock'}
+      </button>
+
+      <button class="btn-text muted" onclick={onopened}>Not now</button>
+    </div>
+  </div>
+
 {:else}
   <!-- creating -->
   <div class="unlock-screen">
     <div class="unlock-stack">
-      <div class="unlock-mark">
-        <Icon name="lock" size={28}/>
-      </div>
+      <div class="unlock-mark"><Icon name="lock" size={28}/></div>
       <div class="unlock-vault">New vault</div>
       <div class="unlock-sub muted">Choose a master password</div>
 
@@ -180,17 +245,13 @@
         </button>
       </div>
 
-      {#if error}
-        <div class="unlock-error">{error}</div>
-      {/if}
+      {#if error}<div class="unlock-error">{error}</div>{/if}
 
       <button class="btn btn-primary" disabled={!password || busy} onclick={create}>
         {busy ? 'Creating…' : 'Create vault'}
       </button>
 
-      <button class="btn-text muted" style="margin-top:auto" onclick={switchFile}>
-        Cancel
-      </button>
+      <button class="btn-text muted" style="margin-top:auto" onclick={switchFile}>Cancel</button>
     </div>
   </div>
 {/if}

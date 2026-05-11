@@ -78,6 +78,9 @@
 }
 .vault-app .unlock-vault { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
 .vault-app .unlock-sub { font-size: 14px; margin-bottom: 24px; }
+.vault-app .offer-list { font-size: 14px; padding-left: 20px; margin: 0; display: flex; flex-direction: column; gap: 6px; width: 100%; max-width: 320px; }
+.vault-app .offer-note { font-size: 12px; }
+.vault-app .offer-footer { font-size: 13px; text-align: center; }
 .vault-app .unlock-or { font-size: 13px; margin: 16px 0 4px; }
 .vault-app .btn-biometric { width: 100%; }
 .vault-app .unlock-pw {
@@ -422,6 +425,21 @@
 .vault-app.is-desktop .record-empty {
   height: 100%; display: flex; align-items: center; justify-content: center;
   color: var(--text-soft); font-size: 15px;
+}
+
+/* DESKTOP — centered sheet/modal */
+@media (min-width: 768px) {
+  .vault-app .sheet-backdrop {
+    align-items: center;
+    justify-content: center;
+  }
+  .vault-app .sheet {
+    width: 480px;
+    max-width: 90vw;
+    border-radius: var(--r-card);
+    max-height: 80vh;
+  }
+  .vault-app .sheet-handle { display: none; }
 }
 
 /* DESKTOP — centered unlock/start screens */

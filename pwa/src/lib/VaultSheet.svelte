@@ -1,9 +1,65 @@
 <script>
-  import { getDatabaseInfo } from '../wasm.js'
+  import { onMount } from 'svelte'
+  import { getDatabaseInfo, openDatabase } from '../wasm.js'
   import { selectedFile } from '../store.js'
+  import { isBiometricSupported, isBiometricEnrolled, enrollBiometric, clearBiometric } from './biometric.js'
   import Icon from './Icon.svelte'
 
   let { onclose, onlock, onclosevault, ondbsave, theme, accent, ontheme, onaccent } = $props()
+
+  let biometricAvailable = $state(false)
+  let biometricEnrolled  = $state(false)
+  let setupMode          = $state(false)
+  let setupPassword      = $state('')
+  let setupError         = $state('')
+  let setupBusy          = $state(false)
+
+  onMount(async () => {
+    biometricAvailable = await isBiometricSupported()
+    biometricEnrolled  = await isBiometricEnrolled()
+  })
+
+  async function disableBiometric() {
+    await clearBiometric()
+    biometricEnrolled = false
+    setupMode = false
+  }
+
+  function startSetup() {
+    setupMode = true
+    setupPassword = ''
+    setupError = ''
+  }
+
+  async function doSetup() {
+    if (!setupPassword) return
+    setupBusy = true
+    setupError = ''
+    try {
+      // Verify password against the vault file before triggering WebAuthn
+      const handle = $selectedFile?.handle
+      if (handle) {
+        const file = await handle.getFile()
+        const buf  = await file.arrayBuffer()
+        openDatabase(new Uint8Array(buf), setupPassword) // throws if wrong
+      }
+      // Password correct — now trigger WebAuthn enrollment
+      await enrollBiometric(setupPassword)
+      biometricEnrolled = true
+      setupMode = false
+      setupPassword = ''
+    } catch (e) {
+      if (e.name === 'NotAllowedError') {
+        setupError = 'Setup cancelled.'
+      } else if (e.message?.includes('decrypt')) {
+        setupError = 'Wrong password.'
+      } else {
+        setupError = e.message
+      }
+    } finally {
+      setupBusy = false
+    }
+  }
 
   const ACCENTS = ['amber', 'sage', 'slate', 'burgundy']
   const SWATCH  = { amber: '#b07418', sage: '#5a7a4f', slate: '#4a5d82', burgundy: '#8a3a3a' }
@@ -91,6 +147,48 @@
         </div>
       </div>
 
+      {#if biometricAvailable}
+        <div class="sheet-section">
+          <div class="sheet-section-title">Security</div>
+          <div class="sheet-toggle">
+            <div class="sheet-toggle-label">
+              <span class="sheet-toggle-name">Fast unlock</span>
+              <span class="sheet-toggle-help">
+                {biometricEnrolled ? 'Enabled' : 'Fingerprint, PIN, or passkey'}
+              </span>
+            </div>
+            <button
+              class="switch"
+              class:on={biometricEnrolled}
+              onclick={biometricEnrolled ? disableBiometric : startSetup}
+              aria-label="Fast unlock"
+            ></button>
+          </div>
+
+          {#if setupMode && !biometricEnrolled}
+            <div class="setup-form">
+              <p class="setup-prompt muted">Enter your master password to set up fast unlock:</p>
+              <div class="unlock-pw" style="margin:0">
+                <input
+                  type="password"
+                  bind:value={setupPassword}
+                  placeholder="Master password"
+                  onkeydown={e => { if (e.key === 'Enter') doSetup() }}
+                  autofocus
+                />
+              </div>
+              {#if setupError}<div class="unlock-error" style="font-size:13px">{setupError}</div>{/if}
+              <div class="setup-actions">
+                <button class="btn btn-primary" style="flex:1" disabled={!setupPassword || setupBusy} onclick={doSetup}>
+                  {setupBusy ? 'Setting up…' : 'Enable fast unlock'}
+                </button>
+                <button class="btn btn-ghost" onclick={() => setupMode = false}>Cancel</button>
+              </div>
+            </div>
+          {/if}
+        </div>
+      {/if}
+
       <div class="sheet-actions">
         <button class="btn btn-ghost" onclick={onlock}>
           <Icon name="lock" size={16}/> Lock vault
@@ -146,5 +244,20 @@
   }
   .about-url:hover {
     color: var(--accent);
+  }
+
+  .setup-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 8px;
+  }
+  .setup-prompt {
+    font-size: 13px;
+    margin: 0;
+  }
+  .setup-actions {
+    display: flex;
+    gap: 8px;
   }
 </style>
