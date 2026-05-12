@@ -5,7 +5,7 @@
   import { isBiometricSupported, isBiometricEnrolled, enrollBiometric, clearBiometric } from './biometric.js'
   import Icon from './Icon.svelte'
 
-  let { onclose, onlock, onclosevault, ondbsave, theme, accent, ontheme, onaccent } = $props()
+  let { isDesktop, onback, onlock, ondbsave, ondirtychange, theme, accent, ontheme, onaccent } = $props()
 
   let biometricAvailable = $state(false)
   let biometricEnrolled  = $state(false)
@@ -84,109 +84,121 @@
 
   let dirty = $derived(origName !== draftName || origDesc !== draftDesc)
 
+  // Notify parent of dirty state changes
+  $effect(() => {
+    ondirtychange?.(dirty)
+  })
+
   function save() {
     ondbsave({ Name: draftName, Description: draftDesc })
     origName = draftName
     origDesc = draftDesc
-    onclose()
   }
 </script>
 
-<div class="sheet-backdrop" role="dialog" aria-modal="true" onclick={onclose}>
-  <div class="sheet" onclick={e => e.stopPropagation()}>
-    <div class="sheet-handle"></div>
-    <div class="sheet-body">
+<!-- Mobile bar -->
+<div class="record-bar" style={isDesktop ? 'display:none' : ''}>
+  <button class="icon-btn" onclick={onback} aria-label="Back">
+    <Icon name="back" size={22}/>
+  </button>
+  <div class="record-bar-group" style="text-transform:uppercase;font-size:13px;letter-spacing:0.04em;font-weight:600">Vault settings</div>
+  {#if dirty}
+    <button class="btn-text primary" onclick={save}>Save</button>
+  {/if}
+</div>
 
-      <div class="sheet-section">
-        <div class="sheet-section-title">Vault info</div>
-
-        <div class="sheet-field">
-          <span class="sheet-label muted">Name</span>
-          <input
-            class="input sheet-input"
-            value={draftName}
-            oninput={e => draftName = e.target.value}
-            placeholder="My vault"
-          />
-        </div>
-
-        <div class="sheet-field">
-          <span class="sheet-label muted">Notes</span>
-          <textarea
-            class="input sheet-input"
-            rows={3}
-            value={draftDesc}
-            oninput={e => draftDesc = e.target.value}
-            placeholder="Optional description"
-          ></textarea>
-        </div>
-
-        <div class="sheet-field">
-          <span class="sheet-label muted">File</span>
-          <span class="sheet-value">{filename}</span>
-        </div>
-
-        {#if dirty}
-          <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick={save}>
-            Save vault info
-          </button>
-        {/if}
-      </div>
-
-      <div class="sheet-section">
-        <div class="sheet-section-title">Appearance</div>
-        <div class="sheet-row">
-          <span class="sheet-label muted">Theme</span>
-          <div class="sheet-segmented" style="margin-top:4px">
-            <button class:on={theme === 'light'} onclick={() => ontheme('light')}>Light</button>
-            <button class:on={theme === 'dark'}  onclick={() => ontheme('dark')}>Dark</button>
-          </div>
-        </div>
-        <div class="sheet-row" style="margin-top:10px">
-          <span class="sheet-label muted">Accent</span>
-          <div class="accent-swatches" style="margin-top:6px">
-            {#each ACCENTS as a}
-              <button class="swatch" class:on={accent === a} onclick={() => onaccent(a)} aria-label={a}>
-                <span class="swatch-dot" style="background:{SWATCH[a]}"></span>
-              </button>
-            {/each}
-          </div>
-        </div>
-      </div>
-
-      {#if biometricAvailable}
-        <div class="sheet-section">
-          <div class="sheet-section-title">Security</div>
-          <div class="sheet-toggle">
-            <div class="sheet-toggle-label">
-              <span class="sheet-toggle-name">Fast unlock</span>
-              <span class="sheet-toggle-help">
-                {biometricEnrolled ? 'Enabled' : 'Fingerprint, PIN, or passkey'}
-              </span>
-            </div>
-            <button
-              class="switch"
-              class:on={biometricEnrolled}
-              onclick={biometricEnrolled ? disableBiometric : startSetup}
-              aria-label="Fast unlock"
-            ></button>
-          </div>
-
-        </div>
+<!-- Desktop header -->
+{#if isDesktop}
+  <div class="record-pane-header">
+    <button class="icon-btn" onclick={onback} aria-label="Back" style="margin-right:8px">
+      <Icon name="back" size={20}/>
+    </button>
+    <span class="record-bar-group" style="text-transform:uppercase;font-size:13px;letter-spacing:0.04em;font-weight:600;flex:1">Vault settings</span>
+    <div class="record-pane-actions" style="min-width:80px">
+      {#if dirty}
+        <button class="btn btn-primary" onclick={save} style="height:36px;padding:0 18px;font-size:14px">Save</button>
       {/if}
+    </div>
+  </div>
+{/if}
 
-      <div class="sheet-actions">
-        <button class="btn btn-ghost" onclick={onlock}>
-          <Icon name="lock" size={16}/> Lock vault
-        </button>
+<div class="record-body vault-settings-body">
+  <div class="vault-section">
+    <div class="vault-section-title">VAULT</div>
+    <div class="vault-inputs">
+      <label class="vault-field">
+        <span class="vault-label muted">Name</span>
+        <input
+          class="input"
+          value={draftName}
+          oninput={e => draftName = e.target.value}
+          placeholder="My vault"
+        />
+      </label>
+      <label class="vault-field">
+        <span class="vault-label muted">Notes</span>
+        <textarea
+          class="input"
+          rows={3}
+          value={draftDesc}
+          oninput={e => draftDesc = e.target.value}
+          placeholder="Optional description"
+        ></textarea>
+      </label>
+    </div>
+    <div class="vault-file">
+      <span class="vault-file-label">FILE</span>
+      <span class="vault-file-value mono">{filename}</span>
+    </div>
+  </div>
+
+  <div class="vault-section">
+    <div class="vault-section-title">APPEARANCE</div>
+    <div class="vault-row">
+      <span class="vault-label muted">Theme</span>
+      <div class="vault-segmented">
+        <button class:on={theme === 'light'} onclick={() => ontheme('light')}>Light</button>
+        <button class:on={theme === 'dark'}  onclick={() => ontheme('dark')}>Dark</button>
       </div>
+    </div>
+    <div class="vault-row" style="margin-top:16px">
+      <span class="vault-label muted">Accent color</span>
+      <div class="accent-swatches">
+        {#each ACCENTS as a}
+          <button class="swatch" class:on={accent === a} onclick={() => onaccent(a)} aria-label={a}>
+            <span class="swatch-dot" style="background:{SWATCH[a]}"></span>
+          </button>
+        {/each}
+      </div>
+    </div>
+  </div>
 
-      <div class="sheet-section">
-        <div class="sheet-section-title">About</div>
-        <div class="about-row">
-          <span class="about-name">Portpass</span>
-          <span class="about-version muted">{__APP_VERSION__}</span>
+  {#if biometricAvailable}
+    <div class="vault-section">
+      <div class="vault-section-title">SECURITY</div>
+      <div class="vault-toggle">
+        <div class="vault-toggle-label">
+          <span class="vault-toggle-name">Fast unlock</span>
+          <span class="vault-toggle-help">
+            {biometricEnrolled ? 'Enabled' : 'Use Face ID, fingerprint, or PIN instead of typing your password'}
+          </span>
         </div>
+        <button
+          class="switch"
+          class:on={biometricEnrolled}
+          onclick={biometricEnrolled ? disableBiometric : startSetup}
+          aria-label="Fast unlock"
+        ></button>
+      </div>
+    </div>
+  {/if}
+
+  <div class="vault-section">
+    <div class="vault-section-title">ABOUT</div>
+    <div class="about-row">
+      <img src="{import.meta.env.BASE_URL}icon.svg" alt="Portpass" class="about-icon" />
+      <div class="about-info">
+        <div class="about-name">Portpass <span class="about-version muted">v{__APP_VERSION__}</span></div>
         <a
           class="about-url muted"
           href="https://dbro.github.io/portpass"
@@ -194,68 +206,225 @@
           rel="noreferrer"
         >dbro.github.io/portpass</a>
       </div>
-
     </div>
   </div>
 
-  {#if setupMode}
-    <div class="modal-overlay" onclick={e => { e.stopPropagation(); setupMode = false; setupError = '' }}>
-      <div class="modal" onclick={e => e.stopPropagation()}>
-        <div class="modal-title">Enable fast unlock</div>
-        <p class="modal-desc muted">Confirm your master password to set up fingerprint, PIN, or passkey unlock.</p>
-        <div class="modal-pw">
-          <input
-            type={showSetupPw ? 'text' : 'password'}
-            bind:value={setupPassword}
-            placeholder="Master password"
-            onkeydown={e => { if (e.key === 'Enter') doSetup() }}
-            use:focusOnMount
-          />
-          <button class="icon-btn-flat" onclick={() => showSetupPw = !showSetupPw} aria-label="Toggle visibility">
-            <Icon name={showSetupPw ? 'eye-off' : 'eye'} size={18}/>
-          </button>
-        </div>
-        {#if setupError}<div class="unlock-error" style="font-size:13px">{setupError}</div>{/if}
-        <div class="modal-actions">
-          <button class="btn btn-ghost" onclick={() => { setupMode = false; setupError = '' }}>Cancel</button>
-          <button class="btn btn-primary" disabled={!setupPassword || setupBusy} onclick={doSetup}>
-            {setupBusy ? 'Setting up…' : 'Enable'}
-          </button>
-        </div>
-      </div>
-    </div>
-  {/if}
+  <button class="btn btn-ghost" onclick={onlock} style="width:fit-content;margin-top:24px">
+    <Icon name="lock" size={16}/> Lock vault
+  </button>
 </div>
 
+{#if setupMode}
+  <div class="modal-overlay" onclick={e => { e.stopPropagation(); setupMode = false; setupError = '' }}>
+    <div class="modal" onclick={e => e.stopPropagation()}>
+      <div class="modal-title">Enable fast unlock</div>
+      <p class="modal-desc muted">Confirm your master password to set up biometric unlock.</p>
+      <div class="modal-pw">
+        <input
+          type={showSetupPw ? 'text' : 'password'}
+          bind:value={setupPassword}
+          placeholder="Master password"
+          onkeydown={e => { if (e.key === 'Enter') doSetup() }}
+          use:focusOnMount
+        />
+        <button class="icon-btn-flat" onclick={() => showSetupPw = !showSetupPw} aria-label="Toggle visibility">
+          <Icon name={showSetupPw ? 'eye-off' : 'eye'} size={18}/>
+        </button>
+      </div>
+      {#if setupError}<div class="unlock-error" style="font-size:13px">{setupError}</div>{/if}
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick={() => { setupMode = false; setupError = '' }}>Cancel</button>
+        <button class="btn btn-primary" disabled={!setupPassword || setupBusy} onclick={doSetup}>
+          {setupBusy ? 'Setting up…' : 'Enable'}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
-  .sheet-field {
+  .vault-settings-body {
+    max-width: none !important;
+  }
+
+  .vault-section {
+    margin-bottom: 32px;
+  }
+
+  .vault-section-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: var(--text-soft);
+    margin-bottom: 12px;
+  }
+
+  .vault-inputs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+
+  @media (max-width: 768px) {
+    .vault-inputs {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .vault-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .vault-label {
+    font-size: 14px;
+  }
+
+  .vault-file {
     display: flex;
     flex-direction: column;
     gap: 4px;
   }
-  .sheet-input {
-    font-size: 15px;
-    padding: 10px 12px;
+
+  .vault-file-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    color: var(--text-soft);
   }
-  .about-row {
+
+  .vault-file-value {
+    font-size: 14px;
+    color: var(--text-muted);
+  }
+
+  .vault-row {
     display: flex;
-    align-items: baseline;
+    flex-direction: column;
     gap: 8px;
   }
+
+  .vault-segmented {
+    display: inline-flex;
+    border-radius: var(--r-input);
+    background: var(--surface-2);
+    padding: 3px;
+    gap: 4px;
+    width: fit-content;
+  }
+
+  .vault-segmented button {
+    padding: 8px 32px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .vault-segmented button.on {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+
+  .accent-swatches {
+    display: flex;
+    gap: 10px;
+  }
+
+  .swatch {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    background: var(--surface);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: border-color 0.15s, transform 0.15s;
+    padding: 0;
+  }
+
+  .swatch:hover {
+    transform: scale(1.08);
+  }
+
+  .swatch.on {
+    border-color: var(--text);
+    border-width: 3px;
+  }
+
+  .swatch-dot {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+  }
+
+  .vault-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .vault-toggle-label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+  }
+
+  .vault-toggle-name {
+    font-size: 15px;
+    font-weight: 500;
+  }
+
+  .vault-toggle-help {
+    font-size: 13px;
+    color: var(--text-soft);
+  }
+
+  .about-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .about-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    flex-shrink: 0;
+  }
+
+  .about-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
   .about-name {
     font-size: 15px;
     font-weight: 600;
   }
+
   .about-version {
     font-size: 13px;
   }
+
   .about-url {
     font-size: 13px;
     color: var(--text-soft);
     text-decoration: none;
-    display: block;
-    margin-top: 2px;
   }
+
   .about-url:hover {
     color: var(--accent);
   }
@@ -270,6 +439,7 @@
     z-index: 100;
     padding: 24px;
   }
+
   .modal {
     background: var(--surface);
     border-radius: 16px;
@@ -280,19 +450,23 @@
     flex-direction: column;
     gap: 14px;
   }
+
   .modal-title {
     font-size: 17px;
     font-weight: 600;
   }
+
   .modal-desc {
     font-size: 14px;
     margin: 0;
   }
+
   .modal-actions {
     display: flex;
     gap: 8px;
     justify-content: flex-end;
   }
+
   .modal-pw {
     display: flex;
     align-items: center;
@@ -301,7 +475,12 @@
     border-radius: var(--r-input);
     padding: 0 6px 0 0;
   }
-  .modal-pw:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+  .modal-pw:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+
   .modal-pw input {
     border: none;
     background: transparent;

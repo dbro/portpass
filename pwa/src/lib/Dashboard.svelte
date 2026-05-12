@@ -25,6 +25,7 @@
   let sheetOpen    = $state(false)
   let isDirty      = $state(false)
   let editDirty    = $state(false)
+  let vaultDirty   = $state(false)
   let dbName = $state('')
   let dbKey  = $state('')
 
@@ -51,12 +52,17 @@
     if (isEditing && editDirty) {
       if (!confirm('Discard unsaved changes?')) return
     }
+    if (sheetOpen && vaultDirty) {
+      if (!confirm('Discard unsaved changes?')) return
+    }
     try {
       record = getRecordData(uuid)
       selectedUUID = uuid
       isEditing = false
       isNew = false
       editDirty = false
+      sheetOpen = false
+      vaultDirty = false
     } catch (e) {
       console.error(e)
     }
@@ -67,10 +73,15 @@
   }
 
   function startNew() {
+    if (sheetOpen && vaultDirty) {
+      if (!confirm('Discard unsaved changes?')) return
+    }
     record = { Title: '', Group: '', Username: '', Password: '', URL: '', Notes: '' }
     selectedUUID = null
     isNew = true
     isEditing = true
+    sheetOpen = false
+    vaultDirty = false
   }
 
   function cancelEdit() {
@@ -281,20 +292,22 @@
       updateDBFields(fields)
       await saveFile(true)
       dbName = fields.Name ?? dbName  // fields uses PascalCase for the WASM write API
+      vaultDirty = false
       showToast('Vault info saved')
     } catch (e) {
       showToast('Failed to save vault info: ' + e.message)
     }
   }
 
-  function lockVault() {
+  function closeVaultSheet() {
+    if (vaultDirty) {
+      if (!confirm('Discard unsaved changes?')) return
+    }
     sheetOpen = false
-    onclosed()
+    vaultDirty = false
   }
 
-  function closeVault() {
-    if (isDirty && !confirm('Close without saving?')) return
-    sheetOpen = false
+  function lockVault() {
     onclosed()
   }
 
@@ -306,7 +319,7 @@
   })
 
   let vaultName = $derived(dbName || $selectedFile?.name || 'Vault')
-  let showRecord = $derived(!!record || isEditing)
+  let showRecord = $derived(!!record || isEditing || sheetOpen)
 </script>
 
 <svelte:window onkeydown={e => {
@@ -359,7 +372,19 @@
 
 <!-- RECORD PANE -->
 <div class="record-screen" class:is-open={showRecord && !isDesktop}>
-  {#if isEditing}
+  {#if sheetOpen}
+    <VaultSheet
+      {isDesktop}
+      {theme}
+      {accent}
+      onback={closeVaultSheet}
+      onlock={lockVault}
+      ondbsave={saveDBFields}
+      ondirtychange={(d) => vaultDirty = d}
+      {ontheme}
+      {onaccent}
+    />
+  {:else if isEditing}
     <RecordEdit
       {record}
       {isNew}
@@ -384,17 +409,3 @@
     <div class="record-empty">Select a record</div>
   {/if}
 </div>
-
-<!-- VAULT SHEET -->
-{#if sheetOpen}
-  <VaultSheet
-    {theme}
-    {accent}
-    onclose={() => sheetOpen = false}
-    onlock={lockVault}
-    onclosevault={closeVault}
-    ondbsave={saveDBFields}
-    {ontheme}
-    {onaccent}
-  />
-{/if}
