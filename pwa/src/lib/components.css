@@ -19,6 +19,14 @@
 }
 .vault-app .vault-pill:hover { background: var(--surface-2); }
 .vault-app .vault-pill svg:first-child { color: var(--accent); }
+.vault-app .new-record-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 14px 7px 10px; border-radius: var(--r-pill);
+  background: var(--accent); border: none; cursor: pointer;
+  font-weight: 600; font-size: 14px; color: var(--accent-on);
+  transition: opacity .12s var(--ease);
+}
+.vault-app .new-record-btn:hover { opacity: 0.9; }
 
 /* BUTTONS */
 .vault-app .icon-btn {

@@ -337,8 +337,9 @@
   </div>
   <div class="topbar-right">
     {#if isDesktop}
-      <button class="btn-text accent small" onclick={startNew} style="padding:6px 8px">
-        <Icon name="plus" size={16}/> New
+      <button class="new-record-btn" onclick={startNew}>
+        <Icon name="plus" size={18}/>
+        <span>New record</span>
       </button>
     {/if}
   </div>
