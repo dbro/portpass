@@ -32,7 +32,7 @@
     const s = $clipboardSession
     if (!s) return ''
     const remaining = Math.max(50, s.expiresAt - Date.now())
-    const elapsed   = Math.max(0, 10000 - remaining)
+    const elapsed   = Math.max(0, 30000 - remaining)
     return `--clip-delay: -${elapsed}ms; --drain-name: clip-drain-${animVariant}`
   }
 

@@ -208,7 +208,7 @@
   background: color-mix(in srgb, var(--accent) 35%, transparent);
   transform-origin: left center;
   z-index: -1; pointer-events: none;
-  animation: var(--drain-name, clip-drain-0) 10000ms var(--clip-delay, 0ms) linear forwards;
+  animation: var(--drain-name, clip-drain-0) 30000ms var(--clip-delay, 0ms) linear forwards;
 }
 /* ::after — initial flash, also behind text so text colour is always readable */
 .vault-app .copy-row.clipboard-active::after,

@@ -9,7 +9,7 @@ async function setupMocks(page: Page) {
   await page.addInitScript(() => {
     const _st = window.setTimeout
     ;(window as any).setTimeout = (fn: TimerHandler, delay?: number, ...args: any[]) =>
-      _st(fn as any, (delay ?? 0) >= 9000 ? 200 : delay, ...args)
+      _st(fn as any, (delay ?? 0) >= 20000 ? 200 : delay, ...args)
 
     const _read  = navigator.clipboard.readText.bind(navigator.clipboard)
     const _write = navigator.clipboard.writeText.bind(navigator.clipboard)

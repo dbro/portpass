@@ -163,13 +163,9 @@
           const current = await navigator.clipboard.readText()
           if (!hashesEqual(await sha256(current), clipHash)) overwritten = true
         }
-        console.log('[portpass] clipboard-read permission:', perm.state, '| overwritten:', overwritten)
-      } catch (e) {
-        console.log('[portpass] permissions.query failed:', e)
-      }
+      } catch {}
 
       if (overwritten) {
-        console.log('[portpass] clipboard overwritten by user — not clearing')
         clipHash = null
         clipboardSession.set(null)
         return
@@ -179,9 +175,7 @@
       clipHash = null
       clipboardSession.set(null)
       showToast('Clipboard cleared', null, 2000)
-      console.log('[portpass] clipboard cleared')
-    } catch (e) {
-      console.log('[portpass] writeText failed (not focused?):', e)
+    } catch {
       // keep clipHash — retry on next visibilitychange
     }
   }
@@ -205,12 +199,12 @@
       await navigator.clipboard.writeText(value)
       clipHash = await sha256(value)
       const token = ++sessionSerial
-      clipboardSession.set({ token, expiresAt: Date.now() + 10000 })
+      clipboardSession.set({ token, expiresAt: Date.now() + 30000 })
       if (clearTimer) clearTimeout(clearTimer)
       clearTimer = setTimeout(() => {
         clearTimer = null
         tryClearClipboard()
-      }, 10000)
+      }, 30000)
       return token
     } catch {
       showToast('Copy failed')
