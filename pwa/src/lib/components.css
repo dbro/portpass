@@ -217,7 +217,7 @@
   content: ''; position: absolute; inset: 0; border-radius: inherit;
   background: var(--accent);
   z-index: -1; pointer-events: none;
-  animation: clip-flash 450ms ease-out forwards;
+  animation: clip-flash var(--flash-duration, 450ms) ease-out forwards;
 }
 
 .vault-app .copy-rows { display: flex; flex-direction: column; gap: 14px; }

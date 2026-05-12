@@ -1,5 +1,4 @@
 <script>
-  import { onMount } from 'svelte'
   import { get } from 'svelte/store'
   import { dbItems, clipboardSession, clipboardContext } from '../store.js'
   import { searchRecords, getRecordData } from '../wasm.js'
@@ -46,21 +45,25 @@
     }
   })
 
-  // On mount, restore drain if the record's field value still matches the clipboard
-  onMount(async () => {
-    const s = get(clipboardSession)
-    const ctx = get(clipboardContext)
+  // Reactively restore (or update) the drain whenever the clipboard context changes —
+  // this fires on mount AND when a copy happens in RecordRead while the list is mounted.
+  $effect(() => {
+    const s = $clipboardSession
+    const ctx = $clipboardContext
     if (!s || !ctx || ctx.token !== s.token || !ctx.uuid || !ctx.field || !ctx.hash) return
-
-    try {
-      const rec = getRecordData(ctx.uuid)
-      const value = { Username: rec.Username, Password: rec.Password, URL: rec.URL }[ctx.field]
-      if (!value) return
-      if (hashesEqual(await sha256(value), new Uint8Array(ctx.hash))) {
-        flashedUUID  = ctx.uuid
-        flashedToken = ctx.token
-      }
-    } catch {}
+    if (flashedToken === ctx.token) return  // already showing the right drain
+    ;(async () => {
+      try {
+        const rec = getRecordData(ctx.uuid)
+        const value = { Username: rec.Username, Password: rec.Password, URL: rec.URL }[ctx.field]
+        if (!value) return
+        if (hashesEqual(await sha256(value), new Uint8Array(ctx.hash))
+            && get(clipboardSession)?.token === ctx.token) {
+          flashedUUID  = ctx.uuid
+          flashedToken = ctx.token
+        }
+      } catch {}
+    })()
   })
 
   async function handleCopy(value, uuid, field = 'Password') {
@@ -79,7 +82,8 @@
     if (!s) return ''
     const remaining = Math.max(50, s.expiresAt - Date.now())
     const elapsed   = Math.max(0, 30000 - remaining)
-    return `--clip-delay: -${elapsed}ms; --drain-name: clip-drain-${animVariant}`
+    const flash = elapsed > 100 ? '0ms' : '450ms'
+    return `--clip-delay: -${elapsed}ms; --drain-name: clip-drain-${animVariant}; --flash-duration: ${flash}`
   }
 
   let groups = $derived.by(() => {

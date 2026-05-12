@@ -1,5 +1,4 @@
 <script>
-  import { onMount } from 'svelte'
   import { get } from 'svelte/store'
   import { clipboardSession, clipboardContext } from '../store.js'
   import Icon from './Icon.svelte'
@@ -31,26 +30,28 @@
     }
   })
 
-  // On mount, restore drain if this record's field value matches what's in the clipboard
-  onMount(async () => {
-    const s = get(clipboardSession)
-    const ctx = get(clipboardContext)
+  // Reactively restore (or update) the drain whenever the clipboard context changes.
+  $effect(() => {
+    const s = $clipboardSession
+    const ctx = $clipboardContext
     if (!s || !ctx || ctx.token !== s.token || ctx.uuid !== uuid || !ctx.field || !ctx.hash) return
-
-    const history = parseHistory(record.PasswordHistory)
-    let value
-    if (ctx.field.startsWith('history-')) {
-      const ts = parseInt(ctx.field.slice(8))
-      value = history.find(e => e.ts === ts)?.password
-    } else {
-      value = { Username: record.Username, Password: record.Password, URL: record.URL }[ctx.field]
-    }
-    if (!value) return
-
-    if (hashesEqual(await sha256(value), new Uint8Array(ctx.hash))) {
-      copiedField = ctx.field
-      copiedToken = ctx.token
-    }
+    if (copiedToken === ctx.token) return  // already showing the right drain
+    ;(async () => {
+      const history = parseHistory(record.PasswordHistory)
+      let value
+      if (ctx.field.startsWith('history-')) {
+        const ts = parseInt(ctx.field.slice(8))
+        value = history.find(e => e.ts === ts)?.password
+      } else {
+        value = { Username: record.Username, Password: record.Password, URL: record.URL }[ctx.field]
+      }
+      if (!value) return
+      if (hashesEqual(await sha256(value), new Uint8Array(ctx.hash))
+          && get(clipboardSession)?.token === ctx.token) {
+        copiedField = ctx.field
+        copiedToken = ctx.token
+      }
+    })()
   })
 
   async function handleCopy(value, field) {
@@ -69,7 +70,8 @@
     if (!s) return ''
     const remaining = Math.max(50, s.expiresAt - Date.now())
     const elapsed   = Math.max(0, 30000 - remaining)
-    return `--clip-delay: -${elapsed}ms; --drain-name: clip-drain-${animVariant}`
+    const flash = elapsed > 100 ? '0ms' : '450ms'
+    return `--clip-delay: -${elapsed}ms; --drain-name: clip-drain-${animVariant}; --flash-duration: ${flash}`
   }
 
   function relTime(str) {
