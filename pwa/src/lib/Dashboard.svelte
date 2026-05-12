@@ -336,12 +336,6 @@
     </button>
   </div>
   <div class="topbar-right">
-    {#if isDesktop}
-      <button class="new-record-btn" onclick={startNew}>
-        <Icon name="plus" size={18}/>
-        <span>New record</span>
-      </button>
-    {/if}
   </div>
 </div>
 
@@ -369,6 +363,14 @@
   <button class="fab" onclick={startNew} aria-label="New record">
     <Icon name="plus" size={22} stroke="var(--accent-on)"/>
   </button>
+
+  <!-- New record button (desktop, bottom of left panel) -->
+  {#if isDesktop}
+    <button class="desktop-new-btn" onclick={startNew}>
+      <Icon name="plus" size={18}/>
+      <span>New record</span>
+    </button>
+  {/if}
 </div>
 
 <!-- RECORD PANE -->
