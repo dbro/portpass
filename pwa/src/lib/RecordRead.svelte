@@ -1,8 +1,10 @@
 <script>
-  import { clipboardSession } from '../store.js'
+  import { onMount } from 'svelte'
+  import { get } from 'svelte/store'
+  import { clipboardSession, clipboardContext } from '../store.js'
   import Icon from './Icon.svelte'
 
-  let { record, isDesktop, onback, onedit, ondelete, oncopy } = $props()
+  let { record, uuid, isDesktop, onback, onedit, ondelete, oncopy } = $props()
 
   let menuOpen     = $state(false)
   let revealed     = $state(false)
@@ -10,6 +12,16 @@
   let copiedField  = $state(null)
   let copiedToken  = null
   let animVariant  = $state(0)  // alternates 0/1 on each copy to force animation restart
+
+  async function sha256(text) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+    return new Uint8Array(buf)
+  }
+  function hashesEqual(a, b) {
+    if (!a || !b || a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+    return true
+  }
 
   $effect(() => {
     const s = $clipboardSession
@@ -19,9 +31,33 @@
     }
   })
 
+  // On mount, restore drain if this record's field value matches what's in the clipboard
+  onMount(async () => {
+    const s = get(clipboardSession)
+    const ctx = get(clipboardContext)
+    if (!s || !ctx || ctx.token !== s.token || ctx.uuid !== uuid || !ctx.field || !ctx.hash) return
+
+    const history = parseHistory(record.PasswordHistory)
+    let value
+    if (ctx.field.startsWith('history-')) {
+      const ts = parseInt(ctx.field.slice(8))
+      value = history.find(e => e.ts === ts)?.password
+    } else {
+      value = { Username: record.Username, Password: record.Password, URL: record.URL }[ctx.field]
+    }
+    if (!value) return
+
+    if (hashesEqual(await sha256(value), new Uint8Array(ctx.hash))) {
+      copiedField = ctx.field
+      copiedToken = ctx.token
+    }
+  })
+
   async function handleCopy(value, field) {
     const token = await oncopy(value)
     if (token !== null) {
+      const hash = Array.from(await sha256(value))
+      clipboardContext.set({ token, field, uuid, hash })
       animVariant ^= 1   // flip name so browser treats it as a fresh animation
       copiedField = field
       copiedToken = token

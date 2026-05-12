@@ -4,3 +4,4 @@ export const selectedFile     = writable(null) // { handle, name }
 export const dbItems          = writable([])   // Array of { uuid, title, group }
 export const toast            = writable(null) // { message, action?, duration? }
 export const clipboardSession = writable(null) // { token: number, expiresAt: number } | null
+export const clipboardContext = writable(null) // { token, field, uuid, hash: number[] } | null

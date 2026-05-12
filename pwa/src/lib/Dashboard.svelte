@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import { selectedFile, dbItems, toast, clipboardSession } from '../store.js'
+  import { selectedFile, dbItems, toast, clipboardSession, clipboardContext } from '../store.js'
   import {
     getRecordData, getDatabaseData, saveDatabase, getDatabaseInfo,
     updateRecordFields, updateDBFields, deleteRecord as wasmDeleteRecord,
@@ -168,12 +168,14 @@
       if (overwritten) {
         clipHash = null
         clipboardSession.set(null)
+        clipboardContext.set(null)
         return
       }
 
       await navigator.clipboard.writeText('')
       clipHash = null
       clipboardSession.set(null)
+      clipboardContext.set(null)
       showToast('Clipboard cleared', null, 2000)
     } catch {
       // keep clipHash — retry on next visibilitychange
@@ -307,6 +309,7 @@
     {#key selectedUUID}
       <RecordRead
         {record}
+        uuid={selectedUUID}
         {isDesktop}
         onback={() => { record = null; selectedUUID = null }}
         onedit={startEdit}

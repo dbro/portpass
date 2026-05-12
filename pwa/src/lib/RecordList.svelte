@@ -1,5 +1,7 @@
 <script>
-  import { dbItems, clipboardSession } from '../store.js'
+  import { onMount } from 'svelte'
+  import { get } from 'svelte/store'
+  import { dbItems, clipboardSession, clipboardContext } from '../store.js'
   import { searchRecords, getRecordData } from '../wasm.js'
   import Icon from './Icon.svelte'
 
@@ -26,6 +28,16 @@
   let flashedToken = null
   let animVariant  = $state(0)
 
+  async function sha256(text) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+    return new Uint8Array(buf)
+  }
+  function hashesEqual(a, b) {
+    if (!a || !b || a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+    return true
+  }
+
   $effect(() => {
     const s = $clipboardSession
     if (!s || s.token !== flashedToken) {
@@ -34,9 +46,28 @@
     }
   })
 
-  async function handleCopy(value, uuid) {
+  // On mount, restore drain if the record's field value still matches the clipboard
+  onMount(async () => {
+    const s = get(clipboardSession)
+    const ctx = get(clipboardContext)
+    if (!s || !ctx || ctx.token !== s.token || !ctx.uuid || !ctx.field || !ctx.hash) return
+
+    try {
+      const rec = getRecordData(ctx.uuid)
+      const value = { Username: rec.Username, Password: rec.Password, URL: rec.URL }[ctx.field]
+      if (!value) return
+      if (hashesEqual(await sha256(value), new Uint8Array(ctx.hash))) {
+        flashedUUID  = ctx.uuid
+        flashedToken = ctx.token
+      }
+    } catch {}
+  })
+
+  async function handleCopy(value, uuid, field = 'Password') {
     const token = await oncopy(value)
     if (token !== null) {
+      const hash = Array.from(await sha256(value))
+      clipboardContext.set({ token, field, uuid, hash })
       animVariant ^= 1
       flashedUUID  = uuid
       flashedToken = token
@@ -115,7 +146,7 @@
   function copyPassword(uuid) {
     try {
       const rec = getRecordData(uuid)
-      if (rec.Password) handleCopy(rec.Password, uuid)
+      if (rec.Password) handleCopy(rec.Password, uuid, 'Password')
     } catch {}
   }
 
@@ -218,17 +249,17 @@
     style="left:{contextMenu.x}px; top:{contextMenu.y}px"
   >
     {#if contextMenu.rec.Username}
-      <button onclick={() => { handleCopy(contextMenu.rec.Username, contextMenu.uuid); closeMenu() }}>
+      <button onclick={() => { handleCopy(contextMenu.rec.Username, contextMenu.uuid, 'Username'); closeMenu() }}>
         Copy username
       </button>
     {/if}
     {#if contextMenu.rec.Password}
-      <button onclick={() => { handleCopy(contextMenu.rec.Password, contextMenu.uuid); closeMenu() }}>
+      <button onclick={() => { handleCopy(contextMenu.rec.Password, contextMenu.uuid, 'Password'); closeMenu() }}>
         Copy password
       </button>
     {/if}
     {#if contextMenu.rec.URL}
-      <button onclick={() => { handleCopy(contextMenu.rec.URL, contextMenu.uuid); closeMenu() }}>
+      <button onclick={() => { handleCopy(contextMenu.rec.URL, contextMenu.uuid, 'URL'); closeMenu() }}>
         Copy URL
       </button>
       <button onclick={() => { window.open(contextMenu.rec.URL, '_blank'); closeMenu() }}>
