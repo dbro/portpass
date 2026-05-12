@@ -24,6 +24,7 @@
   let isNew        = $state(false)
   let sheetOpen    = $state(false)
   let isDirty      = $state(false)
+  let editDirty    = $state(false)
   let dbName = $state('')
   let dbKey  = $state('')
 
@@ -47,8 +48,7 @@
 
   // Load a record by UUID
   function selectRecord(uuid) {
-    if (isEditing && record) {
-      // simple guard — discard changes
+    if (isEditing && editDirty) {
       if (!confirm('Discard unsaved changes?')) return
     }
     try {
@@ -56,6 +56,7 @@
       selectedUUID = uuid
       isEditing = false
       isNew = false
+      editDirty = false
     } catch (e) {
       console.error(e)
     }
@@ -79,6 +80,7 @@
       isNew = false
     }
     isEditing = false
+    editDirty = false
   }
 
   async function saveRecord(draft) {
@@ -90,6 +92,7 @@
       record = getRecordData(selectedUUID)
       isNew = false
       isEditing = false
+      editDirty = false
       isDirty = true
       await saveFile(true)
     } catch (e) {
@@ -97,21 +100,75 @@
     }
   }
 
+  let pendingDeleteTimer = null
+  let pendingDeleteUUID = null
+  let pendingDeleteTitle = null
+
   async function deleteRecord(uuid) {
-    if (!confirm(`Delete "${record?.Title}"?`)) return
     try {
-      wasmDeleteRecord(uuid)
-      const items = getDatabaseData()
-      dbItems.set(items)
+      // Capture title and UUID for toast and undo
+      const snapshot = getRecordData(uuid)
+      pendingDeleteUUID = uuid
+      pendingDeleteTitle = snapshot.Title
+
+      // Clear UI state (record disappears from view)
       record = null
       selectedUUID = null
       isEditing = false
       isNew = false
-      isDirty = true
-      await saveFile(true)
-      showToast('Record deleted')
+
+      // Clear any existing pending delete timer
+      if (pendingDeleteTimer) clearTimeout(pendingDeleteTimer)
+
+      // Show undo toast
+      showToast(`Deleting "${pendingDeleteTitle}"...`, {
+        label: 'Cancel',
+        fn: undoDelete
+      }, 5000)
+
+      // Auto-delete and save after 5 seconds if not undone
+      pendingDeleteTimer = setTimeout(async () => {
+        try {
+          wasmDeleteRecord(pendingDeleteUUID)
+          const items = getDatabaseData()
+          dbItems.set(items)
+          isDirty = true
+          await saveFile(true)
+        } catch (e) {
+          showToast('Failed to delete: ' + e.message)
+        } finally {
+          pendingDeleteTimer = null
+          pendingDeleteUUID = null
+          pendingDeleteTitle = null
+        }
+      }, 5000)
+
     } catch (e) {
       showToast('Failed to delete: ' + e.message)
+    }
+  }
+
+  function undoDelete() {
+    // Cancel the pending delete
+    if (pendingDeleteTimer) {
+      clearTimeout(pendingDeleteTimer)
+      pendingDeleteTimer = null
+    }
+
+    // Re-select the restored record
+    const uuid = pendingDeleteUUID
+    pendingDeleteUUID = null
+    pendingDeleteTitle = null
+
+    if (uuid) {
+      try {
+        selectedUUID = uuid
+        record = getRecordData(uuid)
+        isEditing = false
+        showToast('Delete cancelled', null, 2000)
+      } catch (e) {
+        showToast('Failed to cancel: ' + e.message)
+      }
     }
   }
 
@@ -292,7 +349,7 @@
     {/if}
   </div>
 
-  <RecordList {query} {selectedUUID} storageKey={dbKey} ontap={selectRecord} oncopy={copyToClipboard}/>
+  <RecordList {query} {selectedUUID} excludeUUID={pendingDeleteUUID} storageKey={dbKey} ontap={selectRecord} oncopy={copyToClipboard}/>
 
   <!-- FAB (mobile) -->
   <button class="fab" onclick={startNew} aria-label="New record">
@@ -309,6 +366,8 @@
       {isDesktop}
       oncancel={cancelEdit}
       onsave={saveRecord}
+      ondelete={() => deleteRecord(selectedUUID)}
+      ondirtychange={(d) => editDirty = d}
     />
   {:else if record}
     {#key selectedUUID}
@@ -318,7 +377,6 @@
         {isDesktop}
         onback={() => { record = null; selectedUUID = null }}
         onedit={startEdit}
-        ondelete={() => deleteRecord(selectedUUID)}
         oncopy={copyToClipboard}
       />
     {/key}

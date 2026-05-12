@@ -4,7 +4,7 @@
   import { searchRecords, getRecordData } from '../wasm.js'
   import Icon from './Icon.svelte'
 
-  let { selectedUUID = null, query = '', ontap, oncopy, storageKey = null } = $props()
+  let { selectedUUID = null, excludeUUID = null, query = '', ontap, oncopy, storageKey = null } = $props()
 
   function loadGroupState() {
     if (!storageKey) return {}
@@ -59,6 +59,7 @@
         if (!value) return
         if (hashesEqual(await sha256(value), new Uint8Array(ctx.hash))
             && get(clipboardSession)?.token === ctx.token) {
+          animVariant ^= 1
           flashedUUID  = ctx.uuid
           flashedToken = ctx.token
         }
@@ -89,9 +90,13 @@
   let groups = $derived.by(() => {
     const items = $dbItems
     let list = items
+    // Filter out excluded UUID (pending delete)
+    if (excludeUUID) {
+      list = list.filter(i => i.uuid !== excludeUUID)
+    }
     if (query.trim()) {
       const matched = new Set(searchRecords(query, false))
-      list = items.filter(i => matched.has(i.uuid))
+      list = list.filter(i => matched.has(i.uuid))
     }
     const byGroup = {}
     list.forEach(r => {

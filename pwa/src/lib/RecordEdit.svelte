@@ -4,7 +4,7 @@
   import { generatePassword, loadOpts } from './passwordgen.js'
   import { getAutocompleteSuggestion } from '../wasm.js'
 
-  let { record, isNew, isDesktop, oncancel, onsave } = $props()
+  let { record, isNew, isDesktop, oncancel, onsave, ondelete, ondirtychange } = $props()
 
   function focusOnMount(node, condition = true) {
     if (condition) setTimeout(() => node.focus(), 0)
@@ -55,6 +55,11 @@
 
   let dirty   = $derived(!record || Object.keys(draft).some(k => (record[k] ?? '') !== draft[k]))
   let canSave = $derived(dirty && !!draft.Title)
+
+  // Notify parent of dirty state changes
+  $effect(() => {
+    ondirtychange?.(dirty)
+  })
 
   function set(k, v) { draft = { ...draft, [k]: v } }
 
@@ -121,13 +126,23 @@
   <div class="record-bar" style={isDesktop ? 'display:none' : ''}>
     <button class="btn-text" onclick={oncancel}>Cancel</button>
     <div class="record-bar-group muted">{isNew ? 'New record' : 'Edit'}</div>
-    <button class="btn-text primary" disabled={!canSave} onclick={() => onsave(draft)}>Save</button>
+    <div style="display:flex;align-items:center;gap:8px">
+      {#if !isNew && ondelete}
+        <button class="icon-btn" onclick={ondelete} aria-label="Delete">
+          <Icon name="trash" size={20} stroke="var(--danger)"/>
+        </button>
+      {/if}
+      <button class="btn-text primary" disabled={!canSave} onclick={() => onsave(draft)}>Save</button>
+    </div>
   </div>
 
   {#if isDesktop}
     <div class="record-pane-header">
       <span class="record-bar-group muted">{isNew ? 'New record' : 'Edit'}</span>
       <div class="record-pane-actions">
+        {#if !isNew && ondelete}
+          <button class="btn-text" onclick={ondelete} style="color:var(--danger)">Delete</button>
+        {/if}
         <button class="btn-text" onclick={oncancel}>Cancel</button>
         <button class="btn btn-primary" disabled={!canSave} onclick={() => onsave(draft)}
           style="height:36px;padding:0 14px;font-size:14px">Save</button>

@@ -3,9 +3,8 @@
   import { clipboardSession, clipboardContext } from '../store.js'
   import Icon from './Icon.svelte'
 
-  let { record, uuid, isDesktop, onback, onedit, ondelete, oncopy } = $props()
+  let { record, uuid, isDesktop, onback, onedit, oncopy } = $props()
 
-  let menuOpen     = $state(false)
   let revealed     = $state(false)
   let showHistory  = $state(false)
   let copiedField  = $state(null)
@@ -48,6 +47,7 @@
       if (!value) return
       if (hashesEqual(await sha256(value), new Uint8Array(ctx.hash))
           && get(clipboardSession)?.token === ctx.token) {
+        animVariant ^= 1
         copiedField = ctx.field
         copiedToken = ctx.token
       }
@@ -114,22 +114,9 @@
     <Icon name="back" size={22}/>
   </button>
   <div class="record-bar-group muted">{record.Group ?? ''}</div>
-  <div style="position:relative">
-    <button class="icon-btn" onclick={() => menuOpen = !menuOpen} aria-label="More">
-      <Icon name="more" size={20}/>
-    </button>
-    {#if menuOpen}
-      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-      <div class="popmenu" onclick={() => menuOpen = false}>
-        <button class="popmenu-item" onclick={onedit}>
-          <Icon name="edit" size={16}/><span>Edit</span>
-        </button>
-        <button class="popmenu-item danger" onclick={ondelete}>
-          <Icon name="trash" size={16}/><span>Delete</span>
-        </button>
-      </div>
-    {/if}
-  </div>
+  <button class="icon-btn" onclick={onedit} aria-label="Edit">
+    <Icon name="edit" size={20}/>
+  </button>
 </div>
 
 <!-- Desktop pane header (hidden on mobile via CSS) -->
@@ -137,7 +124,6 @@
   <div class="record-pane-header">
     <span class="record-bar-group muted">{record.Group ?? ''}</span>
     <div class="record-pane-actions">
-      <button class="btn-text" onclick={ondelete} style="color:var(--danger)">Delete</button>
       <button class="btn btn-ghost" onclick={onedit} style="height:36px;padding:0 14px;font-size:14px">Edit</button>
     </div>
   </div>
