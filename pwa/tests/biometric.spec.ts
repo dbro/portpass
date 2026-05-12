@@ -77,7 +77,7 @@ async function openVaultNoEnroll(page: Page) {
 // Lock the vault and wait for the landing screen.
 async function lockVault(page: Page) {
   await page.locator('.vault-pill').click()
-  await expect(page.locator('.sheet')).toBeVisible()
+  await expect(page.locator('.vault-settings-body')).toBeVisible()
   await page.getByRole('button', { name: /Lock vault/ }).click()
   await expect(page.getByRole('button', { name: 'Open vault file' })).toBeVisible({ timeout: 5000 })
 }
@@ -92,8 +92,8 @@ test.describe('Fast unlock', () => {
       await openVaultNoEnroll(page)
 
       await page.locator('.vault-pill').click()
-      await expect(page.locator('.sheet')).toBeVisible()
-      await expect(page.locator('.sheet-toggle-help')).not.toHaveText('Enabled')
+      await expect(page.locator('.vault-settings-body')).toBeVisible()
+      await expect(page.locator('.vault-toggle-help')).not.toHaveText('Enabled')
 
       // Click toggle — modal should appear
       await page.getByRole('button', { name: 'Fast unlock' }).click()
@@ -106,7 +106,7 @@ test.describe('Fast unlock', () => {
 
       // Modal closes and toggle flips on
       await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 })
-      await expect(page.locator('.sheet-toggle-help')).toHaveText('Enabled')
+      await expect(page.locator('.vault-toggle-help')).toHaveText('Enabled')
     })
 
     test('cancel closes modal without enrolling', async ({ page }) => {
@@ -119,7 +119,7 @@ test.describe('Fast unlock', () => {
       await page.locator('.modal').getByRole('button', { name: 'Cancel' }).click()
 
       await expect(page.locator('.modal')).not.toBeVisible()
-      await expect(page.locator('.sheet-toggle-help')).not.toHaveText('Enabled')
+      await expect(page.locator('.vault-toggle-help')).not.toHaveText('Enabled')
     })
 
     test('clicking backdrop closes modal without enrolling', async ({ page }) => {
@@ -132,7 +132,7 @@ test.describe('Fast unlock', () => {
       await page.locator('.modal-overlay').click({ position: { x: 5, y: 5 } })
 
       await expect(page.locator('.modal')).not.toBeVisible()
-      await expect(page.locator('.sheet-toggle-help')).not.toHaveText('Enabled')
+      await expect(page.locator('.vault-toggle-help')).not.toHaveText('Enabled')
     })
 
     test('wrong password shows error and keeps modal open', async ({ page }) => {
@@ -147,7 +147,7 @@ test.describe('Fast unlock', () => {
 
       await expect(page.locator('.unlock-error')).toBeVisible({ timeout: 5000 })
       await expect(page.locator('.modal')).toBeVisible()
-      await expect(page.locator('.sheet-toggle-help')).not.toHaveText('Enabled')
+      await expect(page.locator('.vault-toggle-help')).not.toHaveText('Enabled')
     })
 
   })
@@ -156,8 +156,8 @@ test.describe('Fast unlock', () => {
     await openVaultAndEnroll(page)
 
     await page.locator('.vault-pill').click()
-    await expect(page.locator('.sheet')).toBeVisible()
-    await expect(page.locator('.sheet-toggle-help')).toHaveText('Enabled')
+    await expect(page.locator('.vault-settings-body')).toBeVisible()
+    await expect(page.locator('.vault-toggle-help')).toHaveText('Enabled')
   })
 
   test('new vault shows fast unlock as disabled when another vault is enrolled', async ({ page }) => {
@@ -171,8 +171,8 @@ test.describe('Fast unlock', () => {
     await expect(page.getByPlaceholder('Search vault')).toBeVisible({ timeout: 10000 })
 
     await page.locator('.vault-pill').click()
-    await expect(page.locator('.sheet')).toBeVisible()
-    await expect(page.locator('.sheet-toggle-help')).not.toHaveText('Enabled')
+    await expect(page.locator('.vault-settings-body')).toBeVisible()
+    await expect(page.locator('.vault-toggle-help')).not.toHaveText('Enabled')
   })
 
   test('stale enrollment is cleared and error shown when fast unlock password does not match', async ({ page }) => {

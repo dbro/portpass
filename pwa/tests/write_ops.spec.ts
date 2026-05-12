@@ -6,8 +6,8 @@ test.describe('Record write operations', () => {
   test('create new record appears in list', async ({ page }) => {
     await createVault(page)
 
-    // On desktop the FAB is hidden; use the topbar New button
-    await page.getByRole('button', { name: 'New', exact: true }).click()
+    // On desktop the FAB is hidden; use the bottom-left New record button
+    await page.getByRole('button', { name: 'New record' }).click()
     await page.getByPlaceholder('e.g. Bank of America').fill('My New Record')
     await page.getByPlaceholder('e.g. Banking').fill('Test Group')
     await page.getByPlaceholder('e.g. Bank of America').press('Tab') // move focus
@@ -40,13 +40,19 @@ test.describe('Record write operations', () => {
     await openVault(page)
 
     await page.locator('.record-row', { hasText: 'three entry 1' }).click()
-
-    // Accept the browser confirm dialog
-    page.on('dialog', d => d.accept())
+    await page.getByRole('button', { name: 'Edit' }).click()
     await page.getByRole('button', { name: 'Delete' }).click()
 
-    await expect(page.locator('.record-row', { hasText: 'three entry 1' })).not.toBeVisible()
-    await expect(page.locator('.record-screen .record-title')).not.toBeVisible()
+    // Toast should appear with delete message
+    await expect(page.locator('.toast')).toContainText('Deleting', { timeout: 2000 })
+
+    // Record disappears from list (wait a bit for reactivity)
+    await page.waitForTimeout(200)
+    await expect(page.locator('.record-row', { hasText: 'three entry 1' })).toHaveCount(0)
+
+    // Wait for undo timeout to expire and record to be permanently deleted
+    await page.waitForTimeout(5500)
+    await expect(page.locator('.toast')).not.toBeVisible()
   })
 
 

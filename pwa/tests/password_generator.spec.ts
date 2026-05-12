@@ -3,33 +3,36 @@ import { openVault, createVault } from './helpers'
 
 async function openEditWithGenerator(page) {
   await createVault(page)
-  await page.getByRole('button', { name: 'New', exact: true }).click()
+  await page.getByRole('button', { name: 'New record' }).click()
   await page.getByPlaceholder('e.g. Bank of America').fill('Gen Test')
 }
 
 test.describe('Password generator — quick generate', () => {
 
-  test('Generate button fills the password field', async ({ page }) => {
+  test('Refresh icon opens generator and Use fills the password field', async ({ page }) => {
     await openEditWithGenerator(page)
 
     const pwInput = page.locator('input.mono').first()
     const before  = await pwInput.inputValue()
 
-    await page.getByRole('button', { name: 'Generate' }).click()
+    await page.getByLabel('Open password generator').click()
+    await expect(page.locator('.generator')).toBeVisible()
+    await page.getByRole('button', { name: 'Use' }).click()
 
     const after = await pwInput.inputValue()
     expect(after.length).toBeGreaterThan(0)
     expect(after).not.toBe(before)
   })
 
-  test('Generate button produces different passwords each time', async ({ page }) => {
+  test('Generator produces different passwords each time', async ({ page }) => {
     await openEditWithGenerator(page)
 
-    await page.getByRole('button', { name: 'Generate' }).click()
-    const first = await page.locator('input.mono').first().inputValue()
+    await page.getByLabel('Open password generator').click()
+    await page.locator('.gen-regen').click()
+    const first = await page.locator('.gen-output-value').textContent()
 
-    await page.getByRole('button', { name: 'Generate' }).click()
-    const second = await page.locator('input.mono').first().inputValue()
+    await page.locator('.gen-regen').click()
+    const second = await page.locator('.gen-output-value').textContent()
 
     // Statistically near-impossible to collide
     expect(first).not.toBe(second)
@@ -39,15 +42,15 @@ test.describe('Password generator — quick generate', () => {
 
 test.describe('Password generator — options screen', () => {
 
-  test('gear icon opens generator screen', async ({ page }) => {
+  test('refresh icon opens generator screen', async ({ page }) => {
     await openEditWithGenerator(page)
-    await page.getByLabel('Password options').click()
+    await page.getByLabel('Open password generator').click()
     await expect(page.locator('.generator')).toBeVisible()
   })
 
   test('generator screen has Use and Cancel buttons', async ({ page }) => {
     await openEditWithGenerator(page)
-    await page.getByLabel('Password options').click()
+    await page.getByLabel('Open password generator').click()
     await expect(page.getByRole('button', { name: 'Use' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Cancel' })).toBeVisible()
   })
@@ -57,7 +60,7 @@ test.describe('Password generator — options screen', () => {
     const pwInput = page.locator('input.mono').first()
     const before  = await pwInput.inputValue()
 
-    await page.getByLabel('Password options').click()
+    await page.getByLabel('Open password generator').click()
     await page.getByRole('button', { name: 'Cancel' }).click()
 
     await expect(page.locator('.generator')).not.toBeVisible()
@@ -66,7 +69,7 @@ test.describe('Password generator — options screen', () => {
 
   test('Use applies generated password to field', async ({ page }) => {
     await openEditWithGenerator(page)
-    await page.getByLabel('Password options').click()
+    await page.getByLabel('Open password generator').click()
 
     const generated = await page.locator('.gen-output-value').textContent()
     await page.getByRole('button', { name: 'Use' }).click()
@@ -78,7 +81,7 @@ test.describe('Password generator — options screen', () => {
 
   test('length slider changes output length', async ({ page }) => {
     await openEditWithGenerator(page)
-    await page.getByLabel('Password options').click()
+    await page.getByLabel('Open password generator').click()
 
     const slider = page.locator('.gen-range')
     await slider.fill('20')
@@ -89,7 +92,7 @@ test.describe('Password generator — options screen', () => {
 
   test('disabling all character sets produces empty output', async ({ page }) => {
     await openEditWithGenerator(page)
-    await page.getByLabel('Password options').click()
+    await page.getByLabel('Open password generator').click()
 
     // Toggle all chips off
     for (const chip of await page.locator('.gen-chip').all()) {
@@ -101,23 +104,19 @@ test.describe('Password generator — options screen', () => {
     expect(generated?.trim()).toBe('')
   })
 
-  test('symbol palette toggles individual characters', async ({ page }) => {
+  test('exclude characters field filters output', async ({ page }) => {
     await openEditWithGenerator(page)
-    await page.getByLabel('Password options').click()
+    await page.getByLabel('Open password generator').click()
 
-    // Symbol chips should be visible (symbols enabled by default)
-    await expect(page.locator('.sym-key').first()).toBeVisible()
+    // Add a character to exclude list (pick something common like 'a')
+    const excludeInput = page.getByPlaceholder('e.g. 0O Il1')
+    await excludeInput.fill('a')
 
-    // Toggle first symbol off and verify by character, not by re-querying the live locator
-    const char = (await page.locator('.sym-key.on').first().textContent())!.trim()
-    await page.locator('.sym-key.on').first().click()
-    await expect(page.locator('.sym-key.on').filter({ hasText: char })).toHaveCount(0)
-
-    // Regenerate several times and verify char doesn't appear
-    for (let i = 0; i < 5; i++) {
+    // Regenerate several times and verify 'a' doesn't appear
+    for (let i = 0; i < 10; i++) {
       await page.getByLabel('Regenerate').click()
       const pw = await page.locator('.gen-output-value').textContent()
-      expect(pw).not.toContain(char)
+      expect(pw).not.toContain('a')
     }
   })
 
