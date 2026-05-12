@@ -187,11 +187,20 @@
 
 /* Drain bar uses transform:scaleX (reliable cross-browser) behind text via z-index:-1.
    Two identical keyframes let us alternate names to force animation restart on re-copy. */
-@keyframes clip-drain-0 { from { transform: scaleX(1); opacity: 1; } to { transform: scaleX(0); opacity: 0; } }
-@keyframes clip-drain-1 { from { transform: scaleX(1); opacity: 1; } to { transform: scaleX(0); opacity: 0; } }
+/* Width-only drain — opacity stays constant so colour doesn't fade */
+@keyframes clip-drain-0 { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+@keyframes clip-drain-1 { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 @keyframes clip-flash   { from { opacity: 0.7; } to { opacity: 0; } }
 
-/* ::before is the drain bar — z-index:-1 keeps it behind text inside the isolated context */
+/* Text turns accent while the clipboard is active, reverts when class is removed */
+.vault-app .copy-row.clipboard-active .copy-row-label,
+.vault-app .copy-row.clipboard-active .copy-row-value,
+.vault-app .history-entry.clipboard-active .history-pw,
+.vault-app .record-row.clipboard-active .record-row-title {
+  color: var(--accent);
+}
+
+/* ::before — drain bar, behind text via z-index:-1 in isolated context */
 .vault-app .copy-row.clipboard-active::before,
 .vault-app .history-entry.clipboard-active::before,
 .vault-app .record-row.clipboard-active::before {
@@ -201,13 +210,13 @@
   z-index: -1; pointer-events: none;
   animation: var(--drain-name, clip-drain-0) 10000ms var(--clip-delay, 0ms) linear forwards;
 }
-/* ::after is the initial flash — briefly covers, then fades */
+/* ::after — initial flash, also behind text so text colour is always readable */
 .vault-app .copy-row.clipboard-active::after,
 .vault-app .history-entry.clipboard-active::after,
 .vault-app .record-row.clipboard-active::after {
   content: ''; position: absolute; inset: 0; border-radius: inherit;
   background: var(--accent);
-  pointer-events: none;
+  z-index: -1; pointer-events: none;
   animation: clip-flash 450ms ease-out forwards;
 }
 
