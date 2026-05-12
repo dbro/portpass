@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 import { VitePWA } from 'vite-plugin-pwa'
 import { execSync } from 'child_process'
+import { copyFileSync, existsSync } from 'fs'
 
 let version = '0.0.0-dev'
 try {

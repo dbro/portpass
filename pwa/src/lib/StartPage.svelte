@@ -1,11 +1,11 @@
 <script>
   import { onMount } from 'svelte'
   import { get as idbGet, set as idbSet } from 'idb-keyval'
-  import { openDatabase, createDatabase, getDatabaseData } from '../wasm.js'
+  import { openDatabase, createDatabase, getDatabaseData, getDatabaseInfo } from '../wasm.js'
   import { selectedFile, dbItems } from '../store.js'
   import {
-    isBiometricSupported, isBiometricEnrolled,
-    enrollBiometric, unlockWithBiometric,
+    isBiometricSupported, isBiometricEnrolledForFile,
+    enrollBiometric, unlockWithBiometric, clearBiometric,
   } from './biometric.js'
   import Icon from './Icon.svelte'
 
@@ -26,14 +26,17 @@
 
   onMount(async () => {
     biometricAvailable = await isBiometricSupported()
-    biometricEnrolled  = await isBiometricEnrolled()
 
     if (!supportsFilePicker) return
     try {
       const handle = await idbGet('lastHandle')
       if (!handle) return
       const perm = await handle.queryPermission({ mode: 'read' })
-      if (perm === 'granted') { fileHandle = handle; mode = 'unlock' }
+      if (perm === 'granted') {
+        fileHandle = handle
+        mode = 'unlock'
+        biometricEnrolled = await isBiometricEnrolledForFile(handle.name)
+      }
     } catch {}
   })
 
@@ -45,6 +48,7 @@
       mode = 'unlock'
       error = ''
       password = ''
+      biometricEnrolled = await isBiometricEnrolledForFile(fileHandle.name)
     } catch (e) {
       if (e.name !== 'AbortError') error = e.message
     }
@@ -81,21 +85,28 @@
   async function unlockBiometric() {
     busy = true; error = ''
     try {
-      const pw = await unlockWithBiometric()
+      let pw
+      try {
+        pw = await unlockWithBiometric()
+      } catch (e) {
+        error = e.name === 'NotAllowedError' ? 'Biometric authentication cancelled.' : e.message
+        console.error(e)
+        return
+      }
       const file = await fileHandle.getFile()
       const buf  = await file.arrayBuffer()
-      openDatabase(new Uint8Array(buf), pw)
+      try {
+        openDatabase(new Uint8Array(buf), pw)
+      } catch {
+        await clearBiometric()
+        biometricEnrolled = false
+        error = 'Fast unlock is out of date — please enter your master password.'
+        return
+      }
       dbItems.set(getDatabaseData())
       selectedFile.set({ handle: fileHandle, name: fileHandle.name })
       await idbSet('lastHandle', fileHandle)
       onopened()
-    } catch (e) {
-      if (e.name === 'NotAllowedError') {
-        error = 'Biometric authentication cancelled.'
-      } else {
-        error = e.message
-      }
-      console.error(e)
     } finally {
       busy = false
     }
@@ -104,7 +115,8 @@
   async function enableBiometric() {
     busy = true; error = ''
     try {
-      await enrollBiometric(password)
+      const info = getDatabaseInfo()
+      await enrollBiometric(password, info?.uuid, fileHandle?.name)
       biometricEnrolled = true
       onopened()
     } catch (e) {

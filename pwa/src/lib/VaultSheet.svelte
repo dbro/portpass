@@ -13,10 +13,11 @@
   let setupPassword      = $state('')
   let setupError         = $state('')
   let setupBusy          = $state(false)
+  let showSetupPw        = $state(false)
 
   onMount(async () => {
     biometricAvailable = await isBiometricSupported()
-    biometricEnrolled  = await isBiometricEnrolled()
+    biometricEnrolled  = await isBiometricEnrolled(info?.uuid)
   })
 
   async function disableBiometric() {
@@ -29,6 +30,7 @@
     setupMode = true
     setupPassword = ''
     setupError = ''
+    showSetupPw = false
   }
 
   async function doSetup() {
@@ -44,10 +46,11 @@
         openDatabase(new Uint8Array(buf), setupPassword) // throws if wrong
       }
       // Password correct — now trigger WebAuthn enrollment
-      await enrollBiometric(setupPassword)
+      await enrollBiometric(setupPassword, info?.uuid, filename)
       biometricEnrolled = true
       setupMode = false
       setupPassword = ''
+      showSetupPw = false
     } catch (e) {
       if (e.name === 'NotAllowedError') {
         setupError = 'Setup cancelled.'
@@ -165,27 +168,6 @@
             ></button>
           </div>
 
-          {#if setupMode && !biometricEnrolled}
-            <div class="setup-form">
-              <p class="setup-prompt muted">Enter your master password to set up fast unlock:</p>
-              <div class="unlock-pw" style="margin:0">
-                <input
-                  type="password"
-                  bind:value={setupPassword}
-                  placeholder="Master password"
-                  onkeydown={e => { if (e.key === 'Enter') doSetup() }}
-                  autofocus
-                />
-              </div>
-              {#if setupError}<div class="unlock-error" style="font-size:13px">{setupError}</div>{/if}
-              <div class="setup-actions">
-                <button class="btn btn-primary" style="flex:1" disabled={!setupPassword || setupBusy} onclick={doSetup}>
-                  {setupBusy ? 'Setting up…' : 'Enable fast unlock'}
-                </button>
-                <button class="btn btn-ghost" onclick={() => setupMode = false}>Cancel</button>
-              </div>
-            </div>
-          {/if}
         </div>
       {/if}
 
@@ -211,6 +193,34 @@
 
     </div>
   </div>
+
+  {#if setupMode}
+    <div class="modal-overlay" onclick={e => { e.stopPropagation(); setupMode = false; setupError = '' }}>
+      <div class="modal" onclick={e => e.stopPropagation()}>
+        <div class="modal-title">Enable fast unlock</div>
+        <p class="modal-desc muted">Confirm your master password to set up fingerprint, PIN, or passkey unlock.</p>
+        <div class="modal-pw">
+          <input
+            type={showSetupPw ? 'text' : 'password'}
+            bind:value={setupPassword}
+            placeholder="Master password"
+            onkeydown={e => { if (e.key === 'Enter') doSetup() }}
+            autofocus
+          />
+          <button class="icon-btn-flat" onclick={() => showSetupPw = !showSetupPw} aria-label="Toggle visibility">
+            <Icon name={showSetupPw ? 'eye-off' : 'eye'} size={18}/>
+          </button>
+        </div>
+        {#if setupError}<div class="unlock-error" style="font-size:13px">{setupError}</div>{/if}
+        <div class="modal-actions">
+          <button class="btn btn-ghost" onclick={() => { setupMode = false; setupError = '' }}>Cancel</button>
+          <button class="btn btn-primary" disabled={!setupPassword || setupBusy} onclick={doSetup}>
+            {setupBusy ? 'Setting up…' : 'Enable'}
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -246,18 +256,59 @@
     color: var(--accent);
   }
 
-  .setup-form {
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 24px;
+  }
+  .modal {
+    background: var(--surface);
+    border-radius: 16px;
+    padding: 24px;
+    width: 100%;
+    max-width: 340px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    margin-top: 8px;
+    gap: 14px;
   }
-  .setup-prompt {
-    font-size: 13px;
+  .modal-title {
+    font-size: 17px;
+    font-weight: 600;
+  }
+  .modal-desc {
+    font-size: 14px;
     margin: 0;
   }
-  .setup-actions {
+  .modal-actions {
     display: flex;
     gap: 8px;
+    justify-content: flex-end;
+  }
+  .modal-pw {
+    display: flex;
+    align-items: center;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-input);
+    padding: 0 6px 0 0;
+  }
+  .modal-pw:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .modal-pw input {
+    border: none;
+    background: transparent;
+    padding: 12px 14px;
+    flex: 1;
+    min-width: 0;
+    outline: none;
+    font-family: var(--font-ui);
+    font-size: 17px;
+    color: var(--text);
+    appearance: none;
+    -webkit-appearance: none;
   }
 </style>

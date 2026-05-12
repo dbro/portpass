@@ -10,11 +10,26 @@ export async function isBiometricSupported() {
   } catch { return false }
 }
 
-export async function isBiometricEnrolled() {
-  try { return !!(await get(STORAGE_KEY)) } catch { return false }
+// Returns true only when the stored enrollment matches the given vault UUID.
+export async function isBiometricEnrolled(vaultUuid) {
+  if (!vaultUuid) return false
+  try {
+    const stored = await get(STORAGE_KEY)
+    return !!(stored && stored.vaultUuid === vaultUuid)
+  } catch { return false }
 }
 
-export async function enrollBiometric(masterPassword) {
+// Pre-open check for StartPage: match by filename before the vault is decrypted.
+export async function isBiometricEnrolledForFile(filename) {
+  if (!filename) return false
+  try {
+    const stored = await get(STORAGE_KEY)
+    return !!(stored && stored.filename === filename)
+  } catch { return false }
+}
+
+// Overwrites any existing enrollment with a new credential tied to this vault.
+export async function enrollBiometric(masterPassword, vaultUuid, filename) {
   const challenge = crypto.getRandomValues(new Uint8Array(32))
   const userId    = crypto.getRandomValues(new Uint8Array(16))
 
@@ -49,6 +64,8 @@ export async function enrollBiometric(masterPassword) {
   )
 
   await set(STORAGE_KEY, {
+    vaultUuid,
+    filename,
     credentialId: Array.from(new Uint8Array(cred.rawId)),
     iv:           Array.from(iv),
     ciphertext:   Array.from(new Uint8Array(ciphertext)),
