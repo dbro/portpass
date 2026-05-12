@@ -102,31 +102,31 @@ test.describe('Record detail', () => {
 
 test.describe('Clipboard copy', () => {
 
-  test('copy button shows toast', async ({ page, context }) => {
+  test('copy button flashes the field row', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write'])
     await openVault(page)
     await page.locator('.record-row').first().click()
 
     await page.getByLabel('Copy username').click()
-    await expect(page.locator('.toast')).toContainText('copied')
+    await expect(page.locator('.copy-row.clipboard-active')).toBeVisible({ timeout: 3000 })
   })
 
-  test('double-click copies password and shows toast', async ({ page, context }) => {
+  test('double-click flashes the record row', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write'])
     await openVault(page)
 
     await page.locator('.record-row').first().dblclick()
-    await expect(page.locator('.toast')).toContainText('Password copied')
+    await expect(page.locator('.record-row.clipboard-active')).toBeVisible({ timeout: 3000 })
   })
 
-  test('clicking already-selected record copies password', async ({ page, context }) => {
+  test('clicking already-selected record flashes the record row', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write'])
     await openVault(page)
 
     const row = page.locator('.record-row').first()
     await row.click()       // select
     await row.click()       // copy
-    await expect(page.locator('.toast')).toContainText('Password copied')
+    await expect(page.locator('.record-row.clipboard-active')).toBeVisible({ timeout: 3000 })
   })
 
 })

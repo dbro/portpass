@@ -154,6 +154,7 @@
 .vault-app .coll-body .record-row + .record-row { border-top: 1px solid var(--border); }
 
 .vault-app .record-row {
+  position: relative; isolation: isolate;
   display: flex; align-items: center; gap: 8px;
   width: 100%; padding: 14px 16px;
   background: transparent; border: none; cursor: pointer; text-align: left;
@@ -184,8 +185,34 @@
 .vault-app .record-body { flex: 1; overflow-y: auto; padding: 20px 16px 32px; }
 .vault-app .record-title { font-size: 26px; font-weight: 700; letter-spacing: -0.015em; margin: 0 0 20px; }
 
+/* Drain bar uses transform:scaleX (reliable cross-browser) behind text via z-index:-1.
+   Two identical keyframes let us alternate names to force animation restart on re-copy. */
+@keyframes clip-drain-0 { from { transform: scaleX(1); opacity: 1; } to { transform: scaleX(0); opacity: 0; } }
+@keyframes clip-drain-1 { from { transform: scaleX(1); opacity: 1; } to { transform: scaleX(0); opacity: 0; } }
+@keyframes clip-flash   { from { opacity: 0.7; } to { opacity: 0; } }
+
+/* ::before is the drain bar — z-index:-1 keeps it behind text inside the isolated context */
+.vault-app .copy-row.clipboard-active::before,
+.vault-app .history-entry.clipboard-active::before,
+.vault-app .record-row.clipboard-active::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit;
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+  transform-origin: left center;
+  z-index: -1; pointer-events: none;
+  animation: var(--drain-name, clip-drain-0) 10000ms var(--clip-delay, 0ms) linear forwards;
+}
+/* ::after is the initial flash — briefly covers, then fades */
+.vault-app .copy-row.clipboard-active::after,
+.vault-app .history-entry.clipboard-active::after,
+.vault-app .record-row.clipboard-active::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit;
+  background: var(--accent);
+  pointer-events: none;
+  animation: clip-flash 450ms ease-out forwards;
+}
+
 .vault-app .copy-rows { display: flex; flex-direction: column; gap: 14px; }
-.vault-app .copy-row { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); padding: 12px 12px 10px; }
+.vault-app .copy-row { position: relative; isolation: isolate; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); padding: 12px 12px 10px; }
 .vault-app .copy-row-label { font-size: 12px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; padding-left: 4px; }
 .vault-app .copy-row-main { display: flex; align-items: center; gap: 4px; margin-top: 2px; }
 .vault-app .copy-row-value {

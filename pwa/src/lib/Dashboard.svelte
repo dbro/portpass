@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import { selectedFile, dbItems, toast } from '../store.js'
+  import { selectedFile, dbItems, toast, clipboardSession } from '../store.js'
   import {
     getRecordData, getDatabaseData, saveDatabase, getDatabaseInfo,
     updateRecordFields, updateDBFields, deleteRecord as wasmDeleteRecord,
@@ -29,6 +29,12 @@
       dbName = info?.name ?? ''
       dbKey  = info?.uuid ?? ''
     } catch (e) {}
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    window.addEventListener('focus', onWindowFocus)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      window.removeEventListener('focus', onWindowFocus)
+    }
   })
 
   function showToast(message, action, duration = 4000) {
@@ -128,20 +134,87 @@
     }
   }
 
-  let clearTimer = null
+  let clearTimer    = null
+  let clipHash      = null  // SHA-256 of the value we copied; null when nothing pending
+  let sessionSerial = 0     // increments on every copy to give each session a unique identity
 
-  async function copyToClipboard(value, label) {
+  async function sha256(text) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+    return new Uint8Array(buf)
+  }
+
+  function hashesEqual(a, b) {
+    if (!a || !b || a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+    return true
+  }
+
+  // Read clipboard, compare hash, clear only if it's still our data.
+  // Only attempts readText if clipboard-read is already granted — calling it
+  // without pre-existing permission shows a browser prompt that steals page
+  // focus and breaks the subsequent writeText call.
+  async function tryClearClipboard() {
+    if (!clipHash) return
+    try {
+      let overwritten = false
+      try {
+        const perm = await navigator.permissions.query({ name: 'clipboard-read' })
+        if (perm.state === 'granted') {
+          const current = await navigator.clipboard.readText()
+          if (!hashesEqual(await sha256(current), clipHash)) overwritten = true
+        }
+        console.log('[portpass] clipboard-read permission:', perm.state, '| overwritten:', overwritten)
+      } catch (e) {
+        console.log('[portpass] permissions.query failed:', e)
+      }
+
+      if (overwritten) {
+        console.log('[portpass] clipboard overwritten by user — not clearing')
+        clipHash = null
+        clipboardSession.set(null)
+        return
+      }
+
+      await navigator.clipboard.writeText('')
+      clipHash = null
+      clipboardSession.set(null)
+      showToast('Clipboard cleared', null, 2000)
+      console.log('[portpass] clipboard cleared')
+    } catch (e) {
+      console.log('[portpass] writeText failed (not focused?):', e)
+      // keep clipHash — retry on next visibilitychange
+    }
+  }
+
+  function onVisibilityChange() {
+    if (!document.hidden && clearTimer === null && clipHash !== null) {
+      tryClearClipboard()
+    }
+  }
+
+  // window.focus fires after the document is genuinely focused, which is required
+  // for clipboard API access — more reliable than visibilitychange alone.
+  function onWindowFocus() {
+    if (clearTimer === null && clipHash !== null) {
+      tryClearClipboard()
+    }
+  }
+
+  async function copyToClipboard(value) {
     try {
       await navigator.clipboard.writeText(value)
-      showToast(`${label} copied`)
+      clipHash = await sha256(value)
+      const token = ++sessionSerial
+      clipboardSession.set({ token, expiresAt: Date.now() + 10000 })
       if (clearTimer) clearTimeout(clearTimer)
-      clearTimer = setTimeout(async () => {
-        try { await navigator.clipboard.writeText('') } catch {}
-        showToast('Clipboard cleared', null, 2000)
+      clearTimer = setTimeout(() => {
         clearTimer = null
-      }, 30000)
-    } catch (e) {
+        tryClearClipboard()
+      }, 10000)
+      return token
+    } catch {
       showToast('Copy failed')
+      return null
     }
   }
 

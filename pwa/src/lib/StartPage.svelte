@@ -11,6 +11,10 @@
 
   let { onopened } = $props()
 
+  function focusOnMount(node, condition = true) {
+    if (condition) setTimeout(() => node.focus(), 0)
+  }
+
   // 'landing' | 'unlock' | 'creating' | 'offer-biometric'
   let mode       = $state('landing')
   let fileHandle = $state(null)
@@ -192,7 +196,7 @@
           bind:value={password}
           placeholder="Master password"
           onkeydown={e => { if (e.key === 'Enter' && password) unlock() }}
-          autofocus={!biometricEnrolled}
+          use:focusOnMount={!biometricEnrolled}
         />
         <button class="icon-btn-flat" onclick={() => showPw = !showPw} aria-label="Toggle password visibility">
           <Icon name={showPw ? 'eye-off' : 'eye'} size={18}/>
@@ -250,7 +254,7 @@
           bind:value={password}
           placeholder="Master password"
           onkeydown={e => { if (e.key === 'Enter' && password) create() }}
-          autofocus
+          use:focusOnMount
         />
         <button class="icon-btn-flat" onclick={() => showPw = !showPw} aria-label="Toggle password visibility">
           <Icon name={showPw ? 'eye-off' : 'eye'} size={18}/>

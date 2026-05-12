@@ -1,5 +1,5 @@
 <script>
-  import { dbItems } from '../store.js'
+  import { dbItems, clipboardSession } from '../store.js'
   import { searchRecords, getRecordData } from '../wasm.js'
   import Icon from './Icon.svelte'
 
@@ -21,7 +21,35 @@
     // Reload when storageKey becomes available (set after onMount in Dashboard)
     openGroups = loadGroupState()
   })
-  let contextMenu = $state(null) // { x, y, rec }
+  let contextMenu = $state(null) // { x, y, rec, uuid }
+  let flashedUUID  = $state(null)
+  let flashedToken = null
+  let animVariant  = $state(0)
+
+  $effect(() => {
+    const s = $clipboardSession
+    if (!s || s.token !== flashedToken) {
+      flashedUUID  = null
+      flashedToken = null
+    }
+  })
+
+  async function handleCopy(value, uuid) {
+    const token = await oncopy(value)
+    if (token !== null) {
+      animVariant ^= 1
+      flashedUUID  = uuid
+      flashedToken = token
+    }
+  }
+
+  function drainStyle() {
+    const s = $clipboardSession
+    if (!s) return ''
+    const remaining = Math.max(50, s.expiresAt - Date.now())
+    const elapsed   = Math.max(0, 10000 - remaining)
+    return `--clip-delay: -${elapsed}ms; --drain-name: clip-drain-${animVariant}`
+  }
 
   let groups = $derived.by(() => {
     const items = $dbItems
@@ -80,14 +108,14 @@
       const menuW = 180, menuH = 160
       const x = Math.min(e.clientX, window.innerWidth  - menuW - 8)
       const y = Math.min(e.clientY, window.innerHeight - menuH - 8)
-      contextMenu = { x, y, rec }
+      contextMenu = { x, y, rec, uuid }
     } catch {}
   }
 
   function copyPassword(uuid) {
     try {
       const rec = getRecordData(uuid)
-      if (rec.Password) oncopy(rec.Password, 'Password')
+      if (rec.Password) handleCopy(rec.Password, uuid)
     } catch {}
   }
 
@@ -157,6 +185,8 @@
               <button
                 class="record-row"
                 class:is-selected={r.uuid === selectedUUID}
+                class:clipboard-active={flashedUUID === r.uuid}
+                style={flashedUUID === r.uuid ? drainStyle() : ''}
                 onclick={() => handleClick(r.uuid)}
                 ondblclick={() => handleDblClick(r.uuid)}
                 oncontextmenu={e => handleContextMenu(e, r.uuid)}
@@ -188,17 +218,17 @@
     style="left:{contextMenu.x}px; top:{contextMenu.y}px"
   >
     {#if contextMenu.rec.Username}
-      <button onclick={() => { oncopy(contextMenu.rec.Username, 'Username'); closeMenu() }}>
+      <button onclick={() => { handleCopy(contextMenu.rec.Username, contextMenu.uuid); closeMenu() }}>
         Copy username
       </button>
     {/if}
     {#if contextMenu.rec.Password}
-      <button onclick={() => { oncopy(contextMenu.rec.Password, 'Password'); closeMenu() }}>
+      <button onclick={() => { handleCopy(contextMenu.rec.Password, contextMenu.uuid); closeMenu() }}>
         Copy password
       </button>
     {/if}
     {#if contextMenu.rec.URL}
-      <button onclick={() => { oncopy(contextMenu.rec.URL, 'URL'); closeMenu() }}>
+      <button onclick={() => { handleCopy(contextMenu.rec.URL, contextMenu.uuid); closeMenu() }}>
         Copy URL
       </button>
       <button onclick={() => { window.open(contextMenu.rec.URL, '_blank'); closeMenu() }}>

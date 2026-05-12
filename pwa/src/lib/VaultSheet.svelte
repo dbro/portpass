@@ -33,6 +33,10 @@
     showSetupPw = false
   }
 
+  function focusOnMount(node) {
+    setTimeout(() => node.focus(), 0)
+  }
+
   async function doSetup() {
     if (!setupPassword) return
     setupBusy = true
@@ -205,7 +209,7 @@
             bind:value={setupPassword}
             placeholder="Master password"
             onkeydown={e => { if (e.key === 'Enter') doSetup() }}
-            autofocus
+            use:focusOnMount
           />
           <button class="icon-btn-flat" onclick={() => showSetupPw = !showSetupPw} aria-label="Toggle visibility">
             <Icon name={showSetupPw ? 'eye-off' : 'eye'} size={18}/>
