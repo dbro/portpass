@@ -27,14 +27,18 @@
   color: var(--text-muted);
   transition: background .12s var(--ease), color .12s var(--ease);
 }
-.vault-app .icon-btn:hover { background: var(--surface-2); color: var(--text); }
+.vault-app .icon-btn:hover,
+.vault-app .icon-btn:focus-visible { background: var(--surface-2); color: var(--text); }
+.vault-app .icon-btn:focus { outline: none; }
 .vault-app .icon-btn-flat {
   width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center;
   border-radius: var(--r-input); border: none; background: transparent; cursor: pointer;
   color: var(--text-muted); appearance: none; -webkit-appearance: none;
   transition: background .12s var(--ease), color .12s var(--ease);
 }
-.vault-app .icon-btn-flat:hover { background: var(--surface-2); color: var(--text); }
+.vault-app .icon-btn-flat:hover,
+.vault-app .icon-btn-flat:focus-visible { background: var(--surface-2); color: var(--text); }
+.vault-app .icon-btn-flat:focus { outline: none; }
 .vault-app .icon-btn-flat.copy-btn { color: var(--accent); }
 .vault-app .icon-btn-flat.copy-btn:hover { color: var(--accent-strong); }
 
@@ -263,9 +267,15 @@
   transition: border-color .12s var(--ease), box-shadow .12s var(--ease);
 }
 .vault-app .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.vault-app .input-wrap { display: flex; align-items: center; gap: 4px; }
-.vault-app .input-wrap .input { padding-right: 8px; }
-.vault-app .input-wrap .icon-btn-flat { flex: 0 0 auto; }
+.vault-app .input-wrap {
+  display: flex; align-items: center;
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-input);
+  transition: border-color .12s var(--ease), box-shadow .12s var(--ease);
+}
+.vault-app .input-wrap:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.vault-app .input-wrap .input { background: transparent; border: none; box-shadow: none; flex: 1; padding-right: 4px; }
+.vault-app .input-wrap .input:focus { border: none; box-shadow: none; }
+.vault-app .input-wrap .icon-btn-flat { flex: 0 0 auto; margin-right: 4px; }
 .vault-app textarea.input { resize: vertical; font-family: inherit; }
 
 /* VAULT SHEET */
@@ -402,16 +412,15 @@
 .vault-app .gen-output-value { flex: 1; font-size: 17px; word-break: break-all; line-height: 1.4; letter-spacing: 0.01em; }
 .vault-app .gen-regen { flex: 0 0 auto; color: var(--accent); }
 .vault-app .gen-controls { display: flex; flex-direction: column; gap: 18px; }
-.vault-app .gen-slider { display: flex; flex-direction: column; gap: 6px; }
-.vault-app .gen-row { display: flex; justify-content: space-between; align-items: baseline; }
-.vault-app .gen-row-label { font-size: 13px; font-weight: 500; color: var(--text-muted); letter-spacing: 0.04em; text-transform: uppercase; }
-.vault-app .gen-row-value { font-size: 18px; color: var(--text); font-weight: 500; }
-.vault-app .gen-range { -webkit-appearance: none; appearance: none; width: 100%; height: 28px; background: transparent; cursor: pointer; }
+.vault-app .gen-slider { display: flex; align-items: center; gap: 10px; }
+.vault-app .gen-row-label { font-size: 13px; font-weight: 500; color: var(--text-muted); letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; }
+.vault-app .gen-row-value { font-size: 15px; color: var(--text); font-weight: 500; white-space: nowrap; }
+.vault-app .gen-range { -webkit-appearance: none; appearance: none; flex: 1; height: 28px; background: transparent; cursor: pointer; }
 .vault-app .gen-range::-webkit-slider-runnable-track { height: 4px; background: var(--surface-2); border-radius: 999px; }
 .vault-app .gen-range::-moz-range-track { height: 4px; background: var(--surface-2); border-radius: 999px; }
 .vault-app .gen-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 22px; height: 22px; border-radius: 999px; background: var(--accent); margin-top: -9px; box-shadow: 0 1px 3px rgba(0,0,0,0.18); border: none; }
 .vault-app .gen-range::-moz-range-thumb { width: 22px; height: 22px; border-radius: 999px; background: var(--accent); border: none; }
-.vault-app .gen-chips { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.vault-app .gen-chips { display: flex; flex-direction: column; gap: 8px; }
 .vault-app .gen-chip {
   display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--r-input);
   background: var(--surface); border: 1px solid var(--border-strong);

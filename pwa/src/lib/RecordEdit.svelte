@@ -6,6 +6,10 @@
 
   let { record, isNew, isDesktop, oncancel, onsave } = $props()
 
+  function focusOnMount(node, condition = true) {
+    if (condition) setTimeout(() => node.focus(), 0)
+  }
+
   let draft = $state({
     Title:    record?.Title    ?? '',
     Group:    record?.Group    ?? '',
@@ -14,7 +18,7 @@
     URL:      record?.URL      ?? '',
     Notes:    record?.Notes    ?? '',
   })
-  let showPw      = $state(isNew)
+  let showPw      = $state(false)
   let genOpen     = $state(false)
   let showHistory = $state(false)
 
@@ -102,12 +106,10 @@
 
   function quickGenerate() {
     set('Password', generatePassword(loadOpts()))
-    showPw = true
   }
 
   function usePassword(pw) {
     set('Password', pw)
-    showPw = true
     genOpen = false
   }
 </script>
@@ -137,7 +139,7 @@
     <label class="field">
       <span class="field-label muted">Title</span>
       <input class="input" value={draft.Title} oninput={e => set('Title', e.target.value)}
-        placeholder="e.g. Bank of America" autofocus={isNew}/>
+        placeholder="e.g. Bank of America" use:focusOnMount={isNew}/>
     </label>
 
     <div class="field">

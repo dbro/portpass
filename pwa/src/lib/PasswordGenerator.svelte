@@ -42,12 +42,23 @@
 
     <div class="gen-controls">
       <div class="gen-slider">
-        <div class="gen-row">
-          <span class="gen-row-label">Length</span>
-          <span class="gen-row-value mono">{opts.length}</span>
-        </div>
+        <span class="gen-row-label">Length</span>
         <input type="range" min="8" max="40" value={opts.length}
           oninput={e => set('length', Number(e.target.value))} class="gen-range"/>
+        <span class="gen-row-value mono">{opts.length}</span>
+      </div>
+
+      <div class="gen-toggle-row">
+        <div>
+          <div class="gen-toggle-label">Exclude similar</div>
+          <div class="gen-toggle-hint mono">0O Il1 5S Z2</div>
+        </div>
+        <button
+          class="switch"
+          class:on={opts.excludeSimilar}
+          onclick={() => set('excludeSimilar', !opts.excludeSimilar)}
+          aria-label="Exclude similar characters"
+        ></button>
       </div>
 
       <div class="gen-chips">
@@ -65,33 +76,20 @@
             <span class="gen-chip-glyph mono">{chip.glyph}</span>
             <span>{chip.label}</span>
           </button>
+          {#if chip.key === 'symbols'}
+            <div class="sym-picker" class:sym-disabled={!opts.symbols}>
+              {#each SYMBOL_PALETTE.split('') as char}
+                <button
+                  class="sym-key mono"
+                  class:on={activeSymbols.has(char)}
+                  disabled={!opts.symbols}
+                  onclick={() => toggleSymbol(char)}
+                  aria-label="{activeSymbols.has(char) ? 'Remove' : 'Add'} {char}"
+                >{char}</button>
+              {/each}
+            </div>
+          {/if}
         {/each}
-      </div>
-
-      {#if opts.symbols}
-        <div class="sym-picker">
-          {#each SYMBOL_PALETTE.split('') as char}
-            <button
-              class="sym-key mono"
-              class:on={activeSymbols.has(char)}
-              onclick={() => toggleSymbol(char)}
-              aria-label="{activeSymbols.has(char) ? 'Remove' : 'Add'} {char}"
-            >{char}</button>
-          {/each}
-        </div>
-      {/if}
-
-      <div class="gen-toggle-row">
-        <div>
-          <div class="gen-toggle-label">Exclude similar</div>
-          <div class="gen-toggle-hint mono">0O Il1 5S Z2</div>
-        </div>
-        <button
-          class="switch"
-          class:on={opts.excludeSimilar}
-          onclick={() => set('excludeSimilar', !opts.excludeSimilar)}
-          aria-label="Exclude similar characters"
-        ></button>
       </div>
     </div>
   </div>
@@ -102,6 +100,13 @@
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+    padding: 4px 2px 2px;
+    transition: opacity 0.15s ease;
+  }
+
+  .sym-picker.sym-disabled {
+    opacity: 0.3;
+    pointer-events: none;
   }
 
   .sym-key {

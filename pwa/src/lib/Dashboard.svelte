@@ -13,6 +13,10 @@
 
   let { onclosed, theme, accent, isDesktop, ontheme, onaccent } = $props()
 
+  function focusOnMount(node) {
+    setTimeout(() => node.focus(), 0)
+  }
+
   let query        = $state('')
   let selectedUUID = $state(null)
   let record       = $state(null)
@@ -279,6 +283,7 @@
       type="text"
       placeholder="Search vault"
       bind:value={query}
+      use:focusOnMount
     />
     {#if query}
       <button class="icon-btn-flat" onclick={() => query = ''} aria-label="Clear search">
