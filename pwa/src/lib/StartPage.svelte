@@ -153,7 +153,9 @@
 
 {#if mode === 'landing'}
   <div class="start-landing">
-    <div class="start-mark"><Icon name="lock" size={32}/></div>
+    <div class="start-mark">
+      <img src="{import.meta.env.BASE_URL}icon.svg" alt="Portpass" style="width:64px;height:64px" />
+    </div>
     <div class="start-title">Portpass</div>
     <div class="start-sub muted">Your passwords, on your device.</div>
 
@@ -178,7 +180,9 @@
 {:else if mode === 'unlock'}
   <div class="unlock-screen">
     <div class="unlock-stack">
-      <div class="unlock-mark"><Icon name="lock" size={28}/></div>
+      <div class="unlock-mark">
+        <img src="{import.meta.env.BASE_URL}icon.svg" alt="Portpass" style="width:56px;height:56px" />
+      </div>
       <div class="unlock-vault">{fileHandle?.name ?? 'Vault'}</div>
       <div class="unlock-sub muted">Vault is locked</div>
 
@@ -244,7 +248,9 @@
   <!-- creating -->
   <div class="unlock-screen">
     <div class="unlock-stack">
-      <div class="unlock-mark"><Icon name="lock" size={28}/></div>
+      <div class="unlock-mark">
+        <img src="{import.meta.env.BASE_URL}icon.svg" alt="Portpass" style="width:56px;height:56px" />
+      </div>
       <div class="unlock-vault">New vault</div>
       <div class="unlock-sub muted">Choose a master password</div>
 

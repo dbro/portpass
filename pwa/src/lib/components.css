@@ -474,6 +474,12 @@
   color: var(--text-soft); font-size: 15px;
 }
 
+/* DESKTOP — start/unlock logo padding */
+@media (min-width: 768px) {
+  .vault-app .start-mark { margin-top: 48px; }
+  .vault-app .unlock-mark { margin-top: 48px; }
+}
+
 /* DESKTOP — centered sheet/modal */
 @media (min-width: 768px) {
   .vault-app .sheet-backdrop {
