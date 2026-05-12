@@ -1,8 +1,31 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+  <linearGradient id="gradv2" x1="0%" y1="100%" x2="0%" y2="0%" gradientUnits="userSpaceOnUse">
+    <stop offset="12%" style="stop-color:#8c5e2d;stop-opacity:1" />
+    <stop offset="20%" style="stop-color:#d9a358;stop-opacity:1" />
+    <stop offset="40%" style="stop-color:#8c5e2d;stop-opacity:1" />
+  </linearGradient>
+  <linearGradient id="gradv1" x1="0%" y1="0%" x2="0%" y2="100%" gradientUnits="userSpaceOnUse">
+    <stop offset="60%" style="stop-color:#d9a358;stop-opacity:1" />
+    <stop offset="70%" style="stop-color:#8c5e2d;stop-opacity:1" />
+    <stop offset="90%" style="stop-color:#d9a358;stop-opacity:1" />
+  </linearGradient>
+  <linearGradient id="gradh" x1="0%" y1="0%" x2="100%" y2="0%">
+  <stop offset="0%" style="stop-color:#d9a358;stop-opacity:0.2" />
+  <stop offset="100%" style="stop-color:#d9a358;stop-opacity:1" />
+  </linearGradient>
+  </defs>
+
   <rect width="100" height="100" rx="20" fill="#14161a"/>
-  <path d="M38 85 V 26 " fill="none" stroke="#f1ede4" stroke-width="11" stroke-linecap="round"/>
-  <path d="M41 48 A 18 18 0 1 0 38 26" fill="none" stroke="#f1ede4" stroke-width="11" stroke-linecap="round"/>
-  <rect x="43" y="74" width="6" height="10" rx="0.5" fill="#f1ede4"/>
-  <rect x="47" y="71" width="6" height="6" rx="0.5" fill="#f1ede4"/>
-  <rect x="47" y="81" width="6" height="6" rx="0.5" fill="#f1ede4"/>
+  <path d="M38 87 V 27 " fill="none" stroke="#f1ede4" stroke-width="11" stroke-linecap="round"/>
+  <circle cx="52.9" cy="35.1" r="12" fill="#14161a" />
+  <path d="M39 92 V 52" fill="none" stroke="url(#gradv1)" stroke-width="3"/>
+  <path d="M42 54 V 91" fill="none" stroke="url(#gradv2)" stroke-width="3"/>
+  <path d="M40 47 A 18 18 0 1 0 38 26" fill="none" stroke="#f1ede4" stroke-width="11" stroke-linecap="round"/>
+  <path d="M53 48.9 A 13.7 13.7 0 1 0 45.5 24" fill="none" stroke="url(#gradh)" stroke-width="2.75"/>
+  <path d="M38 95 l -8 -8 M38 95 l 8 -8" fill="none" stroke="#14161a" stroke-width="4.5" />
+
+  <rect x="43" y="74" width="6" height="10" rx="0.5" fill="url(#gradv2)"/>
+  <rect x="47" y="71" width="6" height="6" rx="0.5" fill="url(#gradv2)"/>
+  <rect x="47" y="81" width="6" height="6" rx="0.5" fill="url(#gradv2)"/>
 </svg>
