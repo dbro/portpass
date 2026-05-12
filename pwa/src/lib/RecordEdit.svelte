@@ -203,21 +203,20 @@
           value={draft.Password}
           oninput={e => set('Password', e.target.value)}
         />
+        <button class="icon-btn-flat" onclick={() => genOpen = true} aria-label="Open password generator">
+          <Icon name="refresh" size={18}/>
+        </button>
         <button class="icon-btn-flat" onclick={() => showPw = !showPw} aria-label="Toggle visibility">
           <Icon name={showPw ? 'eye-off' : 'eye'} size={18}/>
         </button>
       </div>
-      <div class="pw-gen-row">
-        <button class="btn-text accent small" onclick={quickGenerate}>Generate</button>
-        <button class="icon-btn-flat" onclick={() => genOpen = true} aria-label="Password options">
-          <Icon name="settings" size={16}/>
-        </button>
-        {#if history.length > 0}
+      {#if history.length > 0}
+        <div class="pw-gen-row">
           <button class="history-toggle" onclick={() => showHistory = !showHistory}>
             {showHistory ? 'Hide' : 'History'} · {history.length}
           </button>
-        {/if}
-      </div>
+        </div>
+      {/if}
       {#if showHistory}
         <div class="history-list">
           {#each history as entry}
