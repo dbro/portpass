@@ -1,15 +1,12 @@
-export const SYMBOL_PALETTE = '!@#$%^&*()-_=+?[]{}|;:\'",./<>\\~`'
-export const DEFAULT_SYMBOLS = '!@#$%^&*-_=+?'
-export const SIMILAR = new Set(['0','O','I','i','l','1','|','5','S','Z','2'])
+export const SYMBOLS = '!@#$%^&*()-_=+?[]{}|;:\'",./<>\\~`'
 
 export const DEFAULT_OPTS = {
-  length:         16,
-  lowercase:      true,
-  uppercase:      true,
-  digits:         true,
-  symbols:        true,
-  excludeSimilar: false,
-  customSymbols:  DEFAULT_SYMBOLS,
+  length:       16,
+  lowercase:    true,
+  uppercase:    true,
+  digits:       true,
+  symbols:      true,
+  excludeChars: "{}|;:'\",./<>\\~`",
 }
 
 const POOLS = {
@@ -29,9 +26,10 @@ export function saveOpts(opts) {
   try { localStorage.setItem('genOpts', JSON.stringify(opts)) } catch {}
 }
 
-function filtered(pool, opts) {
-  if (!opts.excludeSimilar) return pool
-  return pool.split('').filter(c => !SIMILAR.has(c)).join('')
+function filtered(pool, excludeChars) {
+  if (!excludeChars) return pool
+  const exclude = new Set(excludeChars.split(''))
+  return pool.split('').filter(c => !exclude.has(c)).join('')
 }
 
 function randomFrom(pool) {
@@ -51,11 +49,12 @@ function cryptoShuffle(arr) {
 }
 
 export function generatePassword(opts = DEFAULT_OPTS) {
+  const exclude = opts.excludeChars || ''
   const activePools = []
-  if (opts.lowercase) activePools.push(filtered(POOLS.lowercase, opts))
-  if (opts.uppercase) activePools.push(filtered(POOLS.uppercase, opts))
-  if (opts.digits)    activePools.push(filtered(POOLS.digits, opts))
-  if (opts.symbols)   activePools.push(filtered(opts.customSymbols || DEFAULT_SYMBOLS, opts))
+  if (opts.lowercase) activePools.push(filtered(POOLS.lowercase, exclude))
+  if (opts.uppercase) activePools.push(filtered(POOLS.uppercase, exclude))
+  if (opts.digits)    activePools.push(filtered(POOLS.digits, exclude))
+  if (opts.symbols)   activePools.push(filtered(SYMBOLS, exclude))
 
   const nonEmpty = activePools.filter(p => p.length > 0)
   if (nonEmpty.length === 0) return ''
