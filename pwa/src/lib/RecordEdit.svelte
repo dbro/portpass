@@ -10,14 +10,9 @@
     if (condition) setTimeout(() => node.focus(), 0)
   }
 
-  let draft = $state({
-    Title:    record?.Title    ?? '',
-    Group:    record?.Group    ?? '',
-    Username: record?.Username ?? '',
-    Password: record?.Password ?? '',
-    URL:      record?.URL      ?? '',
-    Notes:    record?.Notes    ?? '',
-  })
+  // Destructure once to capture initial prop values — draft is an independent editable copy
+  const { Title = '', Group = '', Username = '', Password = '', URL = '', Notes = '' } = record ?? {}
+  let draft = $state({ Title, Group, Username, Password, URL, Notes })
   let showPw      = $state(false)
   let genOpen     = $state(false)
   let showHistory = $state(false)
@@ -125,24 +120,14 @@
 
   <div class="record-bar" style={isDesktop ? 'display:none' : ''}>
     <button class="btn-text" onclick={oncancel}>Cancel</button>
-    <div class="record-bar-group muted">{isNew ? 'New record' : 'Edit'}</div>
-    <div style="display:flex;align-items:center;gap:8px">
-      {#if !isNew && ondelete}
-        <button class="icon-btn" onclick={ondelete} aria-label="Delete">
-          <Icon name="trash" size={20} stroke="var(--danger)"/>
-        </button>
-      {/if}
-      <button class="btn-text primary" disabled={!canSave} onclick={() => onsave(draft)}>Save</button>
-    </div>
+    <div class="record-bar-group muted">{isNew ? 'New' : 'Edit'}</div>
+    <button class="btn-text primary" disabled={!canSave} onclick={() => onsave(draft)}>Save</button>
   </div>
 
   {#if isDesktop}
     <div class="record-pane-header">
-      <span class="record-bar-group muted">{isNew ? 'New record' : 'Edit'}</span>
+      <span class="record-bar-group muted">{isNew ? 'New' : 'Edit'}</span>
       <div class="record-pane-actions">
-        {#if !isNew && ondelete}
-          <button class="btn-text" onclick={ondelete} style="color:var(--danger)">Delete</button>
-        {/if}
         <button class="btn-text" onclick={oncancel}>Cancel</button>
         <button class="btn btn-primary" disabled={!canSave} onclick={() => onsave(draft)}
           style="height:36px;padding:0 14px;font-size:14px">Save</button>
@@ -243,6 +228,15 @@
       <textarea class="input" rows={4} value={draft.Notes}
         oninput={e => set('Notes', e.target.value)}></textarea>
     </label>
+
+    {#if !isNew && ondelete}
+      <div class="delete-row">
+        <button class="btn-delete" onclick={ondelete}>
+          <Icon name="trash" size={16}/>
+          Delete {draft.Title}
+        </button>
+      </div>
+    {/if}
   </div>
 {/if}
 
@@ -319,4 +313,24 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  .delete-row {
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+    margin-top: 8px;
+  }
+
+  .btn-delete {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--danger);
+    padding: 6px 2px;
+    opacity: 0.75;
+  }
+  .btn-delete:hover { opacity: 1; }
 </style>

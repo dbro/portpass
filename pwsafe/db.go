@@ -160,6 +160,11 @@ func (db *V3) calculateHMAC(unencrypted []byte) {
 func (db *V3) calculateStretchKey(passwd string) {
 	iterations := int(db.Iter)
 	salted := append([]byte(passwd), db.Salt[:]...)
+	defer func() {
+		for i := range salted {
+			salted[i] = 0
+		}
+	}()
 	stretched := sha256.Sum256(salted)
 	for i := 0; i < iterations; i++ {
 		stretched = sha256.Sum256(stretched[:])

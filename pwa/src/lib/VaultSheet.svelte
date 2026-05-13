@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { getDatabaseInfo, openDatabase } from '../wasm.js'
-  import { selectedFile } from '../store.js'
+  import { selectedFile, dbItems } from '../store.js'
   import { isBiometricSupported, isBiometricEnrolled, enrollBiometric, clearBiometric } from './biometric.js'
   import Icon from './Icon.svelte'
 
@@ -75,6 +75,9 @@
 
   // Fetch once on mount — VaultSheet is only rendered while vault is open
   let info = (() => { try { return getDatabaseInfo() } catch { return null } })()
+
+  let passwordCount = $derived($dbItems.length)
+  let groupCount    = $derived(new Set($dbItems.map(i => i.group).filter(Boolean)).size)
 
   let draftName = $state(info?.name        ?? '')
   let draftDesc = $state(info?.description ?? '')
@@ -194,11 +197,28 @@
   {/if}
 
   <div class="vault-section">
+    <div class="vault-section-title">CONTENTS</div>
+    <div class="vault-stats">
+      <div class="vault-stat">
+        <span class="vault-stat-num">{passwordCount}</span>
+        <span class="vault-stat-label muted">passwords</span>
+      </div>
+      {#if groupCount > 0}
+        <div class="vault-stat-divider"></div>
+        <div class="vault-stat">
+          <span class="vault-stat-num">{groupCount}</span>
+          <span class="vault-stat-label muted">groups</span>
+        </div>
+      {/if}
+    </div>
+  </div>
+
+  <div class="vault-section">
     <div class="vault-section-title">ABOUT</div>
     <div class="about-row">
       <img src="{import.meta.env.BASE_URL}icon.svg" alt="Portpass" class="about-icon" />
       <div class="about-info">
-        <div class="about-name">Portpass <span class="about-version muted">v{__APP_VERSION__}</span></div>
+        <div class="about-name">Portpass <span class="about-version muted">{__APP_VERSION__}</span></div>
         <a
           class="about-url muted"
           href="https://dbro.github.io/portpass"
@@ -215,8 +235,10 @@
 </div>
 
 {#if setupMode}
-  <div class="modal-overlay" onclick={e => { e.stopPropagation(); setupMode = false; setupError = '' }}>
-    <div class="modal" onclick={e => e.stopPropagation()}>
+  <div class="modal-overlay" role="presentation"
+    onclick={e => { e.stopPropagation(); setupMode = false; setupError = '' }}
+    onkeydown={e => { if (e.key === 'Escape') { setupMode = false; setupError = '' } }}>
+    <div class="modal" role="dialog" aria-modal="true" onclick={e => e.stopPropagation()} onkeydown={e => e.stopPropagation()}>
       <div class="modal-title">Enable fast unlock</div>
       <p class="modal-desc muted">Confirm your master password to set up biometric unlock.</p>
       <div class="modal-pw">
@@ -257,6 +279,34 @@
     letter-spacing: 0.06em;
     color: var(--text-soft);
     margin-bottom: 12px;
+  }
+
+  .vault-stats {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+  }
+
+  .vault-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .vault-stat-num {
+    font-size: 32px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .vault-stat-label {
+    font-size: 13px;
+  }
+
+  .vault-stat-divider {
+    width: 1px;
+    height: 40px;
+    background: var(--border);
   }
 
   .vault-inputs {

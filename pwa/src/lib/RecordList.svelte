@@ -204,9 +204,17 @@
 
 <div class="list-collapsible">
   {#if groups.length === 0}
-    <div class="empty-state muted">
-      {query ? `No matches for "${query}"` : 'No records'}
-    </div>
+    {#if !query && $dbItems.length === 0}
+      <div class="empty-vault">
+        <img src="{import.meta.env.BASE_URL}icon-512.png" alt="Portpass" class="empty-vault-logo"/>
+        <div class="empty-vault-prompt muted">Add your first password</div>
+        <div class="empty-vault-nudge muted">↙</div>
+      </div>
+    {:else}
+      <div class="empty-state muted">
+        {query ? `No matches for "${query}"` : ''}
+      </div>
+    {/if}
   {:else}
     {#each groups as { group, items }}
       <section class="coll-group" class:is-open={isOpen(group)}>

@@ -6,8 +6,8 @@ test.describe('Record write operations', () => {
   test('create new record appears in list', async ({ page }) => {
     await createVault(page)
 
-    // On desktop the FAB is hidden; use the bottom-left New record button
-    await page.getByRole('button', { name: 'New record' }).click()
+    // On desktop the FAB is hidden; use the bottom-left New button
+    await page.getByRole('button', { name: 'New', exact: true }).click()
     await page.getByPlaceholder('e.g. Bank of America').fill('My New Record')
     await page.getByPlaceholder('e.g. Banking').fill('Test Group')
     await page.getByPlaceholder('e.g. Bank of America').press('Tab') // move focus
@@ -41,7 +41,7 @@ test.describe('Record write operations', () => {
 
     await page.locator('.record-row', { hasText: 'three entry 1' }).click()
     await page.getByRole('button', { name: 'Edit' }).click()
-    await page.getByRole('button', { name: 'Delete' }).click()
+    await page.getByRole('button', { name: /^Delete / }).click()
 
     // Toast should appear with delete message
     await expect(page.locator('.toast')).toContainText('Deleting', { timeout: 2000 })

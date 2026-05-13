@@ -4,8 +4,9 @@
 
   let { onclose, onuse } = $props()
 
-  let opts = $state(loadOpts())
-  let value = $state(generatePassword(opts))
+  const initialOpts = loadOpts()
+  let opts = $state(initialOpts)
+  let value = $state(generatePassword(initialOpts))
 
   function set(k, v) {
     opts = { ...opts, [k]: v }
