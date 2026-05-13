@@ -217,8 +217,9 @@
 
   function hashesEqual(a, b) {
     if (!a || !b || a.length !== b.length) return false
-    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
-    return true
+    let diff = 0
+    for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i]
+    return diff === 0
   }
 
   // Read clipboard, compare hash, clear only if it's still our data.
@@ -228,21 +229,19 @@
   async function tryClearClipboard() {
     if (!clipHash) return
     try {
-      let overwritten = false
       try {
         const perm = await navigator.permissions.query({ name: 'clipboard-read' })
         if (perm.state === 'granted') {
           const current = await navigator.clipboard.readText()
-          if (!hashesEqual(await sha256(current), clipHash)) overwritten = true
+          if (!hashesEqual(await sha256(current), clipHash)) {
+            // user already replaced clipboard contents — abandon clear
+            clipHash = null
+            clipboardSession.set(null)
+            clipboardContext.set(null)
+            return
+          }
         }
       } catch {}
-
-      if (overwritten) {
-        clipHash = null
-        clipboardSession.set(null)
-        clipboardContext.set(null)
-        return
-      }
 
       await navigator.clipboard.writeText('')
       clipHash = null

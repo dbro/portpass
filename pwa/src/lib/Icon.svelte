@@ -36,5 +36,5 @@
   stroke-linejoin="round"
   aria-hidden="true"
 >
-  {@html paths[name] ?? ''}
+  {@html Object.hasOwn(paths, name) ? paths[name] : ''}
 </svg>
