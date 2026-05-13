@@ -10,14 +10,9 @@
     if (condition) setTimeout(() => node.focus(), 0)
   }
 
-  let draft = $state({
-    Title:    record?.Title    ?? '',
-    Group:    record?.Group    ?? '',
-    Username: record?.Username ?? '',
-    Password: record?.Password ?? '',
-    URL:      record?.URL      ?? '',
-    Notes:    record?.Notes    ?? '',
-  })
+  // Destructure once to capture initial prop values — draft is an independent editable copy
+  const { Title = '', Group = '', Username = '', Password = '', URL = '', Notes = '' } = record ?? {}
+  let draft = $state({ Title, Group, Username, Password, URL, Notes })
   let showPw      = $state(false)
   let genOpen     = $state(false)
   let showHistory = $state(false)

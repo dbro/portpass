@@ -112,8 +112,8 @@
   }
 
   let pendingDeleteTimer = null
-  let pendingDeleteUUID = null
-  let pendingDeleteTitle = null
+  let pendingDeleteUUID = $state(null)
+  let pendingDeleteTitle = $state(null)
 
   async function deleteRecord(uuid) {
     try {
