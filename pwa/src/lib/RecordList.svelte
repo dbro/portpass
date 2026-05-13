@@ -267,20 +267,20 @@
   >
     {#if contextMenu.rec.Username}
       <button onclick={() => { handleCopy(contextMenu.rec.Username, contextMenu.uuid, 'Username'); closeMenu() }}>
-        Copy username
+        <span>Copy username</span><span class="ctx-keys"><kbd>Ctrl</kbd><kbd>B</kbd></span>
       </button>
     {/if}
     {#if contextMenu.rec.Password}
       <button onclick={() => { handleCopy(contextMenu.rec.Password, contextMenu.uuid, 'Password'); closeMenu() }}>
-        Copy password
+        <span>Copy password</span><span class="ctx-keys"><kbd>Ctrl</kbd><kbd>C</kbd></span>
       </button>
     {/if}
     {#if contextMenu.rec.URL}
       <button onclick={() => { handleCopy(contextMenu.rec.URL, contextMenu.uuid, 'URL'); closeMenu() }}>
-        Copy URL
+        <span>Copy URL</span><span class="ctx-keys"><kbd>Ctrl</kbd><kbd>U</kbd></span>
       </button>
       <button onclick={() => { window.open(contextMenu.rec.URL, '_blank'); closeMenu() }}>
-        Visit URL
+        <span>Visit URL</span><span class="ctx-keys"><kbd>↵</kbd></span>
       </button>
     {/if}
   </div>
@@ -303,7 +303,7 @@
   .ctx-menu {
     position: fixed;
     z-index: 100;
-    min-width: 160px;
+    min-width: 210px;
     background: var(--surface);
     border: 1px solid var(--border-strong);
     border-radius: var(--r-input);
@@ -314,9 +314,11 @@
   }
 
   .ctx-menu button {
-    display: block;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
     width: 100%;
-    text-align: left;
     padding: 9px 12px;
     border: none;
     border-radius: 6px;
@@ -328,5 +330,18 @@
 
   .ctx-menu button:hover {
     background: var(--surface-2);
+  }
+
+  .ctx-keys {
+    display: flex;
+    gap: 3px;
+    flex-shrink: 0;
+  }
+
+  .ctx-menu kbd {
+    font-size: 11px;
+    font-family: inherit;
+    font-weight: normal;
+    color: var(--text-soft);
   }
 </style>
