@@ -31,6 +31,8 @@ Portpass runs in your browser and can be installed as an app on any device. Inst
 
 Portpass will then be visible as a standalone app and can be launched with a tap. It works offline and uses your local vault file.
 
+For best security, install Portpass in a [dedicated browser profile with no extensions](SECURITY.md#mitigation-use-a-dedicated-browser-profile).
+
 ## Cross-platform + how to sync
 
 Portpass runs as a Progressive Web App (PWA) on any device with a modern browser (eg. iPhone, Android, Windows, Mac, Linux). Install it to your home screen for quick access, just like a native app.
@@ -49,6 +51,10 @@ There is no server, no account, and nothing to trust except the open source code
 **Fast unlock** can be enabled to use your device's built-in authentication (fingerprint, face recognition, or PIN) so you don't have to type your master password on repeat visits. Your master password is encrypted with a key only your device can produce and stored locally, it is never transmitted anywhere.
 
 On Android, Chrome routes fast unlock setup through [Google Password Manager](https://passwords.google.com/), which requires a recovery PIN to have been set up previously. Google Password Manager stores a synced copy of the passkey in Google's cloud (but not your vault's master password, which always stays on your device). To set up or reset a Google Password Manager recovery PIN, visit [passwords.google.com/passkeys/reset/intro](https://passwords.google.com/passkeys/reset/intro).
+
+## Security
+
+Portpass's threat model, known limitations, and guidance on protecting yourself from malicious browser extensions are documented in [SECURITY.md](SECURITY.md).
 
 ## Credits
 
