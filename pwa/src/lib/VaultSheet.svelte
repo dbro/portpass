@@ -198,7 +198,7 @@
     <div class="about-row">
       <img src="{import.meta.env.BASE_URL}icon.svg" alt="Portpass" class="about-icon" />
       <div class="about-info">
-        <div class="about-name">Portpass <span class="about-version muted">v{__APP_VERSION__}</span></div>
+        <div class="about-name">Portpass <span class="about-version muted">{__APP_VERSION__}</span></div>
         <a
           class="about-url muted"
           href="https://dbro.github.io/portpass"
