@@ -225,7 +225,7 @@
 
     <label class="field">
       <span class="field-label muted">Notes</span>
-      <textarea class="input" rows={4} value={draft.Notes}
+      <textarea class="input mono" rows={4} value={draft.Notes}
         oninput={e => set('Notes', e.target.value)}></textarea>
     </label>
 

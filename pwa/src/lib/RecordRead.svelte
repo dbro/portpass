@@ -5,8 +5,9 @@
 
   let { record, uuid, isDesktop, onback, onedit, oncopy } = $props()
 
-  let revealed     = $state(false)
-  let showHistory  = $state(false)
+  let revealed      = $state(false)
+  let showHistory   = $state(false)
+  let notesRevealed = $state(false)
   let copiedField  = $state(null)
   let copiedToken  = null
   let animVariant  = $state(0)  // alternates 0/1 on each copy to force animation restart
@@ -209,8 +210,13 @@
 
   {#if record.Notes}
     <div class="record-notes">
-      <div class="copy-row-label muted">Notes</div>
-      <div class="notes-text">{record.Notes}</div>
+      <div class="notes-label-row">
+        <span class="copy-row-label muted">Notes</span>
+        <button class="icon-btn-flat" onclick={() => notesRevealed = !notesRevealed} aria-label={notesRevealed ? 'Hide notes' : 'Reveal notes'}>
+          <Icon name={notesRevealed ? 'eye-off' : 'eye'} size={16}/>
+        </button>
+      </div>
+      <div class="notes-text mono">{notesRevealed ? record.Notes : record.Notes.replace(/[^\n]/g, '•')}</div>
     </div>
   {/if}
 
@@ -220,6 +226,15 @@
 </div>
 
 <style>
+  .notes-label-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 4px;
+  }
+  .notes-label-row .copy-row-label {
+    margin-bottom: 0;
+  }
   .history-toggle {
     background: none;
     border: none;

@@ -303,6 +303,7 @@
 .vault-app .input-wrap .input:focus { border: none; box-shadow: none; }
 .vault-app .input-wrap .icon-btn-flat { flex: 0 0 auto; margin-right: 4px; }
 .vault-app textarea.input { resize: vertical; font-family: inherit; }
+.vault-app .input.mono { font-family: var(--font-mono); }
 
 /* VAULT SHEET */
 .vault-app .sheet-backdrop {
