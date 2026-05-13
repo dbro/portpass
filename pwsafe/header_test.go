@@ -3,7 +3,6 @@ package pwsafe
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -84,12 +83,10 @@ func TestUnmarshalHeader_UnknownFieldType(t *testing.T) {
 	headerBytes = append(headerBytes, endFieldBytes...)
 
 	// var h header // h is not used when only checking for error
-	_, _, _, err := UnmarshalHeader(headerBytes)
+	h, _, _, err := UnmarshalHeader(headerBytes)
 
-	assert.NotNil(t, err, "UnmarshalHeader should return an error for unknown field type")
-	// Based on header.go, the error for unknown field type:
-	expectedError := fmt.Sprintf("encountered unknown Header Field type - %v", 0xFE)
-	assert.Equal(t, expectedError, err.Error(), "Error message mismatch")
+	assert.Nil(t, err, "UnmarshalHeader should not error on unknown field type")
+	assert.Equal(t, unknownFieldData, h.UnknownFields[0xFE], "Unknown field should be preserved")
 }
 
 func TestUnmarshalHeader_FieldLengthExceedsData(t *testing.T) {

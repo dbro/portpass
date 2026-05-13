@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"golang.org/x/crypto/twofish"
@@ -61,10 +62,11 @@ type Record struct {
 	ProtectedEntry         byte      // 0x15
 	RunCommand             string    // 0x12
 	ShiftDoubleClickAction [2]byte   // 0x17
-	Title                  string    // 0x03
-	Username               string    // 0x04
-	URL                    string    // 0x0d
-	UUID                   [16]byte  // 0x01
+	Title                  string         // 0x03
+	Username               string         // 0x04
+	URL                    string         // 0x0d
+	UUID                   [16]byte       // 0x01
+	UnknownFields          map[byte][]byte // forward compatibility: fields not yet parsed
 }
 
 // setField sets the field value based on the ID
@@ -137,7 +139,10 @@ func (r *Record) setField(id byte, data []byte) error {
 	case recordPasswordPolicyName:
 		r.PasswordPolicyName = string(data)
 	default:
-		return fmt.Errorf("encountered unknown Record Field type - %v", id)
+		if r.UnknownFields == nil {
+			r.UnknownFields = make(map[byte][]byte)
+		}
+		r.UnknownFields[id] = append([]byte(nil), data...)
 	}
 	return nil
 }
@@ -207,6 +212,17 @@ func (r *Record) marshal() ([]byte, []byte, error) {
 	appendField(recordOwnSymbolsForPassword, []byte(r.OwnSymbolsForPassword))
 	appendField(recordShiftDoubleClickAction, r.ShiftDoubleClickAction[:])
 	appendField(recordPasswordPolicyName, []byte(r.PasswordPolicyName))
+
+	if len(r.UnknownFields) > 0 {
+		keys := make([]byte, 0, len(r.UnknownFields))
+		for k := range r.UnknownFields {
+			keys = append(keys, k)
+		}
+		sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+		for _, k := range keys {
+			appendField(k, r.UnknownFields[k])
+		}
+	}
 
 	// End of entry
 	recordBuf.Write([]byte{0, 0, 0, 0})
