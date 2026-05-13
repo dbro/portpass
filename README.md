@@ -2,7 +2,7 @@
 
 *A simple password manager that keeps your data in your control, across all your devices.*
 
-<img src="https://github.com/user-attachments/assets/bfa7c2cf-da97-46ca-9393-7f3d86b45640" width="65%" alt="Screenshots of mobile layouts">
+<img src="https://github.com/user-attachments/assets/43b73bbf-a035-4d9c-aa34-652f8e02b264" width="65%" alt="Screenshots of mobile layouts">
 
 **Free and open source. Try it: [https://dbro.github.io/portpass](https://dbro.github.io/portpass)**
 

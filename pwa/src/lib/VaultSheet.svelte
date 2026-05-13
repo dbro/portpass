@@ -79,8 +79,9 @@
   let passwordCount = $derived($dbItems.length)
   let groupCount    = $derived(new Set($dbItems.map(i => i.group).filter(Boolean)).size)
 
-  let draftName = $state(info?.name        ?? '')
-  let draftDesc = $state(info?.description ?? '')
+  let draftName  = $state(info?.name        ?? '')
+  let draftDesc  = $state(info?.description ?? '')
+  let showNotes  = $state(!!(info?.description))
 
   let origName = info?.name        ?? ''
   let origDesc = info?.description ?? ''
@@ -127,7 +128,6 @@
 
 <div class="record-body vault-settings-body">
   <div class="vault-section">
-    <div class="vault-section-title">VAULT</div>
     <div class="vault-inputs">
       <label class="vault-field">
         <span class="vault-label muted">Name</span>
@@ -138,16 +138,20 @@
           placeholder="My vault"
         />
       </label>
-      <label class="vault-field">
-        <span class="vault-label muted">Notes</span>
-        <textarea
-          class="input"
-          rows={3}
-          value={draftDesc}
-          oninput={e => draftDesc = e.target.value}
-          placeholder="Optional description"
-        ></textarea>
-      </label>
+      {#if showNotes}
+        <label class="vault-field">
+          <span class="vault-label muted">Notes</span>
+          <textarea
+            class="input"
+            rows={3}
+            value={draftDesc}
+            oninput={e => draftDesc = e.target.value}
+            placeholder="Optional description"
+          ></textarea>
+        </label>
+      {:else}
+        <button class="vault-add-notes" onclick={() => showNotes = true}>+ Add notes</button>
+      {/if}
     </div>
     <div class="vault-file">
       <span class="vault-file-label">FILE</span>
@@ -330,6 +334,16 @@
 
   .vault-label {
     font-size: 14px;
+  }
+
+  .vault-add-notes {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--accent);
+    padding: 4px 0;
+    text-align: left;
   }
 
   .vault-file {
