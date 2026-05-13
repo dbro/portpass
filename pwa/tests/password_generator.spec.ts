@@ -3,7 +3,7 @@ import { openVault, createVault } from './helpers'
 
 async function openEditWithGenerator(page) {
   await createVault(page)
-  await page.getByRole('button', { name: 'New record' }).click()
+  await page.getByRole('button', { name: 'New', exact: true }).click()
   await page.getByPlaceholder('e.g. Bank of America').fill('Gen Test')
 }
 

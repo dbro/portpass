@@ -26,14 +26,34 @@
   let isDirty      = $state(false)
   let editDirty    = $state(false)
   let vaultDirty   = $state(false)
-  let dbName = $state('')
-  let dbKey  = $state('')
+  let dbName   = $state('')
+  let dbKey    = $state('')
+  let lastSave = $state('')
+
+  let passwordCount = $derived($dbItems.length)
+  let groupCount    = $derived(new Set($dbItems.map(i => i.group).filter(Boolean)).size)
+
+  function relSaveTime(when) {
+    if (!when) return ''
+    // Go time.String() format: "2006-01-02 15:04:05.999 +0000 UTC m=+..."
+    const s = when.replace(/ m=[+-][\d.]+$/, '').replace(/\.\d+/, '').replace(/ [A-Z]{2,5}$/, '')
+    const d = new Date(s)
+    if (isNaN(d.getTime())) return ''
+    const diff = (Date.now() - d) / 1000
+    if (diff < 60)       return 'just now'
+    if (diff < 3600)     return `${Math.floor(diff / 60)}m ago`
+    if (diff < 86400)    return `${Math.floor(diff / 3600)}h ago`
+    if (diff < 86400*7)  return `${Math.floor(diff / 86400)}d ago`
+    if (diff < 86400*30) return `${Math.floor(diff / (86400*7))}w ago`
+    return d.toLocaleDateString()
+  }
 
   onMount(() => {
     try {
       const info = getDatabaseInfo()
-      dbName = info?.name ?? ''
-      dbKey  = info?.uuid ?? ''
+      dbName   = info?.name ?? ''
+      dbKey    = info?.uuid ?? ''
+      lastSave = info?.when ?? ''
     } catch (e) {}
     document.addEventListener('visibilitychange', onVisibilityChange)
     window.addEventListener('focus', onWindowFocus)
@@ -200,6 +220,7 @@
       await w.write(data)
       await w.close()
       isDirty = false
+      try { lastSave = getDatabaseInfo()?.when ?? '' } catch {}
       if (!silent) showToast('Vault saved')
     } catch (e) {
       if (e.name !== 'AbortError') showToast('Save failed: ' + e.message)
@@ -359,15 +380,15 @@
   <RecordList {query} {selectedUUID} excludeUUID={pendingDeleteUUID} storageKey={dbKey} ontap={selectRecord} oncopy={copyToClipboard}/>
 
   <!-- FAB (mobile) -->
-  <button class="fab" onclick={startNew} aria-label="New record">
+  <button class="fab" onclick={startNew} aria-label="New">
     <Icon name="plus" size={22} stroke="var(--accent-on)"/>
   </button>
 
-  <!-- New record button (desktop, bottom of left panel) -->
+  <!-- New button (desktop, bottom of left panel) -->
   {#if isDesktop}
     <button class="desktop-new-btn" onclick={startNew}>
       <Icon name="plus" size={18}/>
-      <span>New record</span>
+      <span>New</span>
     </button>
   {/if}
 </div>
@@ -408,6 +429,29 @@
       />
     {/key}
   {:else if isDesktop}
-    <div class="record-empty">Select a record</div>
+    <div class="record-empty">
+      <img src="{import.meta.env.BASE_URL}icon-512.png" alt="Portpass" class="empty-logo"/>
+      {#if passwordCount === 0}
+        <div class="empty-prompt muted">Add your first password</div>
+        <div class="empty-nudge muted">↙</div>
+      {:else}
+        <div class="empty-stats">
+          <div class="empty-stat">
+            <span class="empty-num">{passwordCount}</span>
+            <span class="empty-label muted">passwords</span>
+          </div>
+          {#if groupCount > 0}
+            <div class="empty-divider"></div>
+            <div class="empty-stat">
+              <span class="empty-num">{groupCount}</span>
+              <span class="empty-label muted">groups</span>
+            </div>
+          {/if}
+        </div>
+        {#if lastSave}
+          <div class="empty-save muted">Last saved {relSaveTime(lastSave)}</div>
+        {/if}
+      {/if}
+    </div>
   {/if}
 </div>

@@ -181,6 +181,24 @@
 .vault-app .record-row-title { font-size: 16px; font-weight: 500; color: var(--text); }
 .vault-app .record-row-sub { font-size: 13px; }
 .vault-app .empty-state { padding: 48px 24px; text-align: center; font-size: 14px; }
+.vault-app .empty-vault {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 80px;
+  gap: 16px;
+}
+.vault-app .empty-vault-logo {
+  width: 80px;
+  height: 80px;
+  border-radius: 18px;
+}
+.vault-app .empty-vault-prompt { font-size: 15px; }
+.vault-app .empty-vault-nudge {
+  font-size: 28px;
+  line-height: 1;
+  transform: translateX(-24px);
+}
 
 /* RECORD SCREEN */
 .vault-app .record-screen {
@@ -480,8 +498,52 @@
 }
 .vault-app.is-desktop .desktop-new-btn:hover { opacity: 0.9; }
 .vault-app.is-desktop .record-empty {
-  height: 100%; display: flex; align-items: center; justify-content: center;
-  color: var(--text-soft); font-size: 15px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+}
+.vault-app.is-desktop .empty-logo {
+  width: 96px;
+  height: 96px;
+  border-radius: 20px;
+}
+.vault-app.is-desktop .empty-stats {
+  display: flex;
+  align-items: center;
+  gap: 36px;
+}
+.vault-app.is-desktop .empty-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.vault-app.is-desktop .empty-num {
+  font-size: 48px;
+  font-weight: 700;
+  line-height: 1;
+}
+.vault-app.is-desktop .empty-label {
+  font-size: 14px;
+}
+.vault-app.is-desktop .empty-divider {
+  width: 1px;
+  height: 56px;
+  background: var(--border);
+}
+.vault-app.is-desktop .empty-save {
+  font-size: 14px;
+}
+.vault-app.is-desktop .empty-prompt {
+  font-size: 15px;
+}
+.vault-app.is-desktop .empty-nudge {
+  font-size: 28px;
+  line-height: 1;
+  transform: translateX(-24px);
 }
 
 /* DESKTOP — start/unlock logo padding */

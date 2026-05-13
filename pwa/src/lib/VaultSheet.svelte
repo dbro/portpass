@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { getDatabaseInfo, openDatabase } from '../wasm.js'
-  import { selectedFile } from '../store.js'
+  import { selectedFile, dbItems } from '../store.js'
   import { isBiometricSupported, isBiometricEnrolled, enrollBiometric, clearBiometric } from './biometric.js'
   import Icon from './Icon.svelte'
 
@@ -75,6 +75,9 @@
 
   // Fetch once on mount — VaultSheet is only rendered while vault is open
   let info = (() => { try { return getDatabaseInfo() } catch { return null } })()
+
+  let passwordCount = $derived($dbItems.length)
+  let groupCount    = $derived(new Set($dbItems.map(i => i.group).filter(Boolean)).size)
 
   let draftName = $state(info?.name        ?? '')
   let draftDesc = $state(info?.description ?? '')
@@ -194,6 +197,23 @@
   {/if}
 
   <div class="vault-section">
+    <div class="vault-section-title">CONTENTS</div>
+    <div class="vault-stats">
+      <div class="vault-stat">
+        <span class="vault-stat-num">{passwordCount}</span>
+        <span class="vault-stat-label muted">passwords</span>
+      </div>
+      {#if groupCount > 0}
+        <div class="vault-stat-divider"></div>
+        <div class="vault-stat">
+          <span class="vault-stat-num">{groupCount}</span>
+          <span class="vault-stat-label muted">groups</span>
+        </div>
+      {/if}
+    </div>
+  </div>
+
+  <div class="vault-section">
     <div class="vault-section-title">ABOUT</div>
     <div class="about-row">
       <img src="{import.meta.env.BASE_URL}icon.svg" alt="Portpass" class="about-icon" />
@@ -259,6 +279,34 @@
     letter-spacing: 0.06em;
     color: var(--text-soft);
     margin-bottom: 12px;
+  }
+
+  .vault-stats {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+  }
+
+  .vault-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .vault-stat-num {
+    font-size: 32px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .vault-stat-label {
+    font-size: 13px;
+  }
+
+  .vault-stat-divider {
+    width: 1px;
+    height: 40px;
+    background: var(--border);
   }
 
   .vault-inputs {
