@@ -38,6 +38,11 @@ const (
 	recordOwnSymbolsForPassword  = 0x16
 	recordShiftDoubleClickAction = 0x17
 	recordPasswordPolicyName     = 0x18
+	recordTwoFactorKey           = 0x1b
+	recordTOTPConfig             = 0x21
+	recordTOTPLength             = 0x22
+	recordTOTPTimeStep           = 0x23
+	recordTOTPStartTime          = 0x24
 	recordEndOfEntry             = 0xff
 )
 
@@ -62,10 +67,15 @@ type Record struct {
 	ProtectedEntry         byte      // 0x15
 	RunCommand             string    // 0x12
 	ShiftDoubleClickAction [2]byte   // 0x17
-	Title                  string         // 0x03
-	Username               string         // 0x04
-	URL                    string         // 0x0d
-	UUID                   [16]byte       // 0x01
+	Title                  string          // 0x03
+	TOTPConfig             byte            // 0x21 bits 0-1: algorithm (0=SHA1)
+	TOTPLength             byte            // 0x22 digit count (default 6)
+	TOTPStartTime          time.Time       // 0x24 T0 (default epoch)
+	TOTPTimeStep           byte            // 0x23 seconds (default 30)
+	TwoFactorKey           []byte          // 0x1b raw TOTP secret
+	Username               string          // 0x04
+	URL                    string          // 0x0d
+	UUID                   [16]byte        // 0x01
 	UnknownFields          map[byte][]byte // forward compatibility: fields not yet parsed
 }
 
@@ -138,6 +148,30 @@ func (r *Record) setField(id byte, data []byte) error {
 		copy(r.ShiftDoubleClickAction[:], data)
 	case recordPasswordPolicyName:
 		r.PasswordPolicyName = string(data)
+	case recordTwoFactorKey:
+		r.TwoFactorKey = append([]byte(nil), data...)
+	case recordTOTPConfig:
+		if len(data) >= 1 {
+			r.TOTPConfig = data[0]
+		}
+	case recordTOTPLength:
+		if len(data) >= 1 {
+			r.TOTPLength = data[0]
+		}
+	case recordTOTPTimeStep:
+		if len(data) >= 1 {
+			r.TOTPTimeStep = data[0]
+		}
+	case recordTOTPStartTime:
+		if len(data) >= 5 {
+			var ts uint64
+			for i := 0; i < 5; i++ {
+				ts |= uint64(data[i]) << (uint(i) * 8)
+			}
+			if ts > 0 {
+				r.TOTPStartTime = time.Unix(int64(ts), 0)
+			}
+		}
 	default:
 		if r.UnknownFields == nil {
 			r.UnknownFields = make(map[byte][]byte)
@@ -212,6 +246,29 @@ func (r *Record) marshal() ([]byte, []byte, error) {
 	appendField(recordOwnSymbolsForPassword, []byte(r.OwnSymbolsForPassword))
 	appendField(recordShiftDoubleClickAction, r.ShiftDoubleClickAction[:])
 	appendField(recordPasswordPolicyName, []byte(r.PasswordPolicyName))
+
+	if len(r.TwoFactorKey) > 0 {
+		appendField(recordTwoFactorKey, r.TwoFactorKey)
+		appendField(recordTOTPConfig, []byte{r.TOTPConfig})
+		length := r.TOTPLength
+		if length == 0 {
+			length = 6
+		}
+		appendField(recordTOTPLength, []byte{length})
+		step := r.TOTPTimeStep
+		if step == 0 {
+			step = 30
+		}
+		appendField(recordTOTPTimeStep, []byte{step})
+		if !r.TOTPStartTime.IsZero() {
+			ts := uint64(r.TOTPStartTime.Unix())
+			tsBytes := make([]byte, 5)
+			for i := 0; i < 5; i++ {
+				tsBytes[i] = byte(ts >> (uint(i) * 8))
+			}
+			appendField(recordTOTPStartTime, tsBytes)
+		}
+	}
 
 	if len(r.UnknownFields) > 0 {
 		keys := make([]byte, 0, len(r.UnknownFields))

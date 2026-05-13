@@ -103,3 +103,7 @@ export function searchRecords(query, namesOnly) {
 export function getAutocompleteSuggestion(field, prefix) {
     return window.getSuggestion(field, prefix) || ''
 }
+
+export function getTOTP(uuid) {
+    return parseOrThrow(window.getTOTP(uuid))
+}

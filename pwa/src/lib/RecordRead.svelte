@@ -1,13 +1,38 @@
 <script>
+  import { onMount, tick } from 'svelte'
   import { get } from 'svelte/store'
   import { clipboardSession, clipboardContext } from '../store.js'
+  import { getTOTP } from '../wasm.js'
   import Icon from './Icon.svelte'
 
-  let { record, uuid, isDesktop, onback, onedit, oncopy } = $props()
+  let { record, uuid, isDesktop, onback, onedit, oncopy, oncopytotp } = $props()
 
   let revealed      = $state(false)
   let showHistory   = $state(false)
   let notesRevealed = $state(false)
+  let totpData       = $state(null)   // { code, seconds, period } | null
+  let totpRevealed   = $state(false)
+  let totpBarInstant = $state(false)
+  let totpPrevSeconds = -1
+
+  $effect(() => {
+    if (!record.TwoFactorKey) return
+    function refresh() {
+      try {
+        const data = getTOTP(uuid)
+        // Detect period rollover — snap the bar instantly instead of animating
+        if (totpPrevSeconds > 0 && data.seconds > totpPrevSeconds + 5) {
+          totpBarInstant = true
+          setTimeout(() => totpBarInstant = false, 50)
+        }
+        totpPrevSeconds = data.seconds
+        totpData = data
+      } catch { totpData = null }
+    }
+    refresh()
+    const id = setInterval(refresh, 1000)
+    return () => clearInterval(id)
+  })
   let copiedField  = $state(null)
   let copiedToken  = null
   let animVariant  = $state(0)  // alternates 0/1 on each copy to force animation restart
@@ -40,7 +65,9 @@
     ;(async () => {
       const history = parseHistory(record.PasswordHistory)
       let value
-      if (ctx.field.startsWith('history-')) {
+      if (ctx.field === 'otp') {
+        value = totpData?.code
+      } else if (ctx.field.startsWith('history-')) {
         const ts = parseInt(ctx.field.slice(8))
         value = history.find(e => e.ts === ts)?.password
       } else {
@@ -49,21 +76,31 @@
       if (!value) return
       if (hashesEqual(await sha256(value), new Uint8Array(ctx.hash))
           && get(clipboardSession)?.token === ctx.token) {
+        copiedToken = ctx.token  // claim before yielding
+        copiedField = null
+        await tick()
+        if (get(clipboardSession)?.token !== ctx.token) return
         animVariant ^= 1
         copiedField = ctx.field
-        copiedToken = ctx.token
       }
     })()
   })
+
+  async function handleTOTPCopy() {
+    if (!totpData?.code) return
+    await oncopytotp(uuid)
+  }
 
   async function handleCopy(value, field) {
     const token = await oncopy(value)
     if (token !== null) {
       const hash = Array.from(await sha256(value))
       clipboardContext.set({ token, field, uuid, hash })
-      animVariant ^= 1   // flip name so browser treats it as a fresh animation
+      copiedToken = token  // claim before yielding — restore effect guard bails
+      copiedField = null
+      await tick()
+      animVariant ^= 1
       copiedField = field
-      copiedToken = token
     }
   }
 
@@ -73,7 +110,7 @@
     const remaining = Math.max(50, s.expiresAt - Date.now())
     const elapsed   = Math.max(0, 30000 - remaining)
     const flash = elapsed > 100 ? '0ms' : '450ms'
-    return `--clip-delay: -${elapsed}ms; --drain-name: clip-drain-${animVariant}; --flash-duration: ${flash}`
+    return `--clip-delay: -${elapsed}ms; --drain-name: clip-drain-${animVariant}; --flash-name: clip-flash-${animVariant}; --flash-duration: ${flash}`
   }
 
   function relTime(str) {
@@ -206,6 +243,38 @@
         </div>
       </div>
     {/if}
+
+  {#if record.TwoFactorKey}
+    <div class="copy-row" class:clipboard-active={copiedField === 'otp'}
+      style={copiedField === 'otp' ? `--drain-name: clip-drain-${animVariant}; --flash-name: clip-flash-${animVariant}; --clip-delay: -30000ms; --flash-duration: 450ms` : ''}>
+      <div class="copy-row-label muted">One-time code</div>
+      <div class="copy-row-main">
+        <button class="copy-row-value" onclick={handleTOTPCopy}>
+          <span class="mono">
+            {#if totpData}
+              {totpRevealed ? totpData.code : '•'.repeat(totpData.code.length)}
+            {:else}
+              <span class="muted">—</span>
+            {/if}
+          </span>
+        </button>
+        <div class="copy-row-actions">
+          <button class="icon-btn-flat" onclick={() => totpRevealed = !totpRevealed} aria-label={totpRevealed ? 'Hide code' : 'Reveal code'}>
+            <Icon name={totpRevealed ? 'eye-off' : 'eye'} size={18}/>
+          </button>
+          <button class="icon-btn-flat copy-btn" onclick={handleTOTPCopy} aria-label="Copy one-time code" disabled={!totpData}>
+            <Icon name="copy" size={18}/>
+          </button>
+        </div>
+      </div>
+      {#if totpData}
+        <div class="totp-bar">
+          <div class="totp-bar-fill" class:totp-instant={totpBarInstant}
+            style="width:{(totpData.seconds / totpData.period) * 100}%"></div>
+        </div>
+      {/if}
+    </div>
+  {/if}
   </div>
 
   {#if record.Notes}
@@ -226,6 +295,21 @@
 </div>
 
 <style>
+  .totp-bar {
+    height: 2px;
+    background: var(--border);
+    border-radius: 1px;
+    margin-top: 6px;
+    overflow: hidden;
+  }
+  .totp-bar-fill {
+    height: 100%;
+    background: var(--text-soft);
+    border-radius: 1px;
+    transition: width 1s linear;
+  }
+  .totp-bar-fill.totp-instant { transition: none; }
+
   .notes-label-row {
     display: flex;
     align-items: center;

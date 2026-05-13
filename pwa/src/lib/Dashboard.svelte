@@ -1,10 +1,11 @@
 <script>
   import { onMount } from 'svelte'
+  import { get } from 'svelte/store'
   import { selectedFile, dbItems, toast, clipboardSession, clipboardContext } from '../store.js'
   import {
     getRecordData, getDatabaseData, saveDatabase, getDatabaseInfo,
     updateRecordFields, updateDBFields, deleteRecord as wasmDeleteRecord,
-    searchRecords,
+    searchRecords, getTOTP,
   } from '../wasm.js'
   import Icon from './Icon.svelte'
   import RecordList from './RecordList.svelte'
@@ -289,9 +290,16 @@
     }
   }
 
-  async function copyToClipboard(value) {
+  async function copyToClipboard(value, { skipAutoclear = false } = {}) {
     try {
       await navigator.clipboard.writeText(value)
+      if (skipAutoclear) {
+        if (clearTimer) { clearTimeout(clearTimer); clearTimer = null }
+        clipHash = null
+        clipboardSession.set(null)
+        clipboardContext.set(null)
+        return null
+      }
       clipHash = await sha256(value)
       const token = ++sessionSerial
       clipboardSession.set({ token, expiresAt: Date.now() + 30000 })
@@ -305,6 +313,33 @@
       showToast('Copy failed')
       return null
     }
+  }
+
+  async function copyTOTPForUUID(uuid) {
+    try {
+      const totp = getTOTP(uuid)
+      await navigator.clipboard.writeText(totp.code)
+      if (clearTimer) { clearTimeout(clearTimer); clearTimer = null }
+      clipHash = null
+      const token = ++sessionSerial
+      const h = Array.from(await sha256(totp.code))
+      // Short session drives the visual flash only — no autoclear timer
+      clipboardSession.set({ token, expiresAt: Date.now() + 500 })
+      clipboardContext.set({ token, field: 'otp', uuid, hash: h })
+      setTimeout(() => {
+        if (get(clipboardSession)?.token === token) {
+          clipboardSession.set(null)
+          clipboardContext.set(null)
+        }
+      }, 500)
+    } catch {
+      showToast('Copy failed')
+    }
+  }
+
+  async function copyTOTP() {
+    if (!record?.TwoFactorKey) return
+    await copyTOTPForUUID(selectedUUID)
   }
 
 
@@ -449,6 +484,7 @@
     }
     if (e.ctrlKey && e.key === 'b') { e.preventDefault(); copyRecordField('Username'); return }
     if (e.ctrlKey && e.key === 'u') { e.preventDefault(); copyRecordField('URL'); return }
+    if (e.ctrlKey && e.key === 't') { e.preventDefault(); copyTOTP(); return }
     if (e.ctrlKey && e.key === 'e') { e.preventDefault(); startEdit(); return }
   }
 </script>
@@ -487,7 +523,7 @@
     {/if}
   </div>
 
-  <RecordList {query} {selectedUUID} excludeUUID={pendingDeleteUUID} storageKey={dbKey} ontap={selectRecord} oncopy={copyToClipboard}/>
+  <RecordList {query} {selectedUUID} excludeUUID={pendingDeleteUUID} storageKey={dbKey} ontap={selectRecord} oncopy={copyToClipboard} oncopytotp={copyTOTPForUUID}/>
 
   <!-- FAB (mobile) -->
   <button class="fab" onclick={startNew} aria-label="New">
@@ -527,6 +563,7 @@
         <div class="help-row"><span>Copy password</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>C</kbd></div></div>
         <div class="help-row"><span>Copy username</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>B</kbd></div></div>
         <div class="help-row"><span>Copy URL</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>U</kbd></div></div>
+        <div class="help-row"><span>Copy one-time code</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>T</kbd></div></div>
         <div class="help-row"><span>Edit entry</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>E</kbd></div></div>
         <div class="help-row"><span>Lock vault</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>L</kbd></div></div>
         <div class="help-row"><span>Clear search / close</span><div class="help-keys"><kbd>Esc</kbd></div></div>
@@ -569,6 +606,7 @@
         onback={() => { record = null; selectedUUID = null }}
         onedit={startEdit}
         oncopy={copyToClipboard}
+        oncopytotp={copyTOTPForUUID}
       />
     {/key}
   {:else if isDesktop}

@@ -220,7 +220,8 @@
 /* Width-only drain — opacity stays constant so colour doesn't fade */
 @keyframes clip-drain-0 { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 @keyframes clip-drain-1 { from { transform: scaleX(1); } to { transform: scaleX(0); } }
-@keyframes clip-flash   { from { opacity: 0.7; } to { opacity: 0; } }
+@keyframes clip-flash-0 { from { opacity: 0.7; } to { opacity: 0; } }
+@keyframes clip-flash-1 { from { opacity: 0.7; } to { opacity: 0; } }
 
 /* Text turns accent while the clipboard is active, reverts when class is removed */
 .vault-app .copy-row.clipboard-active .copy-row-label,
@@ -247,7 +248,7 @@
   content: ''; position: absolute; inset: 0; border-radius: inherit;
   background: var(--accent);
   z-index: -1; pointer-events: none;
-  animation: clip-flash var(--flash-duration, 450ms) ease-out forwards;
+  animation: var(--flash-name, clip-flash-0) var(--flash-duration, 450ms) ease-out forwards;
 }
 
 .vault-app .copy-rows { display: flex; flex-direction: column; gap: 14px; }
