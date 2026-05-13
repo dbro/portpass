@@ -40,7 +40,7 @@ test.describe('Unlock screen', () => {
   test('create new vault opens empty dashboard', async ({ page }) => {
     await createVault(page)
     await expect(page.getByPlaceholder('Search vault')).toBeVisible()
-    await expect(page.locator('.empty-state')).toBeVisible()
+    await expect(page.locator('.empty-vault')).toBeVisible()
   })
 
   test('Enter key submits password', async ({ page }) => {
