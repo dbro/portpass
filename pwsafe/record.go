@@ -163,12 +163,8 @@ func (r *Record) setField(id byte, data []byte) error {
 	case recordCustomTextField:
 		r.CustomFields = parseCustomFields(string(data))
 	case recordTwoFactorKey:
-		// Official PasswordSafe stores field 0x1b as the base32-encoded string.
-		// Portpass previously stored raw bytes; try base32 decode first, fall back.
-		if decoded, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(string(data))); err == nil && len(decoded) > 0 {
+		if decoded, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(string(data))); err == nil {
 			r.TwoFactorKey = decoded
-		} else {
-			r.TwoFactorKey = append([]byte(nil), data...)
 		}
 	case recordTOTPConfig:
 		if len(data) >= 1 {

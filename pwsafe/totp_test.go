@@ -2,6 +2,7 @@ package pwsafe
 
 import (
 	"bytes"
+	"encoding/base32"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -67,7 +68,8 @@ func TestRecord_TOTPFields_SetField(t *testing.T) {
 	t.Run("TwoFactorKey", func(t *testing.T) {
 		r := &Record{}
 		key := []byte{0xde, 0xad, 0xbe, 0xef}
-		assert.NoError(t, r.setField(recordTwoFactorKey, key))
+		encoded := []byte(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(key))
+		assert.NoError(t, r.setField(recordTwoFactorKey, encoded))
 		assert.Equal(t, key, r.TwoFactorKey)
 	})
 
