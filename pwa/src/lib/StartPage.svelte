@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import { get as idbGet, set as idbSet } from 'idb-keyval'
+  import { get as idbGet, set as idbSet, del as idbDel } from 'idb-keyval'
   import { openDatabase, createDatabase, getDatabaseData, getDatabaseInfo } from '../wasm.js'
   import { selectedFile, dbItems } from '../store.js'
   import {
@@ -35,12 +35,9 @@
     try {
       const handle = await idbGet('lastHandle')
       if (!handle) return
-      const perm = await handle.queryPermission({ mode: 'read' })
-      if (perm === 'granted') {
-        fileHandle = handle
-        mode = 'unlock'
-        biometricEnrolled = await isBiometricEnrolledForFile(handle.name)
-      }
+      fileHandle = handle
+      mode = 'unlock'
+      biometricEnrolled = await isBiometricEnrolledForFile(handle.name)
     } catch {}
   })
 
@@ -75,7 +72,13 @@
     if (!password || !fileHandle) return
     busy = true; error = ''
     try {
-      const file = await fileHandle.getFile()
+      const perm = await fileHandle.requestPermission({ mode: 'read' })
+      if (perm !== 'granted') { error = 'File access was denied.'; return }
+      let file
+      try { file = await fileHandle.getFile() } catch (e) {
+        if (e.name === 'NotFoundError') { await handleFileMissing(); return }
+        throw e
+      }
       const buf  = await file.arrayBuffer()
       openDatabase(new Uint8Array(buf), password)
       dbItems.set(getDatabaseData())
@@ -101,7 +104,13 @@
         console.error(e)
         return
       }
-      const file = await fileHandle.getFile()
+      const perm = await fileHandle.requestPermission({ mode: 'read' })
+      if (perm !== 'granted') { error = 'File access was denied.'; return }
+      let file
+      try { file = await fileHandle.getFile() } catch (e) {
+        if (e.name === 'NotFoundError') { await handleFileMissing(); return }
+        throw e
+      }
       const buf  = await file.arrayBuffer()
       try {
         openDatabase(new Uint8Array(buf), pw)
@@ -152,6 +161,12 @@
 
   function switchFile() {
     fileHandle = null; password = ''; error = ''; mode = 'landing'
+  }
+
+  async function handleFileMissing() {
+    try { await idbDel('lastHandle') } catch {}
+    fileHandle = null; password = ''; mode = 'landing'
+    error = 'Vault file not found — it may have been moved or deleted.'
   }
 </script>
 
