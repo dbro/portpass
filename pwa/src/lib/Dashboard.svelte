@@ -405,6 +405,16 @@
     }
   }
 
+  async function copyCustomField(index) {
+    const cf = record?.CustomFields?.[index]
+    if (!cf?.Value) return
+    const token = await copyToClipboard(cf.Value)
+    if (token !== null) {
+      const hash = Array.from(await sha256(cf.Value))
+      clipboardContext.set({ token, field: `custom-${index}`, uuid: selectedUUID, hash })
+    }
+  }
+
   async function handleKeydown(e) {
     const inInput = e.target.matches('input, textarea, select, [contenteditable]')
     const inSearch = e.target === searchInput
@@ -486,6 +496,7 @@
     if (e.ctrlKey && e.key === 'u') { e.preventDefault(); copyRecordField('URL'); return }
     if (e.ctrlKey && e.key === 't') { e.preventDefault(); copyTOTP(); return }
     if (e.ctrlKey && e.key === 'e') { e.preventDefault(); startEdit(); return }
+    if (e.ctrlKey && e.key >= '1' && e.key <= '9') { e.preventDefault(); copyCustomField(parseInt(e.key) - 1); return }
   }
 </script>
 
@@ -564,6 +575,7 @@
         <div class="help-row"><span>Copy username</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>B</kbd></div></div>
         <div class="help-row"><span>Copy URL</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>U</kbd></div></div>
         <div class="help-row"><span>Copy one-time code</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>T</kbd></div></div>
+        <div class="help-row"><span>Copy custom field 1–9</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>1–9</kbd></div></div>
         <div class="help-row"><span>Edit entry</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>E</kbd></div></div>
         <div class="help-row"><span>Lock vault</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>L</kbd></div></div>
         <div class="help-row"><span>Clear search / close</span><div class="help-keys"><kbd>Esc</kbd></div></div>

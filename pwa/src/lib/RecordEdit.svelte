@@ -59,6 +59,9 @@
   let totpSecret   = $state(untrack(() => base64ToBase32(record?.TwoFactorKey ?? '')))
   let totpDigits   = $state(untrack(() => record?.TOTPLength || 6))
   let totpPeriod   = $state(untrack(() => record?.TOTPTimeStep || 30))
+
+  // Custom fields — independent editable copy of initial prop value
+  let customFields = $state(untrack(() => (record?.CustomFields ?? []).slice(0, 9).map(cf => ({ Name: cf.Name, Value: cf.Value, Sensitive: !!cf.Sensitive }))))
   let totpGearOpen = $state(false)
   let totpRevealed = $state(false)
   let totpError    = $state('')
@@ -118,14 +121,23 @@
     (totpDigits !== (record?.TOTPLength || 6)) ||
     (totpPeriod !== (record?.TOTPTimeStep || 30))
   )
-  let dirty   = $derived(!record || Object.keys(draft).some(k => (record[k] ?? '') !== draft[k]) || totpChanged)
-  let canSave = $derived(dirty && !!draft.Title && !totpError)
+  let customFieldsDirty = $derived.by(() => {
+    const orig = (record?.CustomFields ?? []).slice(0, 9)
+    if (orig.length !== customFields.length) return true
+    return customFields.some((cf, i) =>
+      cf.Name !== orig[i].Name || cf.Value !== orig[i].Value || cf.Sensitive !== !!orig[i].Sensitive
+    )
+  })
+  let dirty   = $derived(!record || Object.keys(draft).some(k => (record[k] ?? '') !== draft[k]) || totpChanged || customFieldsDirty)
+  let customFieldsValid = $derived(customFields.every(cf => cf.Name.trim() !== '' && cf.Value !== ''))
+  let canSave = $derived(dirty && !!draft.Title && !!draft.Password && !totpError && customFieldsValid)
 
   function buildSaveDraft() {
     const d = { ...draft }
     d.TwoFactorKey = totpSecret
     d.TOTPLength   = String(totpDigits)
     d.TOTPTimeStep = String(totpPeriod)
+    d.CustomFields = customFields.slice()
     return d
   }
 
@@ -216,7 +228,7 @@
   <div class="record-body" style="display:flex;flex-direction:column;gap:16px">
     <label class="field">
       <span class="field-label muted">Title</span>
-      <input class="input" value={draft.Title} oninput={e => set('Title', e.target.value)}
+      <input class="input" class:warn={dirty && !draft.Title} value={draft.Title} oninput={e => set('Title', e.target.value)}
         placeholder="e.g. Bank of America" use:focusOnMount={isNew}/>
     </label>
 
@@ -259,7 +271,7 @@
 
     <div class="field">
       <span class="field-label muted">Password</span>
-      <div class="input-wrap">
+      <div class="input-wrap" class:warn={dirty && !draft.Password}>
         <input
           class="input mono"
           type={showPw ? 'text' : 'password'}
@@ -344,6 +356,41 @@
       <span class="field-label muted">URL</span>
       <input class="input" value={draft.URL} oninput={e => set('URL', e.target.value)}/>
     </label>
+
+    {#each customFields as cf, i}
+      <div class="custom-field-row">
+        <input class="input custom-field-name" class:warn={!cf.Name.trim()}
+          placeholder="Field name"
+          value={cf.Name}
+          oninput={e => { customFields = customFields.map((f, j) => j === i ? { ...f, Name: e.target.value } : f) }}
+        />
+        <div class="input-wrap custom-field-value" class:warn={!cf.Value.trim()}>
+          <input class="input"
+            type={cf.Sensitive ? 'password' : 'text'}
+            placeholder="Value"
+            value={cf.Value}
+            oninput={e => { customFields = customFields.map((f, j) => j === i ? { ...f, Value: e.target.value } : f) }}
+          />
+          <button class="icon-btn-flat" type="button"
+            onclick={() => { customFields = customFields.map((f, j) => j === i ? { ...f, Sensitive: !f.Sensitive } : f) }}
+            aria-label={cf.Sensitive ? 'Show value' : 'Hide value'}>
+            <Icon name={cf.Sensitive ? 'eye-off' : 'eye'} size={18}/>
+          </button>
+        </div>
+        <button class="icon-btn-flat danger" type="button"
+          onclick={() => { customFields = customFields.filter((_, j) => j !== i) }}
+          aria-label="Remove field">
+          <Icon name="trash" size={18}/>
+        </button>
+      </div>
+    {/each}
+
+    {#if customFields.length < 9}
+      <button class="add-custom-field" type="button"
+        onclick={() => { customFields = [...customFields, { Name: '', Value: '', Sensitive: false }] }}>
+        + Add custom field
+      </button>
+    {/if}
 
     <label class="field">
       <span class="field-label muted">Notes</span>

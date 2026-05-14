@@ -245,6 +245,19 @@ func updateRecordFields(this js.Value, args []js.Value) interface{} {
 				return fmt.Sprintf("TOTP period must be 30 or 60, got: %s", value)
 			}
 			rec.TOTPTimeStep = byte(n)
+		case "CustomFields":
+			if value == "" {
+				rec.CustomFields = nil
+			} else {
+				var cfs []pwsafe.CustomField
+				if err := json.Unmarshal([]byte(value), &cfs); err != nil {
+					return fmt.Sprintf("invalid CustomFields JSON: %s", err)
+				}
+				if len(cfs) > 9 {
+					cfs = cfs[:9]
+				}
+				rec.CustomFields = cfs
+			}
 		default:
 			return fmt.Sprintf("unknown field: %s", field)
 		}

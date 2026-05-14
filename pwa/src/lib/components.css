@@ -252,7 +252,7 @@
 }
 
 .vault-app .copy-rows { display: flex; flex-direction: column; gap: 14px; }
-.vault-app .copy-row { position: relative; isolation: isolate; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); padding: 12px 12px 10px; }
+.vault-app .copy-row { position: relative; isolation: isolate; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); padding: 12px 12px 10px; cursor: pointer; }
 .vault-app .copy-row-label { font-size: 12px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; padding-left: 4px; }
 .vault-app .copy-row-main { display: flex; align-items: center; gap: 4px; margin-top: 2px; }
 .vault-app .copy-row-value {
@@ -305,6 +305,18 @@
 .vault-app .input-wrap .icon-btn-flat { flex: 0 0 auto; margin-right: 4px; }
 .vault-app textarea.input { resize: vertical; font-family: inherit; }
 .vault-app .input.mono { font-family: var(--font-mono); }
+.vault-app .input.warn { border-color: var(--danger); }
+.vault-app .input-wrap.warn { border-color: var(--danger); }
+.vault-app .icon-btn-flat.danger { color: var(--danger); }
+.vault-app .custom-field-row { display: flex; align-items: center; gap: 6px; }
+.vault-app .custom-field-name { flex: 0 0 36%; min-width: 0; }
+.vault-app .custom-field-value { flex: 1; min-width: 0; }
+.vault-app .add-custom-field {
+  background: none; border: none; padding: 2px 0;
+  color: var(--accent); cursor: pointer;
+  font-size: 14px; font-weight: 500; text-align: left;
+}
+.vault-app .add-custom-field:hover { text-decoration: underline; }
 
 /* VAULT SHEET */
 .vault-app .sheet-backdrop {

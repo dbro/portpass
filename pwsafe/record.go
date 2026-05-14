@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/twofish"
@@ -38,6 +40,7 @@ const (
 	recordOwnSymbolsForPassword  = 0x16
 	recordShiftDoubleClickAction = 0x17
 	recordPasswordPolicyName     = 0x18
+	recordCustomTextField        = 0x30
 	recordTwoFactorKey           = 0x1b
 	recordTOTPConfig             = 0x21
 	recordTOTPLength             = 0x22
@@ -45,6 +48,13 @@ const (
 	recordTOTPStartTime          = 0x24
 	recordEndOfEntry             = 0xff
 )
+
+// CustomField is one entry in a record's custom text fields (field 0x30).
+type CustomField struct {
+	Name      string `json:"Name"`
+	Value     string `json:"Value"`
+	Sensitive bool   `json:"Sensitive"`
+}
 
 // Record The primary type for password DB entries
 type Record struct {
@@ -76,6 +86,7 @@ type Record struct {
 	Username               string          // 0x04
 	URL                    string          // 0x0d
 	UUID                   [16]byte        // 0x01
+	CustomFields           []CustomField   // 0x30
 	UnknownFields          map[byte][]byte // forward compatibility: fields not yet parsed
 }
 
@@ -148,6 +159,8 @@ func (r *Record) setField(id byte, data []byte) error {
 		copy(r.ShiftDoubleClickAction[:], data)
 	case recordPasswordPolicyName:
 		r.PasswordPolicyName = string(data)
+	case recordCustomTextField:
+		r.CustomFields = parseCustomFields(string(data))
 	case recordTwoFactorKey:
 		r.TwoFactorKey = append([]byte(nil), data...)
 	case recordTOTPConfig:
@@ -270,6 +283,14 @@ func (r *Record) marshal() ([]byte, []byte, error) {
 		}
 	}
 
+	if len(r.CustomFields) > 0 {
+		cfs := r.CustomFields
+		if len(cfs) > 9 {
+			cfs = cfs[:9]
+		}
+		appendField(recordCustomTextField, marshalCustomFields(cfs))
+	}
+
 	if len(r.UnknownFields) > 0 {
 		keys := make([]byte, 0, len(r.UnknownFields))
 		for k := range r.UnknownFields {
@@ -287,4 +308,66 @@ func (r *Record) marshal() ([]byte, []byte, error) {
 	recordBuf.Write(pseudoRandomBytes(twofish.BlockSize - 5))
 
 	return recordBuf.Bytes(), hmacBuf.Bytes(), nil
+}
+
+// parseCustomFields decodes a PLVPLV…S…PLVPLV… encoded custom text field value.
+func parseCustomFields(s string) []CustomField {
+	var fields []CustomField
+	var cur *CustomField
+	for i := 0; i+6 <= len(s); {
+		pID, err1 := strconv.ParseUint(s[i:i+2], 16, 8)
+		lVal, err2 := strconv.ParseUint(s[i+2:i+6], 16, 16)
+		if err1 != nil || err2 != nil {
+			break
+		}
+		i += 6
+		if i+int(lVal) > len(s) {
+			break
+		}
+		v := s[i : i+int(lVal)]
+		i += int(lVal)
+		if pID == 0 { // separator
+			if cur != nil && cur.Name != "" {
+				fields = append(fields, *cur)
+			}
+			cur = nil
+			continue
+		}
+		if cur == nil {
+			cur = &CustomField{}
+		}
+		switch byte(pID) {
+		case 0x01:
+			cur.Name = v
+		case 0x02:
+			cur.Value = v
+		case 0x03:
+			cur.Sensitive = len(v) == 1 && v[0] == '1'
+		}
+	}
+	if cur != nil && cur.Name != "" {
+		fields = append(fields, *cur)
+	}
+	if len(fields) > 9 {
+		fields = fields[:9]
+	}
+	return fields
+}
+
+// marshalCustomFields encodes custom fields to the PLVPLV…S…PLVPLV… format.
+func marshalCustomFields(fields []CustomField) []byte {
+	var sb strings.Builder
+	for i, cf := range fields {
+		if i > 0 {
+			sb.WriteString("000000")
+		}
+		sb.WriteString(fmt.Sprintf("01%04X%s", len(cf.Name), cf.Name))
+		sb.WriteString(fmt.Sprintf("02%04X%s", len(cf.Value), cf.Value))
+		if cf.Sensitive {
+			sb.WriteString("0300011")
+		} else {
+			sb.WriteString("0300010")
+		}
+	}
+	return []byte(sb.String())
 }

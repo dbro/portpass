@@ -62,7 +62,12 @@
           value = getTOTP(ctx.uuid)?.code
         } else {
           const rec = getRecordData(ctx.uuid)
-          value = { Username: rec.Username, Password: rec.Password, URL: rec.URL }[ctx.field]
+          if (ctx.field.startsWith('custom-')) {
+            const idx = parseInt(ctx.field.slice(7))
+            value = rec.CustomFields?.[idx]?.Value
+          } else {
+            value = { Username: rec.Username, Password: rec.Password, URL: rec.URL }[ctx.field]
+          }
         }
         if (!value) return
         if (hashesEqual(await sha256(value), new Uint8Array(ctx.hash))
@@ -164,7 +169,7 @@
     try {
       const rec = getRecordData(uuid)
       // Clamp to viewport so menu doesn't appear off-screen
-      const menuW = 180, menuH = 160
+      const menuW = 180, menuH = 500
       const x = Math.min(e.clientX, window.innerWidth  - menuW - 8)
       const y = Math.min(e.clientY, window.innerHeight - menuH - 8)
       contextMenu = { x, y, rec, uuid }
@@ -179,6 +184,10 @@
   }
 
   function closeMenu() { contextMenu = null }
+
+  function truncate(str, max) {
+    return str.length <= max ? str : str.slice(0, max - 1) + '…'
+  }
 
   // Returns [{text, matched}] segments for inline highlighting
   function hl(text, q) {
@@ -311,6 +320,11 @@
         <span>Copy one-time code</span><span class="ctx-keys"><kbd>Ctrl</kbd><kbd>T</kbd></span>
       </button>
     {/if}
+    {#each (contextMenu.rec.CustomFields ?? []).slice(0, 9) as cf, i}
+      <button onclick={() => { handleCopy(cf.Value, contextMenu.uuid, `custom-${i}`); closeMenu() }}>
+        <span>Copy {truncate(cf.Name, 14)}</span><span class="ctx-keys"><kbd>Ctrl</kbd><kbd>{i + 1}</kbd></span>
+      </button>
+    {/each}
   </div>
 {/if}
 
