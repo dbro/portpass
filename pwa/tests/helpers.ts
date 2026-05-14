@@ -34,9 +34,10 @@ export async function openVault(
 
     ;(window as any).showOpenFilePicker = async () => [{
       name: 'three.dat',
-      getFile:         async () => new File([bytes], 'three.dat'),
-      queryPermission: async () => 'granted',
-      createWritable:  async () => ({ write: async () => {}, close: async () => {} }),
+      getFile:           async () => new File([bytes], 'three.dat'),
+      queryPermission:   async () => 'granted',
+      requestPermission: async () => 'granted',
+      createWritable:    async () => ({ write: async () => {}, close: async () => {} }),
     }]
     ;(window as any).showSaveFilePicker = async () => ({
       name: 'test.psafe3',
