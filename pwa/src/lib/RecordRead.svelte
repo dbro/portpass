@@ -175,11 +175,17 @@
 
   <div class="copy-rows">
     {#if record.Username}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
       <div class="copy-row" class:clipboard-active={copiedField === 'Username'} style={copiedField === 'Username' ? drainStyle() : ''}
-        onclick={() => handleCopy(record.Username, 'Username')}>
+        role="button" tabindex="0"
+        onclick={() => handleCopy(record.Username, 'Username')}
+        onkeydown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCopy(record.Username, 'Username') } }}>
         <div class="copy-row-label muted">Username</div>
         <div class="copy-row-main">
           <div class="copy-row-value">{record.Username}</div>
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
           <div class="copy-row-actions" onclick={e => e.stopPropagation()}>
             <button class="icon-btn-flat copy-btn" onclick={() => handleCopy(record.Username, 'Username')} aria-label="Copy username">
               <Icon name="copy" size={18}/>
@@ -190,13 +196,19 @@
     {/if}
 
     {#if record.Password}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
       <div class="copy-row" class:clipboard-active={copiedField === 'Password'} style={copiedField === 'Password' ? drainStyle() : ''}
-        onclick={() => handleCopy(record.Password, 'Password')}>
+        role="button" tabindex="0"
+        onclick={() => handleCopy(record.Password, 'Password')}
+        onkeydown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCopy(record.Password, 'Password') } }}>
         <div class="copy-row-label muted">Password</div>
         <div class="copy-row-main">
           <div class="copy-row-value">
             <span class="mono">{revealed ? record.Password : '•'.repeat(Math.min(record.Password.length, 12))}</span>
           </div>
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
           <div class="copy-row-actions" onclick={e => e.stopPropagation()}>
             <button class="icon-btn-flat" onclick={() => { revealed = !revealed; if (!revealed) showHistory = false }} aria-label="Reveal password">
               <Icon name={revealed ? 'eye-off' : 'eye'} size={18}/>
@@ -206,6 +218,8 @@
             </button>
           </div>
         </div>
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
         <div onclick={e => e.stopPropagation()}>
           {#if revealed && history.length > 0}
             <button class="history-toggle" onclick={() => showHistory = !showHistory}>
@@ -230,9 +244,13 @@
     {/if}
 
   {#if record.TwoFactorKey}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div class="copy-row" class:clipboard-active={copiedField === 'otp'}
       style={copiedField === 'otp' ? `--drain-name: clip-drain-${animVariant}; --flash-name: clip-flash-${animVariant}; --clip-delay: -30000ms; --flash-duration: 450ms` : ''}
-      onclick={handleTOTPCopy}>
+      role="button" tabindex="0"
+      onclick={handleTOTPCopy}
+      onkeydown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleTOTPCopy() } }}>
       <div class="copy-row-label muted">One-time code</div>
       <div class="copy-row-main">
         <div class="copy-row-value">
@@ -244,6 +262,8 @@
             {/if}
           </span>
         </div>
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
         <div class="copy-row-actions" onclick={e => e.stopPropagation()}>
           <button class="icon-btn-flat" onclick={() => totpRevealed = !totpRevealed} aria-label={totpRevealed ? 'Hide code' : 'Reveal code'}>
             <Icon name={totpRevealed ? 'eye-off' : 'eye'} size={18}/>
@@ -254,6 +274,8 @@
         </div>
       </div>
       {#if totpData}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
         <div class="totp-bar" onclick={e => e.stopPropagation()}>
           <div class="totp-bar-fill" class:totp-instant={totpBarInstant}
             style="width:{(totpData.seconds / totpData.period) * 100}%"></div>
@@ -263,11 +285,17 @@
   {/if}
 
     {#if record.URL}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
       <div class="copy-row" class:clipboard-active={copiedField === 'URL'} style={copiedField === 'URL' ? drainStyle() : ''}
-        onclick={() => handleCopy(record.URL, 'URL')}>
+        role="button" tabindex="0"
+        onclick={() => handleCopy(record.URL, 'URL')}
+        onkeydown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCopy(record.URL, 'URL') } }}>
         <div class="copy-row-label muted">URL</div>
         <div class="copy-row-main">
           <div class="copy-row-value">{record.URL}</div>
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
           <div class="copy-row-actions" onclick={e => e.stopPropagation()}>
             <a class="icon-btn-flat" href={record.URL} target="_blank" rel="noreferrer" aria-label="Open URL">
               <Icon name="external" size={18}/>
@@ -281,11 +309,17 @@
     {/if}
 
   {#if record.Email}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div class="copy-row" class:clipboard-active={copiedField === 'Email'} style={copiedField === 'Email' ? drainStyle() : ''}
-      onclick={() => handleCopy(record.Email, 'Email')}>
+      role="button" tabindex="0"
+      onclick={() => handleCopy(record.Email, 'Email')}
+      onkeydown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCopy(record.Email, 'Email') } }}>
       <div class="copy-row-label muted">Email</div>
       <div class="copy-row-main">
         <div class="copy-row-value">{record.Email}</div>
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
         <div class="copy-row-actions" onclick={e => e.stopPropagation()}>
           <button class="icon-btn-flat copy-btn" onclick={() => handleCopy(record.Email, 'Email')} aria-label="Copy email">
             <Icon name="copy" size={18}/>
@@ -296,8 +330,12 @@
   {/if}
 
   {#each (record.CustomFields ?? []).slice(0, 9) as cf, i}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div class="copy-row" class:clipboard-active={copiedField === `custom-${i}`} style={copiedField === `custom-${i}` ? drainStyle() : ''}
-      onclick={() => handleCopy(cf.Value, `custom-${i}`)}>
+      role="button" tabindex="0"
+      onclick={() => handleCopy(cf.Value, `custom-${i}`)}
+      onkeydown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCopy(cf.Value, `custom-${i}`) } }}>
       <div class="copy-row-label muted">{cf.Name}</div>
       <div class="copy-row-main">
         <div class="copy-row-value">
@@ -305,6 +343,8 @@
             {cf.Sensitive && !customRevealed[i] ? '•'.repeat(Math.min(cf.Value.length, 12)) : cf.Value}
           </span>
         </div>
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
         <div class="copy-row-actions" onclick={e => e.stopPropagation()}>
           {#if cf.Sensitive}
             <button class="icon-btn-flat" onclick={() => { customRevealed[i] = !customRevealed[i] }} aria-label={customRevealed[i] ? 'Hide value' : 'Reveal value'}>
