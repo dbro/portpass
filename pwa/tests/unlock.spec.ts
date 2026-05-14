@@ -16,9 +16,10 @@ test.describe('Unlock screen', () => {
     await page.addInitScript((fileData: number[]) => {
       ;(window as any).showOpenFilePicker = async () => [{
         name: 'three.dat',
-        getFile: async () => new File([new Uint8Array(fileData)], 'three.dat'),
-        queryPermission: async () => 'granted',
-        createWritable: async () => ({ write: async () => {}, close: async () => {} }),
+        getFile:           async () => new File([new Uint8Array(fileData)], 'three.dat'),
+        queryPermission:   async () => 'granted',
+        requestPermission: async () => 'granted',
+        createWritable:    async () => ({ write: async () => {}, close: async () => {} }),
       }]
     }, data)
 
@@ -52,9 +53,10 @@ test.describe('Unlock screen', () => {
       }
       ;(window as any).showOpenFilePicker = async () => [{
         name: 'three.dat',
-        getFile: async () => new File([new Uint8Array(fileData)], 'three.dat'),
-        queryPermission: async () => 'granted',
-        createWritable: async () => ({ write: async () => {}, close: async () => {} }),
+        getFile:           async () => new File([new Uint8Array(fileData)], 'three.dat'),
+        queryPermission:   async () => 'granted',
+        requestPermission: async () => 'granted',
+        createWritable:    async () => ({ write: async () => {}, close: async () => {} }),
       }]
     }, data)
 

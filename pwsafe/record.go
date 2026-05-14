@@ -2,6 +2,7 @@ package pwsafe
 
 import (
 	"bytes"
+	"encoding/base32"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -162,7 +163,9 @@ func (r *Record) setField(id byte, data []byte) error {
 	case recordCustomTextField:
 		r.CustomFields = parseCustomFields(string(data))
 	case recordTwoFactorKey:
-		r.TwoFactorKey = append([]byte(nil), data...)
+		if decoded, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(string(data))); err == nil {
+			r.TwoFactorKey = decoded
+		}
 	case recordTOTPConfig:
 		if len(data) >= 1 {
 			r.TOTPConfig = data[0]
@@ -261,7 +264,8 @@ func (r *Record) marshal() ([]byte, []byte, error) {
 	appendField(recordPasswordPolicyName, []byte(r.PasswordPolicyName))
 
 	if len(r.TwoFactorKey) > 0 {
-		appendField(recordTwoFactorKey, r.TwoFactorKey)
+		encodedKey := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(r.TwoFactorKey)
+		appendField(recordTwoFactorKey, []byte(encodedKey))
 		appendField(recordTOTPConfig, []byte{r.TOTPConfig})
 		length := r.TOTPLength
 		if length == 0 {

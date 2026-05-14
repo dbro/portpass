@@ -31,9 +31,10 @@ async function setupThreeFilePicker(page: Page) {
     const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0))
     ;(window as any).showOpenFilePicker = async () => [{
       name: 'three.dat',
-      getFile:         async () => new File([bytes], 'three.dat'),
-      queryPermission: async () => 'granted',
-      createWritable:  async () => ({ write: async () => {}, close: async () => {} }),
+      getFile:           async () => new File([bytes], 'three.dat'),
+      queryPermission:   async () => 'granted',
+      requestPermission: async () => 'granted',
+      createWritable:    async () => ({ write: async () => {}, close: async () => {} }),
     }]
     ;(window as any).showSaveFilePicker = async () => ({
       name: 'test.psafe3',
