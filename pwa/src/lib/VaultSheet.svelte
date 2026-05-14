@@ -242,7 +242,7 @@
   <div class="modal-overlay" role="presentation"
     onclick={e => { e.stopPropagation(); setupMode = false; setupError = '' }}
     onkeydown={e => { if (e.key === 'Escape') { setupMode = false; setupError = '' } }}>
-    <div class="modal" role="dialog" aria-modal="true" onclick={e => e.stopPropagation()} onkeydown={e => e.stopPropagation()}>
+    <div class="modal" role="dialog" aria-modal="true" tabindex="-1" onclick={e => e.stopPropagation()} onkeydown={e => e.stopPropagation()}>
       <div class="modal-title">Enable fast unlock</div>
       <p class="modal-desc muted">Confirm your master password to set up biometric unlock.</p>
       <div class="modal-pw">

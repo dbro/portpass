@@ -1,4 +1,5 @@
 <script>
+  import { untrack } from 'svelte'
   import Icon from './Icon.svelte'
   import PasswordGenerator from './PasswordGenerator.svelte'
   import { generatePassword, loadOpts } from './passwordgen.js'
@@ -51,13 +52,13 @@
   }
 
   // Destructure once to capture initial prop values — draft is an independent editable copy
-  const { Title = '', Group = '', Username = '', Password = '', URL = '', Notes = '' } = record ?? {}
+  const { Title = '', Group = '', Username = '', Password = '', URL = '', Notes = '' } = untrack(() => record ?? {})
   let draft = $state({ Title, Group, Username, Password, URL, Notes })
 
   // TOTP state — kept separate from draft; merged into save call
-  let totpSecret   = $state(base64ToBase32(record?.TwoFactorKey ?? ''))
-  let totpDigits   = $state(record?.TOTPLength || 6)
-  let totpPeriod   = $state(record?.TOTPTimeStep || 30)
+  let totpSecret   = $state(untrack(() => base64ToBase32(record?.TwoFactorKey ?? '')))
+  let totpDigits   = $state(untrack(() => record?.TOTPLength || 6))
+  let totpPeriod   = $state(untrack(() => record?.TOTPTimeStep || 30))
   let totpGearOpen = $state(false)
   let totpRevealed = $state(false)
   let totpError    = $state('')
