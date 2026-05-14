@@ -101,7 +101,7 @@ func (db V3) Search(query string, namesOnly bool) []string {
 		if namesOnly {
 			hay = strings.ToLower(rec.Title + "\n" + rec.Group)
 		} else {
-			hay = strings.ToLower(rec.Title + "\n" + rec.Group + "\n" + rec.Username + "\n" + rec.URL + "\n" + rec.Notes)
+			hay = strings.ToLower(rec.Title + "\n" + rec.Group + "\n" + rec.Username + "\n" + rec.URL + "\n" + rec.Notes + "\n" + rec.Email)
 		}
 		match := true
 		for _, t := range terms {

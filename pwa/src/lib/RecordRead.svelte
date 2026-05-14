@@ -1,15 +1,42 @@
 <script>
+  import { onMount, tick } from 'svelte'
   import { get } from 'svelte/store'
   import { clipboardSession, clipboardContext } from '../store.js'
+  import { getTOTP } from '../wasm.js'
   import Icon from './Icon.svelte'
 
-  let { record, uuid, isDesktop, onback, onedit, oncopy } = $props()
+  let { record, uuid, isDesktop, onback, onedit, oncopy, oncopytotp } = $props()
 
-  let revealed     = $state(false)
-  let showHistory  = $state(false)
-  let copiedField  = $state(null)
-  let copiedToken  = null
-  let animVariant  = $state(0)  // alternates 0/1 on each copy to force animation restart
+  let revealed      = $state(false)
+  let showHistory   = $state(false)
+  let notesRevealed = $state(false)
+  let totpData       = $state(null)   // { code, seconds, period } | null
+  let totpRevealed   = $state(false)
+  let totpBarInstant = $state(false)
+  let totpPrevSeconds = -1
+
+  $effect(() => {
+    if (!record.TwoFactorKey) return
+    function refresh() {
+      try {
+        const data = getTOTP(uuid)
+        // Detect period rollover — snap the bar instantly instead of animating
+        if (totpPrevSeconds > 0 && data.seconds > totpPrevSeconds + 5) {
+          totpBarInstant = true
+          setTimeout(() => totpBarInstant = false, 50)
+        }
+        totpPrevSeconds = data.seconds
+        totpData = data
+      } catch { totpData = null }
+    }
+    refresh()
+    const id = setInterval(refresh, 1000)
+    return () => clearInterval(id)
+  })
+  let copiedField    = $state(null)
+  let copiedToken    = null
+  let animVariant    = $state(0)  // alternates 0/1 on each copy to force animation restart
+  let customRevealed = $state(Array(9).fill(false))
 
   async function sha256(text) {
     const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
@@ -39,30 +66,45 @@
     ;(async () => {
       const history = parseHistory(record.PasswordHistory)
       let value
-      if (ctx.field.startsWith('history-')) {
+      if (ctx.field === 'otp') {
+        value = totpData?.code
+      } else if (ctx.field.startsWith('history-')) {
         const ts = parseInt(ctx.field.slice(8))
         value = history.find(e => e.ts === ts)?.password
+      } else if (ctx.field.startsWith('custom-')) {
+        const idx = parseInt(ctx.field.slice(7))
+        value = record.CustomFields?.[idx]?.Value
       } else {
-        value = { Username: record.Username, Password: record.Password, URL: record.URL }[ctx.field]
+        value = { Username: record.Username, Password: record.Password, URL: record.URL, Email: record.Email }[ctx.field]
       }
       if (!value) return
       if (hashesEqual(await sha256(value), new Uint8Array(ctx.hash))
           && get(clipboardSession)?.token === ctx.token) {
+        copiedToken = ctx.token  // claim before yielding
+        copiedField = null
+        await tick()
+        if (get(clipboardSession)?.token !== ctx.token) return
         animVariant ^= 1
         copiedField = ctx.field
-        copiedToken = ctx.token
       }
     })()
   })
+
+  async function handleTOTPCopy() {
+    if (!totpData?.code) return
+    await oncopytotp(uuid)
+  }
 
   async function handleCopy(value, field) {
     const token = await oncopy(value)
     if (token !== null) {
       const hash = Array.from(await sha256(value))
       clipboardContext.set({ token, field, uuid, hash })
-      animVariant ^= 1   // flip name so browser treats it as a fresh animation
+      copiedToken = token  // claim before yielding — restore effect guard bails
+      copiedField = null
+      await tick()
+      animVariant ^= 1
       copiedField = field
-      copiedToken = token
     }
   }
 
@@ -72,7 +114,7 @@
     const remaining = Math.max(50, s.expiresAt - Date.now())
     const elapsed   = Math.max(0, 30000 - remaining)
     const flash = elapsed > 100 ? '0ms' : '450ms'
-    return `--clip-delay: -${elapsed}ms; --drain-name: clip-drain-${animVariant}; --flash-duration: ${flash}`
+    return `--clip-delay: -${elapsed}ms; --drain-name: clip-drain-${animVariant}; --flash-name: clip-flash-${animVariant}; --flash-duration: ${flash}`
   }
 
   function relTime(str) {
@@ -115,9 +157,7 @@
     <Icon name="back" size={22}/>
   </button>
   <div class="record-bar-group muted">{record.Group ?? ''}</div>
-  <button class="icon-btn" onclick={onedit} aria-label="Edit">
-    <Icon name="edit" size={20}/>
-  </button>
+  <button class="btn-text primary" onclick={onedit}>Edit</button>
 </div>
 
 <!-- Desktop pane header (hidden on mobile via CSS) -->
@@ -135,13 +175,12 @@
 
   <div class="copy-rows">
     {#if record.Username}
-      <div class="copy-row" class:clipboard-active={copiedField === 'Username'} style={copiedField === 'Username' ? drainStyle() : ''}>
+      <div class="copy-row" class:clipboard-active={copiedField === 'Username'} style={copiedField === 'Username' ? drainStyle() : ''}
+        onclick={() => handleCopy(record.Username, 'Username')}>
         <div class="copy-row-label muted">Username</div>
         <div class="copy-row-main">
-          <button class="copy-row-value" onclick={() => handleCopy(record.Username, 'Username')}>
-            {record.Username}
-          </button>
-          <div class="copy-row-actions">
+          <div class="copy-row-value">{record.Username}</div>
+          <div class="copy-row-actions" onclick={e => e.stopPropagation()}>
             <button class="icon-btn-flat copy-btn" onclick={() => handleCopy(record.Username, 'Username')} aria-label="Copy username">
               <Icon name="copy" size={18}/>
             </button>
@@ -151,13 +190,14 @@
     {/if}
 
     {#if record.Password}
-      <div class="copy-row" class:clipboard-active={copiedField === 'Password'} style={copiedField === 'Password' ? drainStyle() : ''}>
+      <div class="copy-row" class:clipboard-active={copiedField === 'Password'} style={copiedField === 'Password' ? drainStyle() : ''}
+        onclick={() => handleCopy(record.Password, 'Password')}>
         <div class="copy-row-label muted">Password</div>
         <div class="copy-row-main">
-          <button class="copy-row-value" onclick={() => handleCopy(record.Password, 'Password')}>
+          <div class="copy-row-value">
             <span class="mono">{revealed ? record.Password : '•'.repeat(Math.min(record.Password.length, 12))}</span>
-          </button>
-          <div class="copy-row-actions">
+          </div>
+          <div class="copy-row-actions" onclick={e => e.stopPropagation()}>
             <button class="icon-btn-flat" onclick={() => { revealed = !revealed; if (!revealed) showHistory = false }} aria-label="Reveal password">
               <Icon name={revealed ? 'eye-off' : 'eye'} size={18}/>
             </button>
@@ -166,35 +206,69 @@
             </button>
           </div>
         </div>
-        {#if revealed && history.length > 0}
-          <button class="history-toggle" onclick={() => showHistory = !showHistory}>
-            {showHistory ? 'Hide' : 'History'} · {history.length} previous
-          </button>
-        {/if}
-        {#if showHistory}
-          <div class="history-list">
-            {#each history as entry}
-              <div class="history-entry" class:clipboard-active={copiedField === `history-${entry.ts}`} style={copiedField === `history-${entry.ts}` ? drainStyle() : ''}>
-                <span class="history-time muted">{relTimeUnix(entry.ts)}</span>
-                <span class="history-pw mono">{entry.password}</span>
-                <button class="icon-btn-flat" onclick={() => handleCopy(entry.password, `history-${entry.ts}`)} aria-label="Copy">
-                  <Icon name="copy" size={15}/>
-                </button>
-              </div>
-            {/each}
-          </div>
-        {/if}
+        <div onclick={e => e.stopPropagation()}>
+          {#if revealed && history.length > 0}
+            <button class="history-toggle" onclick={() => showHistory = !showHistory}>
+              {showHistory ? 'Hide' : 'History'} · {history.length} previous
+            </button>
+          {/if}
+          {#if showHistory}
+            <div class="history-list">
+              {#each history as entry}
+                <div class="history-entry" class:clipboard-active={copiedField === `history-${entry.ts}`} style={copiedField === `history-${entry.ts}` ? drainStyle() : ''}>
+                  <span class="history-time muted">{relTimeUnix(entry.ts)}</span>
+                  <span class="history-pw mono">{entry.password}</span>
+                  <button class="icon-btn-flat" onclick={() => handleCopy(entry.password, `history-${entry.ts}`)} aria-label="Copy">
+                    <Icon name="copy" size={15}/>
+                  </button>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
       </div>
     {/if}
 
+  {#if record.TwoFactorKey}
+    <div class="copy-row" class:clipboard-active={copiedField === 'otp'}
+      style={copiedField === 'otp' ? `--drain-name: clip-drain-${animVariant}; --flash-name: clip-flash-${animVariant}; --clip-delay: -30000ms; --flash-duration: 450ms` : ''}
+      onclick={handleTOTPCopy}>
+      <div class="copy-row-label muted">One-time code</div>
+      <div class="copy-row-main">
+        <div class="copy-row-value">
+          <span class="mono">
+            {#if totpData}
+              {totpRevealed ? totpData.code : '•'.repeat(totpData.code.length)}
+            {:else}
+              <span class="muted">—</span>
+            {/if}
+          </span>
+        </div>
+        <div class="copy-row-actions" onclick={e => e.stopPropagation()}>
+          <button class="icon-btn-flat" onclick={() => totpRevealed = !totpRevealed} aria-label={totpRevealed ? 'Hide code' : 'Reveal code'}>
+            <Icon name={totpRevealed ? 'eye-off' : 'eye'} size={18}/>
+          </button>
+          <button class="icon-btn-flat copy-btn" onclick={handleTOTPCopy} aria-label="Copy one-time code" disabled={!totpData}>
+            <Icon name="copy" size={18}/>
+          </button>
+        </div>
+      </div>
+      {#if totpData}
+        <div class="totp-bar" onclick={e => e.stopPropagation()}>
+          <div class="totp-bar-fill" class:totp-instant={totpBarInstant}
+            style="width:{(totpData.seconds / totpData.period) * 100}%"></div>
+        </div>
+      {/if}
+    </div>
+  {/if}
+
     {#if record.URL}
-      <div class="copy-row" class:clipboard-active={copiedField === 'URL'} style={copiedField === 'URL' ? drainStyle() : ''}>
+      <div class="copy-row" class:clipboard-active={copiedField === 'URL'} style={copiedField === 'URL' ? drainStyle() : ''}
+        onclick={() => handleCopy(record.URL, 'URL')}>
         <div class="copy-row-label muted">URL</div>
         <div class="copy-row-main">
-          <button class="copy-row-value" onclick={() => handleCopy(record.URL, 'URL')}>
-            {record.URL}
-          </button>
-          <div class="copy-row-actions">
+          <div class="copy-row-value">{record.URL}</div>
+          <div class="copy-row-actions" onclick={e => e.stopPropagation()}>
             <a class="icon-btn-flat" href={record.URL} target="_blank" rel="noreferrer" aria-label="Open URL">
               <Icon name="external" size={18}/>
             </a>
@@ -205,12 +279,56 @@
         </div>
       </div>
     {/if}
+
+  {#if record.Email}
+    <div class="copy-row" class:clipboard-active={copiedField === 'Email'} style={copiedField === 'Email' ? drainStyle() : ''}
+      onclick={() => handleCopy(record.Email, 'Email')}>
+      <div class="copy-row-label muted">Email</div>
+      <div class="copy-row-main">
+        <div class="copy-row-value">{record.Email}</div>
+        <div class="copy-row-actions" onclick={e => e.stopPropagation()}>
+          <button class="icon-btn-flat copy-btn" onclick={() => handleCopy(record.Email, 'Email')} aria-label="Copy email">
+            <Icon name="copy" size={18}/>
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#each (record.CustomFields ?? []).slice(0, 9) as cf, i}
+    <div class="copy-row" class:clipboard-active={copiedField === `custom-${i}`} style={copiedField === `custom-${i}` ? drainStyle() : ''}
+      onclick={() => handleCopy(cf.Value, `custom-${i}`)}>
+      <div class="copy-row-label muted">{cf.Name}</div>
+      <div class="copy-row-main">
+        <div class="copy-row-value">
+          <span class:mono={cf.Sensitive}>
+            {cf.Sensitive && !customRevealed[i] ? '•'.repeat(Math.min(cf.Value.length, 12)) : cf.Value}
+          </span>
+        </div>
+        <div class="copy-row-actions" onclick={e => e.stopPropagation()}>
+          {#if cf.Sensitive}
+            <button class="icon-btn-flat" onclick={() => { customRevealed[i] = !customRevealed[i] }} aria-label={customRevealed[i] ? 'Hide value' : 'Reveal value'}>
+              <Icon name={customRevealed[i] ? 'eye-off' : 'eye'} size={18}/>
+            </button>
+          {/if}
+          <button class="icon-btn-flat copy-btn" onclick={() => handleCopy(cf.Value, `custom-${i}`)} aria-label="Copy {cf.Name}">
+            <Icon name="copy" size={18}/>
+          </button>
+        </div>
+      </div>
+    </div>
+  {/each}
   </div>
 
   {#if record.Notes}
     <div class="record-notes">
-      <div class="copy-row-label muted">Notes</div>
-      <div class="notes-text">{record.Notes}</div>
+      <div class="notes-label-row">
+        <span class="copy-row-label muted">Notes</span>
+        <button class="icon-btn-flat" onclick={() => notesRevealed = !notesRevealed} aria-label={notesRevealed ? 'Hide notes' : 'Reveal notes'}>
+          <Icon name={notesRevealed ? 'eye-off' : 'eye'} size={16}/>
+        </button>
+      </div>
+      <div class="notes-text mono">{notesRevealed ? record.Notes : record.Notes.replace(/[^\n]/g, '•')}</div>
     </div>
   {/if}
 
@@ -220,6 +338,30 @@
 </div>
 
 <style>
+  .totp-bar {
+    height: 2px;
+    background: var(--border);
+    border-radius: 1px;
+    margin-top: 6px;
+    overflow: hidden;
+  }
+  .totp-bar-fill {
+    height: 100%;
+    background: var(--text-soft);
+    border-radius: 1px;
+    transition: width 1s linear;
+  }
+  .totp-bar-fill.totp-instant { transition: none; }
+
+  .notes-label-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 4px;
+  }
+  .notes-label-row .copy-row-label {
+    margin-bottom: 0;
+  }
   .history-toggle {
     background: none;
     border: none;

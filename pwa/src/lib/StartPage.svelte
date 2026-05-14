@@ -58,9 +58,13 @@
     }
   }
 
-  // After a successful vault open, check whether to offer biometric enrollment
+  // After a successful vault open, check whether to offer biometric enrollment.
+  // The offer is shown at most once per vault file — if dismissed, the user can
+  // enable fast unlock later from the vault settings sheet.
   function afterUnlock() {
-    if (biometricAvailable && !biometricEnrolled) {
+    const offerKey = `biometric-offered-${fileHandle?.name}`
+    if (biometricAvailable && !biometricEnrolled && !localStorage.getItem(offerKey)) {
+      localStorage.setItem(offerKey, '1')
       mode = 'offer-biometric'
     } else {
       onopened()

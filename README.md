@@ -2,7 +2,7 @@
 
 *A simple password manager that keeps your data in your control, across all your devices.*
 
-<img src="https://github.com/user-attachments/assets/43b73bbf-a035-4d9c-aa34-652f8e02b264" width="65%" alt="Screenshots of mobile layouts">
+<img src="https://github.com/user-attachments/assets/6917e607-a4ce-4ba8-bf76-b926f830713f" width="65%" alt="Screenshots of mobile layouts">
 
 **Free and open source. Try it: [https://dbro.github.io/portpass](https://dbro.github.io/portpass)**
 
@@ -16,7 +16,9 @@ Portpass is different: your passwords live in a file on your device, or in a clo
 * works fully offline, no internet connection required
 * runs on all your devices: mobile, tablet, and desktop
 * generates strong passwords
+* generates one-time codes (TOTP) for two-factor authentication (2FA)
 * organizes password records into groups for browsing
+* supports custom fields (eg. PIN codes, account numbers, API keys)
 * encrypts your vault using an established open source format (pwsafe v3)
 * stores your vault as a file on your device, for easy sync/backup
 * supports convenient alternate unlock methods: fingerprint, face recognition, and PIN

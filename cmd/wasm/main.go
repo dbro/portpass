@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base32"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -52,18 +53,20 @@ func getDBData(this js.Value, args []js.Value) interface{} {
 	// Let's return a list of {uuid, title, group} objects.
 
 	type Item struct {
-		UUID  string `json:"uuid"`
-		Title string `json:"title"`
-		Group string `json:"group"`
+		UUID    string `json:"uuid"`
+		Title   string `json:"title"`
+		Group   string `json:"group"`
+		HasTOTP bool   `json:"hasTOTP"`
 	}
 
 	var items []Item
 
 	for uuidHex, rec := range db.Records {
 		items = append(items, Item{
-			UUID:  uuidHex,
-			Title: rec.Title,
-			Group: rec.Group,
+			UUID:    uuidHex,
+			Title:   rec.Title,
+			Group:   rec.Group,
+			HasTOTP: len(rec.TwoFactorKey) > 0,
 		})
 	}
 
@@ -214,8 +217,49 @@ func updateRecordFields(this js.Value, args []js.Value) interface{} {
 			rec.Password = value
 		case "URL":
 			rec.URL = value
+		case "Email":
+			rec.Email = value
 		case "Notes":
 			rec.Notes = value
+		case "TwoFactorKey":
+			if value == "" {
+				rec.TwoFactorKey = nil
+				rec.TOTPConfig = 0
+				rec.TOTPLength = 0
+				rec.TOTPTimeStep = 0
+				rec.TOTPStartTime = time.Time{}
+			} else {
+				decoded, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(strings.NewReplacer(" ", "", "-", "").Replace(value)))
+				if err != nil {
+					return fmt.Sprintf("invalid TOTP secret: %s", err)
+				}
+				rec.TwoFactorKey = decoded
+			}
+		case "TOTPLength":
+			n, err := strconv.Atoi(value)
+			if err != nil || (n != 6 && n != 8) {
+				return fmt.Sprintf("TOTP digits must be 6 or 8, got: %s", value)
+			}
+			rec.TOTPLength = byte(n)
+		case "TOTPTimeStep":
+			n, err := strconv.Atoi(value)
+			if err != nil || (n != 30 && n != 60) {
+				return fmt.Sprintf("TOTP period must be 30 or 60, got: %s", value)
+			}
+			rec.TOTPTimeStep = byte(n)
+		case "CustomFields":
+			if value == "" {
+				rec.CustomFields = nil
+			} else {
+				var cfs []pwsafe.CustomField
+				if err := json.Unmarshal([]byte(value), &cfs); err != nil {
+					return fmt.Sprintf("invalid CustomFields JSON: %s", err)
+				}
+				if len(cfs) > 9 {
+					cfs = cfs[:9]
+				}
+				rec.CustomFields = cfs
+			}
 		default:
 			return fmt.Sprintf("unknown field: %s", field)
 		}
@@ -389,6 +433,44 @@ func getSuggestion(this js.Value, args []js.Value) interface{} {
 	return matches[0]
 }
 
+
+func getTOTP(this js.Value, args []js.Value) interface{} {
+	if db == nil {
+		return "database not open"
+	}
+	if len(args) != 1 {
+		return "invalid arguments: expected (uuid)"
+	}
+	rec, ok := db.Records[args[0].String()]
+	if !ok {
+		return "record not found"
+	}
+	if len(rec.TwoFactorKey) == 0 {
+		return "no TOTP configured"
+	}
+
+	var t0 int64
+	if !rec.TOTPStartTime.IsZero() {
+		t0 = rec.TOTPStartTime.Unix()
+	}
+	code, remaining := pwsafe.ComputeTOTP(rec.TwoFactorKey, time.Now().Unix(), t0, rec.TOTPTimeStep, rec.TOTPLength)
+
+	type Result struct {
+		Code    string `json:"code"`
+		Seconds int64  `json:"seconds"`
+		Period  int    `json:"period"`
+	}
+	period := int(rec.TOTPTimeStep)
+	if period == 0 {
+		period = 30
+	}
+	data, err := json.Marshal(Result{code, remaining, period})
+	if err != nil {
+		return fmt.Sprintf("error: %s", err)
+	}
+	return string(data)
+}
+
 func main() {
 	c := make(chan struct{}, 0)
 
@@ -403,6 +485,7 @@ func main() {
 	js.Global().Set("UpdateDBFields", js.FuncOf(updateDBFields))
 	js.Global().Set("searchRecords", js.FuncOf(searchRecords))
 	js.Global().Set("getSuggestion", js.FuncOf(getSuggestion))
+	js.Global().Set("getTOTP", js.FuncOf(getTOTP))
 
 	fmt.Println("WASM initialized")
 	<-c

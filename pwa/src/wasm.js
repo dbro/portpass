@@ -78,7 +78,10 @@ export function saveDatabase() {
 
 export function updateRecordFields(uuid, fields) {
     const args = [uuid ?? '']
-    for (const [k, v] of Object.entries(fields)) args.push(k, String(v ?? ''))
+    for (const [k, v] of Object.entries(fields)) {
+        const str = (v == null) ? '' : (typeof v === 'object') ? JSON.stringify(v) : String(v)
+        args.push(k, str)
+    }
     const res = window.UpdateRecordFields(...args)
     if (typeof res === 'string' && res.length === 32) return res // UUID hex (new record)
     if (res) throw new Error(res)
@@ -102,4 +105,8 @@ export function searchRecords(query, namesOnly) {
 
 export function getAutocompleteSuggestion(field, prefix) {
     return window.getSuggestion(field, prefix) || ''
+}
+
+export function getTOTP(uuid) {
+    return parseOrThrow(window.getTOTP(uuid))
 }

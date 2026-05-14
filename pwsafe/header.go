@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/pborman/uuid"
@@ -45,8 +46,9 @@ type header struct {
 	Preferences    string    // 0x02
 	RecentyUsed    string    // 0x0f
 	Tree           string    // 0x03
-	UUID           [16]byte  // 0x01
-	Version        [2]byte   // 0x00
+	UUID           [16]byte        // 0x01
+	UnknownFields  map[byte][]byte // forward compatibility: fields not yet parsed
+	Version        [2]byte         // 0x00
 }
 
 func newHeader(name string) header {
@@ -96,7 +98,10 @@ func (h *header) setField(id byte, data []byte) error {
 	case headerEmptyGroups:
 		h.EmptyGroups = append(h.EmptyGroups, string(data))
 	default:
-		return fmt.Errorf("encountered unknown Header Field type - %v", id)
+		if h.UnknownFields == nil {
+			h.UnknownFields = make(map[byte][]byte)
+		}
+		h.UnknownFields[id] = append([]byte(nil), data...)
 	}
 	return nil
 }
@@ -147,6 +152,17 @@ func (h *header) marshal() ([]byte, []byte) {
 	appendField(headerPasswordPolicy, []byte(h.PasswordPolicy))
 	for _, group := range h.EmptyGroups {
 		appendField(headerEmptyGroups, []byte(group))
+	}
+
+	if len(h.UnknownFields) > 0 {
+		keys := make([]byte, 0, len(h.UnknownFields))
+		for k := range h.UnknownFields {
+			keys = append(keys, k)
+		}
+		sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+		for _, k := range keys {
+			appendField(k, h.UnknownFields[k])
+		}
 	}
 
 	// End of entry

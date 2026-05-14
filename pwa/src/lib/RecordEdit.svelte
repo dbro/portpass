@@ -1,8 +1,49 @@
 <script>
+  import { untrack } from 'svelte'
   import Icon from './Icon.svelte'
   import PasswordGenerator from './PasswordGenerator.svelte'
   import { generatePassword, loadOpts } from './passwordgen.js'
   import { getAutocompleteSuggestion } from '../wasm.js'
+
+  // --- TOTP helpers ---
+  const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
+
+  function base32Encode(bytes) {
+    let bits = '', out = ''
+    for (const b of bytes) bits += b.toString(2).padStart(8, '0')
+    for (let i = 0; i + 5 <= bits.length; i += 5) out += B32[parseInt(bits.slice(i, i + 5), 2)]
+    return out
+  }
+
+  function base64ToBase32(b64) {
+    if (!b64) return ''
+    try {
+      const bin = atob(b64)
+      const bytes = new Uint8Array(bin.length)
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+      return base32Encode(bytes)
+    } catch { return '' }
+  }
+
+  function parseOtpAuthUri(uri) {
+    // Use regex rather than new URL() — custom protocols are unreliable across browsers
+    const m = uri.match(/^otpauth:\/\/([^/?#]+)(?:\/[^?#]*)?(?:\?(.*))?$/i)
+    if (!m) return { error: 'Invalid URI' }
+    const type = m[1].toLowerCase()
+    if (type !== 'totp') return { error: 'Only TOTP is supported (not HOTP)' }
+    const params = {}
+    ;(m[2] || '').split('&').forEach(p => {
+      const eq = p.indexOf('=')
+      if (eq > 0) params[decodeURIComponent(p.slice(0, eq)).toLowerCase()] = decodeURIComponent(p.slice(eq + 1))
+    })
+    const secret = params.secret
+    if (!secret) return { error: 'No secret found in URI' }
+    const algorithm = (params.algorithm || 'SHA1').toUpperCase()
+    if (algorithm !== 'SHA1') return { error: `Algorithm ${algorithm} is not supported` }
+    const digits = parseInt(params.digits || '6')
+    const period = parseInt(params.period || '30')
+    return { secret: secret.toUpperCase().replace(/[\s-]/g, ''), digits, period }
+  }
 
   let { record, isNew, isDesktop, oncancel, onsave, ondelete, ondirtychange } = $props()
 
@@ -11,8 +52,35 @@
   }
 
   // Destructure once to capture initial prop values — draft is an independent editable copy
-  const { Title = '', Group = '', Username = '', Password = '', URL = '', Notes = '' } = record ?? {}
-  let draft = $state({ Title, Group, Username, Password, URL, Notes })
+  const { Title = '', Group = '', Username = '', Password = '', URL = '', Email = '', Notes = '' } = untrack(() => record ?? {})
+  let draft = $state({ Title, Group, Username, Password, URL, Email, Notes })
+
+  // TOTP state — kept separate from draft; merged into save call
+  let totpSecret   = $state(untrack(() => base64ToBase32(record?.TwoFactorKey ?? '')))
+  let totpDigits   = $state(untrack(() => record?.TOTPLength || 6))
+  let totpPeriod   = $state(untrack(() => record?.TOTPTimeStep || 30))
+
+  // Custom fields — independent editable copy of initial prop value
+  let customFields = $state(untrack(() => (record?.CustomFields ?? []).slice(0, 9).map(cf => ({ Name: cf.Name, Value: cf.Value, Sensitive: !!cf.Sensitive }))))
+  let totpGearOpen = $state(false)
+  let totpRevealed = $state(false)
+  let totpError    = $state('')
+
+  function onTOTPInput(e) {
+    const val = e.target.value.trim()
+    totpSecret = val
+    totpError = ''
+    if (!val) return
+    if (val.toLowerCase().startsWith('otpauth://')) {
+      const parsed = parseOtpAuthUri(val)
+      if (!parsed) { totpError = 'Invalid URI'; return }
+      if (parsed.error) { totpError = parsed.error; return }
+      totpSecret = parsed.secret
+      totpDigits = parsed.digits
+      totpPeriod = parsed.period
+      e.target.value = parsed.secret
+    }
+  }
   let showPw      = $state(false)
   let genOpen     = $state(false)
   let showHistory = $state(false)
@@ -48,8 +116,30 @@
   let groupGhost    = $state('')
   let usernameGhost = $state('')
 
-  let dirty   = $derived(!record || Object.keys(draft).some(k => (record[k] ?? '') !== draft[k]))
-  let canSave = $derived(dirty && !!draft.Title)
+  let totpChanged = $derived(
+    totpSecret !== base64ToBase32(record?.TwoFactorKey ?? '') ||
+    (totpDigits !== (record?.TOTPLength || 6)) ||
+    (totpPeriod !== (record?.TOTPTimeStep || 30))
+  )
+  let customFieldsDirty = $derived.by(() => {
+    const orig = (record?.CustomFields ?? []).slice(0, 9)
+    if (orig.length !== customFields.length) return true
+    return customFields.some((cf, i) =>
+      cf.Name !== orig[i].Name || cf.Value !== orig[i].Value || cf.Sensitive !== !!orig[i].Sensitive
+    )
+  })
+  let dirty   = $derived(!record || Object.keys(draft).some(k => (record[k] ?? '') !== draft[k]) || totpChanged || customFieldsDirty)
+  let customFieldsValid = $derived(customFields.every(cf => cf.Name.trim() !== '' && cf.Value !== ''))
+  let canSave = $derived(dirty && !!draft.Title && !!draft.Password && !totpError && customFieldsValid)
+
+  function buildSaveDraft() {
+    const d = { ...draft }
+    d.TwoFactorKey = totpSecret
+    d.TOTPLength   = String(totpDigits)
+    d.TOTPTimeStep = String(totpPeriod)
+    d.CustomFields = customFields.slice()
+    return d
+  }
 
   // Notify parent of dirty state changes
   $effect(() => {
@@ -121,7 +211,7 @@
   <div class="record-bar" style={isDesktop ? 'display:none' : ''}>
     <button class="btn-text" onclick={oncancel}>Cancel</button>
     <div class="record-bar-group muted">{isNew ? 'New' : 'Edit'}</div>
-    <button class="btn-text primary" disabled={!canSave} onclick={() => onsave(draft)}>Save</button>
+    <button class="btn-text primary" disabled={!canSave} onclick={() => onsave(buildSaveDraft())}>Save</button>
   </div>
 
   {#if isDesktop}
@@ -129,7 +219,7 @@
       <span class="record-bar-group muted">{isNew ? 'New' : 'Edit'}</span>
       <div class="record-pane-actions">
         <button class="btn-text" onclick={oncancel}>Cancel</button>
-        <button class="btn btn-primary" disabled={!canSave} onclick={() => onsave(draft)}
+        <button class="btn btn-primary" disabled={!canSave} onclick={() => onsave(buildSaveDraft())}
           style="height:36px;padding:0 14px;font-size:14px">Save</button>
       </div>
     </div>
@@ -138,7 +228,7 @@
   <div class="record-body" style="display:flex;flex-direction:column;gap:16px">
     <label class="field">
       <span class="field-label muted">Title</span>
-      <input class="input" value={draft.Title} oninput={e => set('Title', e.target.value)}
+      <input class="input" class:warn={dirty && !draft.Title} value={draft.Title} oninput={e => set('Title', e.target.value)}
         placeholder="e.g. Bank of America" use:focusOnMount={isNew}/>
     </label>
 
@@ -181,7 +271,7 @@
 
     <div class="field">
       <span class="field-label muted">Password</span>
-      <div class="input-wrap">
+      <div class="input-wrap" class:warn={dirty && !draft.Password}>
         <input
           class="input mono"
           type={showPw ? 'text' : 'password'}
@@ -218,14 +308,100 @@
       {/if}
     </div>
 
+    <div class="field">
+      <span class="field-label muted">One-time code secret</span>
+      <div class="input-wrap">
+        <input
+          class="input mono"
+          type={totpRevealed ? 'text' : 'password'}
+          value={totpSecret}
+          oninput={onTOTPInput}
+          placeholder="Base32 secret or otpauth:// URI"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button class="icon-btn-flat" type="button" onclick={() => totpGearOpen = !totpGearOpen}
+          aria-label="TOTP settings" class:active={totpGearOpen}>
+          <Icon name="settings" size={18}/>
+        </button>
+        <button class="icon-btn-flat" type="button" onclick={() => totpRevealed = !totpRevealed}
+          aria-label={totpRevealed ? 'Hide secret' : 'Reveal secret'}>
+          <Icon name={totpRevealed ? 'eye-off' : 'eye'} size={18}/>
+        </button>
+      </div>
+      {#if totpError}
+        <div class="totp-error">{totpError}</div>
+      {/if}
+      {#if totpGearOpen}
+        <div class="totp-gear">
+          <label class="totp-gear-row">
+            <span class="muted">Digits</span>
+            <select class="input totp-select" bind:value={totpDigits}>
+              <option value={6}>6</option>
+              <option value={8}>8</option>
+            </select>
+          </label>
+          <label class="totp-gear-row">
+            <span class="muted">Period</span>
+            <select class="input totp-select" bind:value={totpPeriod}>
+              <option value={30}>30 s</option>
+              <option value={60}>60 s</option>
+            </select>
+          </label>
+        </div>
+      {/if}
+    </div>
+
     <label class="field">
       <span class="field-label muted">URL</span>
       <input class="input" value={draft.URL} oninput={e => set('URL', e.target.value)}/>
     </label>
 
     <label class="field">
+      <span class="field-label muted">Email</span>
+      <input class="input" type="email" value={draft.Email} oninput={e => set('Email', e.target.value)}/>
+    </label>
+
+    <div class="field-label muted">Custom fields</div>
+
+    {#each customFields as cf, i}
+      <div class="custom-field-row">
+        <input class="input custom-field-name" class:warn={!cf.Name.trim()}
+          placeholder="Field name"
+          value={cf.Name}
+          oninput={e => { customFields = customFields.map((f, j) => j === i ? { ...f, Name: e.target.value } : f) }}
+        />
+        <div class="input-wrap custom-field-value" class:warn={!cf.Value.trim()}>
+          <input class="input"
+            type={cf.Sensitive ? 'password' : 'text'}
+            placeholder="Value"
+            value={cf.Value}
+            oninput={e => { customFields = customFields.map((f, j) => j === i ? { ...f, Value: e.target.value } : f) }}
+          />
+          <button class="icon-btn-flat" type="button"
+            onclick={() => { customFields = customFields.map((f, j) => j === i ? { ...f, Sensitive: !f.Sensitive } : f) }}
+            aria-label={cf.Sensitive ? 'Show value' : 'Hide value'}>
+            <Icon name={cf.Sensitive ? 'eye-off' : 'eye'} size={18}/>
+          </button>
+        </div>
+        <button class="icon-btn-flat danger" type="button"
+          onclick={() => { customFields = customFields.filter((_, j) => j !== i) }}
+          aria-label="Remove field">
+          <Icon name="trash" size={18}/>
+        </button>
+      </div>
+    {/each}
+
+    {#if customFields.length < 9}
+      <button class="add-custom-field" type="button"
+        onclick={() => { customFields = [...customFields, { Name: '', Value: '', Sensitive: false }] }}>
+        + Add custom field
+      </button>
+    {/if}
+
+    <label class="field">
       <span class="field-label muted">Notes</span>
-      <textarea class="input" rows={4} value={draft.Notes}
+      <textarea class="input mono" rows={4} value={draft.Notes}
         oninput={e => set('Notes', e.target.value)}></textarea>
     </label>
 
@@ -313,6 +489,37 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  .totp-error {
+    font-size: 12px;
+    color: var(--danger);
+    margin-top: 4px;
+    padding: 0 2px;
+  }
+
+  .totp-gear {
+    display: flex;
+    gap: 12px;
+    margin-top: 8px;
+    padding: 10px 12px;
+    background: var(--surface-2);
+    border-radius: var(--r-input);
+  }
+
+  .totp-gear-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+  }
+
+  .totp-select {
+    width: auto;
+    padding: 4px 8px;
+    font-size: 13px;
+  }
+
+  .icon-btn-flat.active { color: var(--accent); }
 
   .delete-row {
     border-top: 1px solid var(--border);

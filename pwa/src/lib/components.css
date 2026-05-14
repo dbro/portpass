@@ -220,7 +220,8 @@
 /* Width-only drain — opacity stays constant so colour doesn't fade */
 @keyframes clip-drain-0 { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 @keyframes clip-drain-1 { from { transform: scaleX(1); } to { transform: scaleX(0); } }
-@keyframes clip-flash   { from { opacity: 0.7; } to { opacity: 0; } }
+@keyframes clip-flash-0 { from { opacity: 0.7; } to { opacity: 0; } }
+@keyframes clip-flash-1 { from { opacity: 0.7; } to { opacity: 0; } }
 
 /* Text turns accent while the clipboard is active, reverts when class is removed */
 .vault-app .copy-row.clipboard-active .copy-row-label,
@@ -247,11 +248,11 @@
   content: ''; position: absolute; inset: 0; border-radius: inherit;
   background: var(--accent);
   z-index: -1; pointer-events: none;
-  animation: clip-flash var(--flash-duration, 450ms) ease-out forwards;
+  animation: var(--flash-name, clip-flash-0) var(--flash-duration, 450ms) ease-out forwards;
 }
 
 .vault-app .copy-rows { display: flex; flex-direction: column; gap: 14px; }
-.vault-app .copy-row { position: relative; isolation: isolate; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); padding: 12px 12px 10px; }
+.vault-app .copy-row { position: relative; isolation: isolate; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); padding: 12px 12px 10px; cursor: pointer; }
 .vault-app .copy-row-label { font-size: 12px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; padding-left: 4px; }
 .vault-app .copy-row-main { display: flex; align-items: center; gap: 4px; margin-top: 2px; }
 .vault-app .copy-row-value {
@@ -303,6 +304,19 @@
 .vault-app .input-wrap .input:focus { border: none; box-shadow: none; }
 .vault-app .input-wrap .icon-btn-flat { flex: 0 0 auto; margin-right: 4px; }
 .vault-app textarea.input { resize: vertical; font-family: inherit; }
+.vault-app .input.mono { font-family: var(--font-mono); }
+.vault-app .input.warn { border-color: var(--danger); }
+.vault-app .input-wrap.warn { border-color: var(--danger); }
+.vault-app .icon-btn-flat.danger { color: var(--danger); }
+.vault-app .custom-field-row { display: flex; align-items: center; gap: 6px; }
+.vault-app .custom-field-name { flex: 0 0 36%; min-width: 0; }
+.vault-app .custom-field-value { flex: 1; min-width: 0; }
+.vault-app .add-custom-field {
+  background: none; border: none; padding: 2px 0;
+  color: var(--accent); cursor: pointer;
+  font-size: 14px; font-weight: 500; text-align: left;
+}
+.vault-app .add-custom-field:hover { text-decoration: underline; }
 
 /* VAULT SHEET */
 .vault-app .sheet-backdrop {

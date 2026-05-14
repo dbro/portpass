@@ -1,10 +1,11 @@
 <script>
   import { get } from 'svelte/store'
+  import { tick } from 'svelte'
   import { dbItems, clipboardSession, clipboardContext } from '../store.js'
-  import { searchRecords, getRecordData } from '../wasm.js'
+  import { searchRecords, getRecordData, getTOTP } from '../wasm.js'
   import Icon from './Icon.svelte'
 
-  let { selectedUUID = null, excludeUUID = null, query = '', ontap, oncopy, storageKey = null } = $props()
+  let { selectedUUID = null, excludeUUID = null, query = '', ontap, oncopy, oncopytotp, storageKey = null } = $props()
 
   function loadGroupState() {
     if (!storageKey) return {}
@@ -22,9 +23,10 @@
     // Reload when storageKey becomes available (set after onMount in Dashboard)
     openGroups = loadGroupState()
   })
-  let contextMenu = $state(null) // { x, y, rec, uuid }
+  let contextMenu  = $state(null) // { x, y, rec, uuid }
   let flashedUUID  = $state(null)
   let flashedToken = null
+  let flashedField = $state(null)
   let animVariant  = $state(0)
 
   async function sha256(text) {
@@ -42,6 +44,7 @@
     if (!s || s.token !== flashedToken) {
       flashedUUID  = null
       flashedToken = null
+      flashedField = null
     }
   })
 
@@ -54,14 +57,29 @@
     if (flashedToken === ctx.token) return  // already showing the right drain
     ;(async () => {
       try {
-        const rec = getRecordData(ctx.uuid)
-        const value = { Username: rec.Username, Password: rec.Password, URL: rec.URL }[ctx.field]
+        let value
+        if (ctx.field === 'otp') {
+          value = getTOTP(ctx.uuid)?.code
+        } else {
+          const rec = getRecordData(ctx.uuid)
+          if (ctx.field.startsWith('custom-')) {
+            const idx = parseInt(ctx.field.slice(7))
+            value = rec.CustomFields?.[idx]?.Value
+          } else {
+            value = { Username: rec.Username, Password: rec.Password, URL: rec.URL, Email: rec.Email }[ctx.field]
+          }
+        }
         if (!value) return
         if (hashesEqual(await sha256(value), new Uint8Array(ctx.hash))
             && get(clipboardSession)?.token === ctx.token) {
+          flashedToken = ctx.token  // claim before yielding
+          flashedUUID  = null
+          flashedField = null
+          await tick()
+          if (get(clipboardSession)?.token !== ctx.token) return
           animVariant ^= 1
           flashedUUID  = ctx.uuid
-          flashedToken = ctx.token
+          flashedField = ctx.field
         }
       } catch {}
     })()
@@ -72,9 +90,15 @@
     if (token !== null) {
       const hash = Array.from(await sha256(value))
       clipboardContext.set({ token, field, uuid, hash })
+      // Claim the token synchronously before yielding — restore effect guard sees
+      // flashedToken === ctx.token and bails, preventing a race with this function.
+      flashedToken = token
+      flashedUUID  = null
+      flashedField = null
+      await tick()
       animVariant ^= 1
       flashedUUID  = uuid
-      flashedToken = token
+      flashedField = field
     }
   }
 
@@ -84,7 +108,7 @@
     const remaining = Math.max(50, s.expiresAt - Date.now())
     const elapsed   = Math.max(0, 30000 - remaining)
     const flash = elapsed > 100 ? '0ms' : '450ms'
-    return `--clip-delay: -${elapsed}ms; --drain-name: clip-drain-${animVariant}; --flash-duration: ${flash}`
+    return `--clip-delay: -${elapsed}ms; --drain-name: clip-drain-${animVariant}; --flash-name: clip-flash-${animVariant}; --flash-duration: ${flash}`
   }
 
   let groups = $derived.by(() => {
@@ -145,7 +169,7 @@
     try {
       const rec = getRecordData(uuid)
       // Clamp to viewport so menu doesn't appear off-screen
-      const menuW = 180, menuH = 160
+      const menuW = 180, menuH = 500
       const x = Math.min(e.clientX, window.innerWidth  - menuW - 8)
       const y = Math.min(e.clientY, window.innerHeight - menuH - 8)
       contextMenu = { x, y, rec, uuid }
@@ -160,6 +184,10 @@
   }
 
   function closeMenu() { contextMenu = null }
+
+  function truncate(str, max) {
+    return str.length <= max ? str : str.slice(0, max - 1) + '…'
+  }
 
   // Returns [{text, matched}] segments for inline highlighting
   function hl(text, q) {
@@ -234,7 +262,11 @@
                 class="record-row"
                 class:is-selected={r.uuid === selectedUUID}
                 class:clipboard-active={flashedUUID === r.uuid}
-                style={flashedUUID === r.uuid ? drainStyle() : ''}
+                style={flashedUUID === r.uuid
+                  ? (flashedField === 'otp'
+                     ? `--drain-name: clip-drain-${animVariant}; --flash-name: clip-flash-${animVariant}; --clip-delay: -30000ms; --flash-duration: 450ms`
+                     : drainStyle())
+                  : ''}
                 onclick={() => handleClick(r.uuid)}
                 ondblclick={() => handleDblClick(r.uuid)}
                 oncontextmenu={e => handleContextMenu(e, r.uuid)}
@@ -267,22 +299,32 @@
   >
     {#if contextMenu.rec.Username}
       <button onclick={() => { handleCopy(contextMenu.rec.Username, contextMenu.uuid, 'Username'); closeMenu() }}>
-        Copy username
+        <span>Copy username</span><span class="ctx-keys"><kbd>Ctrl</kbd><kbd>B</kbd></span>
       </button>
     {/if}
     {#if contextMenu.rec.Password}
       <button onclick={() => { handleCopy(contextMenu.rec.Password, contextMenu.uuid, 'Password'); closeMenu() }}>
-        Copy password
+        <span>Copy password</span><span class="ctx-keys"><kbd>Ctrl</kbd><kbd>C</kbd></span>
       </button>
     {/if}
     {#if contextMenu.rec.URL}
       <button onclick={() => { handleCopy(contextMenu.rec.URL, contextMenu.uuid, 'URL'); closeMenu() }}>
-        Copy URL
+        <span>Copy URL</span><span class="ctx-keys"><kbd>Ctrl</kbd><kbd>U</kbd></span>
       </button>
       <button onclick={() => { window.open(contextMenu.rec.URL, '_blank'); closeMenu() }}>
-        Visit URL
+        <span>Visit URL</span><span class="ctx-keys"><kbd>↵</kbd></span>
       </button>
     {/if}
+    {#if contextMenu.rec.TwoFactorKey}
+      <button onclick={async () => { const u = contextMenu.uuid; closeMenu(); await oncopytotp(u) }}>
+        <span>Copy one-time code</span><span class="ctx-keys"><kbd>Ctrl</kbd><kbd>T</kbd></span>
+      </button>
+    {/if}
+    {#each (contextMenu.rec.CustomFields ?? []).slice(0, 9) as cf, i}
+      <button onclick={() => { handleCopy(cf.Value, contextMenu.uuid, `custom-${i}`); closeMenu() }}>
+        <span>Copy {truncate(cf.Name, 14)}</span><span class="ctx-keys"><kbd>Ctrl</kbd><kbd>{i + 1}</kbd></span>
+      </button>
+    {/each}
   </div>
 {/if}
 
@@ -303,7 +345,7 @@
   .ctx-menu {
     position: fixed;
     z-index: 100;
-    min-width: 160px;
+    min-width: 210px;
     background: var(--surface);
     border: 1px solid var(--border-strong);
     border-radius: var(--r-input);
@@ -314,9 +356,11 @@
   }
 
   .ctx-menu button {
-    display: block;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
     width: 100%;
-    text-align: left;
     padding: 9px 12px;
     border: none;
     border-radius: 6px;
@@ -328,5 +372,18 @@
 
   .ctx-menu button:hover {
     background: var(--surface-2);
+  }
+
+  .ctx-keys {
+    display: flex;
+    gap: 3px;
+    flex-shrink: 0;
+  }
+
+  .ctx-menu kbd {
+    font-size: 11px;
+    font-family: inherit;
+    font-weight: normal;
+    color: var(--text-soft);
   }
 </style>

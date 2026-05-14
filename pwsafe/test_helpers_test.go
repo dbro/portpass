@@ -139,6 +139,15 @@ func recordEqual(r, other Record) (bool, error) {
 	if r.Title != other.Title {
 		return false, fmt.Errorf("Title: %q != %q", r.Title, other.Title)
 	}
+	if !slices.Equal(r.TwoFactorKey, other.TwoFactorKey) {
+		return false, fmt.Errorf("TwoFactorKey mismatch")
+	}
+	if r.TOTPLength != other.TOTPLength {
+		return false, fmt.Errorf("TOTPLength: %v != %v", r.TOTPLength, other.TOTPLength)
+	}
+	if r.TOTPTimeStep != other.TOTPTimeStep {
+		return false, fmt.Errorf("TOTPTimeStep: %v != %v", r.TOTPTimeStep, other.TOTPTimeStep)
+	}
 	if r.URL != other.URL {
 		return false, fmt.Errorf("URL: %v != %v", r.URL, other.URL)
 	}
