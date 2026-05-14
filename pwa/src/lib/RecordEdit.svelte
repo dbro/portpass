@@ -52,8 +52,8 @@
   }
 
   // Destructure once to capture initial prop values — draft is an independent editable copy
-  const { Title = '', Group = '', Username = '', Password = '', URL = '', Notes = '' } = untrack(() => record ?? {})
-  let draft = $state({ Title, Group, Username, Password, URL, Notes })
+  const { Title = '', Group = '', Username = '', Password = '', URL = '', Email = '', Notes = '' } = untrack(() => record ?? {})
+  let draft = $state({ Title, Group, Username, Password, URL, Email, Notes })
 
   // TOTP state — kept separate from draft; merged into save call
   let totpSecret   = $state(untrack(() => base64ToBase32(record?.TwoFactorKey ?? '')))
@@ -356,6 +356,13 @@
       <span class="field-label muted">URL</span>
       <input class="input" value={draft.URL} oninput={e => set('URL', e.target.value)}/>
     </label>
+
+    <label class="field">
+      <span class="field-label muted">Email</span>
+      <input class="input" type="email" value={draft.Email} oninput={e => set('Email', e.target.value)}/>
+    </label>
+
+    <div class="field-label muted">Custom fields</div>
 
     {#each customFields as cf, i}
       <div class="custom-field-row">

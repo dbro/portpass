@@ -66,7 +66,7 @@
             const idx = parseInt(ctx.field.slice(7))
             value = rec.CustomFields?.[idx]?.Value
           } else {
-            value = { Username: rec.Username, Password: rec.Password, URL: rec.URL }[ctx.field]
+            value = { Username: rec.Username, Password: rec.Password, URL: rec.URL, Email: rec.Email }[ctx.field]
           }
         }
         if (!value) return

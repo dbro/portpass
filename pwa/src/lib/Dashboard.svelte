@@ -480,6 +480,7 @@
 
     if (!record) return
 
+    if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); startEdit(); return }
     if (e.key === 'Enter' && !e.target.matches('button, a')) {
       e.preventDefault()
       if (record.URL) window.open(record.URL, '_blank')
@@ -495,7 +496,7 @@
     if (e.ctrlKey && e.key === 'b') { e.preventDefault(); copyRecordField('Username'); return }
     if (e.ctrlKey && e.key === 'u') { e.preventDefault(); copyRecordField('URL'); return }
     if (e.ctrlKey && e.key === 't') { e.preventDefault(); copyTOTP(); return }
-    if (e.ctrlKey && e.key === 'e') { e.preventDefault(); startEdit(); return }
+    if (e.ctrlKey && e.key === 'e') { e.preventDefault(); copyRecordField('Email'); return }
     if (e.ctrlKey && e.key >= '1' && e.key <= '9') { e.preventDefault(); copyCustomField(parseInt(e.key) - 1); return }
   }
 </script>
@@ -569,14 +570,15 @@
       <div class="help-rows">
         <div class="help-row"><span>Focus search</span><div class="help-keys"><kbd>/</kbd></div></div>
         <div class="help-row"><span>Navigate list</span><div class="help-keys"><kbd>↑</kbd><kbd>↓</kbd></div></div>
-        <div class="help-row"><span>Visit URL</span><div class="help-keys"><kbd>↵</kbd></div></div>
-        <div class="help-row"><span>New entry</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>+</kbd></div></div>
-        <div class="help-row"><span>Copy password</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>C</kbd></div></div>
         <div class="help-row"><span>Copy username</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>B</kbd></div></div>
-        <div class="help-row"><span>Copy URL</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>U</kbd></div></div>
+        <div class="help-row"><span>Copy password</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>C</kbd></div></div>
         <div class="help-row"><span>Copy one-time code</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>T</kbd></div></div>
+        <div class="help-row"><span>Copy URL</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>U</kbd></div></div>
+        <div class="help-row"><span>Visit URL</span><div class="help-keys"><kbd>↵</kbd></div></div>
+        <div class="help-row"><span>Copy email</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>E</kbd></div></div>
         <div class="help-row"><span>Copy custom field 1–9</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>1–9</kbd></div></div>
-        <div class="help-row"><span>Edit entry</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>E</kbd></div></div>
+        <div class="help-row"><span>Edit entry</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>↵</kbd></div></div>
+        <div class="help-row"><span>New entry</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>+</kbd></div></div>
         <div class="help-row"><span>Lock vault</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>L</kbd></div></div>
         <div class="help-row"><span>Clear search / close</span><div class="help-keys"><kbd>Esc</kbd></div></div>
         <div class="help-row"><span>This help</span><div class="help-keys"><kbd>?</kbd></div></div>

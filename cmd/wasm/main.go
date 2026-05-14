@@ -217,6 +217,8 @@ func updateRecordFields(this js.Value, args []js.Value) interface{} {
 			rec.Password = value
 		case "URL":
 			rec.URL = value
+		case "Email":
+			rec.Email = value
 		case "Notes":
 			rec.Notes = value
 		case "TwoFactorKey":

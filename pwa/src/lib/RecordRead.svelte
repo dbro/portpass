@@ -75,7 +75,7 @@
         const idx = parseInt(ctx.field.slice(7))
         value = record.CustomFields?.[idx]?.Value
       } else {
-        value = { Username: record.Username, Password: record.Password, URL: record.URL }[ctx.field]
+        value = { Username: record.Username, Password: record.Password, URL: record.URL, Email: record.Email }[ctx.field]
       }
       if (!value) return
       if (hashesEqual(await sha256(value), new Uint8Array(ctx.hash))
@@ -229,24 +229,6 @@
       </div>
     {/if}
 
-    {#if record.URL}
-      <div class="copy-row" class:clipboard-active={copiedField === 'URL'} style={copiedField === 'URL' ? drainStyle() : ''}
-        onclick={() => handleCopy(record.URL, 'URL')}>
-        <div class="copy-row-label muted">URL</div>
-        <div class="copy-row-main">
-          <div class="copy-row-value">{record.URL}</div>
-          <div class="copy-row-actions" onclick={e => e.stopPropagation()}>
-            <a class="icon-btn-flat" href={record.URL} target="_blank" rel="noreferrer" aria-label="Open URL">
-              <Icon name="external" size={18}/>
-            </a>
-            <button class="icon-btn-flat copy-btn" onclick={() => handleCopy(record.URL, 'URL')} aria-label="Copy URL">
-              <Icon name="copy" size={18}/>
-            </button>
-          </div>
-        </div>
-      </div>
-    {/if}
-
   {#if record.TwoFactorKey}
     <div class="copy-row" class:clipboard-active={copiedField === 'otp'}
       style={copiedField === 'otp' ? `--drain-name: clip-drain-${animVariant}; --flash-name: clip-flash-${animVariant}; --clip-delay: -30000ms; --flash-duration: 450ms` : ''}
@@ -277,6 +259,39 @@
             style="width:{(totpData.seconds / totpData.period) * 100}%"></div>
         </div>
       {/if}
+    </div>
+  {/if}
+
+    {#if record.URL}
+      <div class="copy-row" class:clipboard-active={copiedField === 'URL'} style={copiedField === 'URL' ? drainStyle() : ''}
+        onclick={() => handleCopy(record.URL, 'URL')}>
+        <div class="copy-row-label muted">URL</div>
+        <div class="copy-row-main">
+          <div class="copy-row-value">{record.URL}</div>
+          <div class="copy-row-actions" onclick={e => e.stopPropagation()}>
+            <a class="icon-btn-flat" href={record.URL} target="_blank" rel="noreferrer" aria-label="Open URL">
+              <Icon name="external" size={18}/>
+            </a>
+            <button class="icon-btn-flat copy-btn" onclick={() => handleCopy(record.URL, 'URL')} aria-label="Copy URL">
+              <Icon name="copy" size={18}/>
+            </button>
+          </div>
+        </div>
+      </div>
+    {/if}
+
+  {#if record.Email}
+    <div class="copy-row" class:clipboard-active={copiedField === 'Email'} style={copiedField === 'Email' ? drainStyle() : ''}
+      onclick={() => handleCopy(record.Email, 'Email')}>
+      <div class="copy-row-label muted">Email</div>
+      <div class="copy-row-main">
+        <div class="copy-row-value">{record.Email}</div>
+        <div class="copy-row-actions" onclick={e => e.stopPropagation()}>
+          <button class="icon-btn-flat copy-btn" onclick={() => handleCopy(record.Email, 'Email')} aria-label="Copy email">
+            <Icon name="copy" size={18}/>
+          </button>
+        </div>
+      </div>
     </div>
   {/if}
 
