@@ -372,7 +372,7 @@
     </div>
   {/if}
 
-  {#if record.ModTime}
+  {#if record.ModTime && new Date(record.ModTime).getTime() > 0}
     <div class="record-meta muted">Modified {relTime(record.ModTime)}</div>
   {/if}
 </div>
