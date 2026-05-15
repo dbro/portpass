@@ -125,6 +125,7 @@ func getDBInfo(this js.Value, args []js.Value) interface{} {
 		What        string `json:"what"`
 		When        string `json:"when"`
 		Who         string `json:"who"`
+		Iter        uint32 `json:"iter"`
 	}
 
 	// UUID to string
@@ -167,6 +168,7 @@ func getDBInfo(this js.Value, args []js.Value) interface{} {
 		What:        string(db.Header.LastSaveBy),
 		When:        db.Header.LastSave.String(),
 		Who:         string(db.Header.LastSaveUser),
+		Iter:        db.Iter,
 	}
 
 	jsonData, err := json.Marshal(info)
