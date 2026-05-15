@@ -254,29 +254,31 @@ func (r *Record) marshal() ([]byte, []byte, error) {
 		return nil, nil, fmt.Errorf("PasswordExpiryInterval %d exceeds maximum of %d", r.PasswordExpiryInterval, PasswordExpiryIntervalMax)
 	}
 	appendField(recordRunCommand, []byte(r.RunCommand))
-	appendField(recordDoubleClickAction, r.DoubleClickAction[:])
+	if r.DoubleClickAction != [2]byte{} {
+		appendField(recordDoubleClickAction, r.DoubleClickAction[:])
+	}
 	appendField(recordEmail, []byte(r.Email))
 	if r.ProtectedEntry != 0 {
 		appendField(recordProtectedEntry, []byte{r.ProtectedEntry})
 	}
 	appendField(recordOwnSymbolsForPassword, []byte(r.OwnSymbolsForPassword))
-	appendField(recordShiftDoubleClickAction, r.ShiftDoubleClickAction[:])
+	if r.ShiftDoubleClickAction != [2]byte{} {
+		appendField(recordShiftDoubleClickAction, r.ShiftDoubleClickAction[:])
+	}
 	appendField(recordPasswordPolicyName, []byte(r.PasswordPolicyName))
 
 	if len(r.TwoFactorKey) > 0 {
 		encodedKey := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(r.TwoFactorKey)
 		appendField(recordTwoFactorKey, []byte(encodedKey))
-		appendField(recordTOTPConfig, []byte{r.TOTPConfig})
-		length := r.TOTPLength
-		if length == 0 {
-			length = 6
+		if r.TOTPConfig != 0 {
+			appendField(recordTOTPConfig, []byte{r.TOTPConfig})
 		}
-		appendField(recordTOTPLength, []byte{length})
-		step := r.TOTPTimeStep
-		if step == 0 {
-			step = 30
+		if r.TOTPLength != 0 && r.TOTPLength != 6 {
+			appendField(recordTOTPLength, []byte{r.TOTPLength})
 		}
-		appendField(recordTOTPTimeStep, []byte{step})
+		if r.TOTPTimeStep != 0 && r.TOTPTimeStep != 30 {
+			appendField(recordTOTPTimeStep, []byte{r.TOTPTimeStep})
+		}
 		if !r.TOTPStartTime.IsZero() {
 			ts := uint64(r.TOTPStartTime.Unix())
 			tsBytes := make([]byte, 5)
@@ -365,8 +367,8 @@ func marshalCustomFields(fields []CustomField) []byte {
 		if i > 0 {
 			sb.WriteString("000000")
 		}
-		sb.WriteString(fmt.Sprintf("01%04X%s", len(cf.Name), cf.Name))
-		sb.WriteString(fmt.Sprintf("02%04X%s", len(cf.Value), cf.Value))
+		sb.WriteString(fmt.Sprintf("01%04x%s", len(cf.Name), cf.Name))
+		sb.WriteString(fmt.Sprintf("02%04x%s", len(cf.Value), cf.Value))
 		if cf.Sensitive {
 			sb.WriteString("0300011")
 		} else {

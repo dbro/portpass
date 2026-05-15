@@ -153,9 +153,32 @@
         <button class="vault-add-notes" onclick={() => showNotes = true}>+ Add notes</button>
       {/if}
     </div>
-    <div class="vault-file">
+    <div class="vault-stats">
+      <div class="vault-stat">
+        <span class="vault-stat-num">{passwordCount}</span>
+        <span class="vault-stat-label muted">passwords</span>
+      </div>
+      {#if groupCount > 0}
+        <div class="vault-stat-divider"></div>
+        <div class="vault-stat">
+          <span class="vault-stat-num">{groupCount}</span>
+          <span class="vault-stat-label muted">groups</span>
+        </div>
+      {/if}
+    </div>
+    <div class="vault-file" style="margin-bottom:12px">
       <span class="vault-file-label">FILE</span>
       <span class="vault-file-value mono">{filename}</span>
+    </div>
+    <div class="vault-file-row">
+      <div class="vault-file">
+        <span class="vault-file-label">FORMAT</span>
+        <span class="vault-file-value">{info?.version ?? '—'}</span>
+      </div>
+      <div class="vault-file">
+        <span class="vault-file-label">ITERATIONS</span>
+        <span class="vault-file-value">{info?.iter?.toLocaleString() ?? '—'}</span>
+      </div>
     </div>
   </div>
 
@@ -199,23 +222,6 @@
       </div>
     </div>
   {/if}
-
-  <div class="vault-section">
-    <div class="vault-section-title">CONTENTS</div>
-    <div class="vault-stats">
-      <div class="vault-stat">
-        <span class="vault-stat-num">{passwordCount}</span>
-        <span class="vault-stat-label muted">passwords</span>
-      </div>
-      {#if groupCount > 0}
-        <div class="vault-stat-divider"></div>
-        <div class="vault-stat">
-          <span class="vault-stat-num">{groupCount}</span>
-          <span class="vault-stat-label muted">groups</span>
-        </div>
-      {/if}
-    </div>
-  </div>
 
   <div class="vault-section">
     <div class="vault-section-title">ABOUT</div>
@@ -289,6 +295,7 @@
     display: flex;
     align-items: center;
     gap: 28px;
+    margin: 20px 0 20px;
   }
 
   .vault-stat {
@@ -344,6 +351,12 @@
     color: var(--accent);
     padding: 4px 0;
     text-align: left;
+  }
+
+  .vault-file-row {
+    display: flex;
+    gap: 32px;
+    flex-wrap: wrap;
   }
 
   .vault-file {

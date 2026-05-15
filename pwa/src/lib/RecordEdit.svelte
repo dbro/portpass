@@ -12,6 +12,8 @@
     let bits = '', out = ''
     for (const b of bytes) bits += b.toString(2).padStart(8, '0')
     for (let i = 0; i + 5 <= bits.length; i += 5) out += B32[parseInt(bits.slice(i, i + 5), 2)]
+    const rem = bits.length % 5
+    if (rem > 0) out += B32[parseInt(bits.slice(-rem).padEnd(5, '0'), 2)]
     return out
   }
 
