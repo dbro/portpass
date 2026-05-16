@@ -176,7 +176,7 @@
         <span class="vault-file-value">{info?.version ?? '—'}</span>
       </div>
       <div class="vault-file">
-        <span class="vault-file-label">ITERATIONS</span>
+        <span class="vault-file-label">UNLOCK DIFFICULTY</span>
         <span class="vault-file-value">{info?.iter?.toLocaleString() ?? '—'}</span>
       </div>
     </div>
