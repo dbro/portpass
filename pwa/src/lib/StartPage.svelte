@@ -1,15 +1,15 @@
 <script>
   import { onMount } from 'svelte'
-  import { get as idbGet, set as idbSet, del as idbDel } from 'idb-keyval'
+  import { get as idbGet, set as idbSet } from 'idb-keyval'
   import { openDatabase, createDatabase, getDatabaseData, getDatabaseInfo } from '../wasm.js'
   import { selectedFile, dbItems } from '../store.js'
   import {
     isBiometricSupported, isBiometricEnrolledForFile,
-    enrollBiometric, unlockWithBiometric, clearBiometric,
+    enrollBiometric, unlockWithBiometric, clearBiometricForFile,
   } from './biometric.js'
   import Icon from './Icon.svelte'
 
-  let { onopened } = $props()
+  let { onopened, autoBiometric = true } = $props()
 
   function focusOnMount(node, condition = true) {
     if (condition) setTimeout(() => node.focus(), 0)
@@ -28,16 +28,27 @@
 
   const supportsFilePicker = typeof window !== 'undefined' && 'showOpenFilePicker' in window
 
+  async function getRecentHandles() {
+    return (await idbGet('recentHandles')) ?? []
+  }
+
+  async function pushRecentHandle(handle) {
+    const handles = await getRecentHandles()
+    const updated = [handle, ...handles.filter(h => h.name !== handle.name)].slice(0, 10)
+    await idbSet('recentHandles', updated)
+  }
+
   onMount(async () => {
     biometricAvailable = await isBiometricSupported()
 
     if (!supportsFilePicker) return
     try {
-      const handle = await idbGet('lastHandle')
-      if (!handle) return
-      fileHandle = handle
+      const handles = await getRecentHandles()
+      if (!handles.length) return
+      fileHandle = handles[0]
       mode = 'unlock'
-      biometricEnrolled = await isBiometricEnrolledForFile(handle.name)
+      biometricEnrolled = await isBiometricEnrolledForFile(fileHandle.name)
+      if (biometricEnrolled && autoBiometric) unlockBiometric()
     } catch {}
   })
 
@@ -57,7 +68,7 @@
 
   // After a successful vault open, check whether to offer biometric enrollment.
   // The offer is shown at most once per vault file — if dismissed, the user can
-  // enable fast unlock later from the vault settings sheet.
+  // enable biometric/PIN unlock later from the vault settings sheet.
   function afterUnlock() {
     const offerKey = `biometric-offered-${fileHandle?.name}`
     if (biometricAvailable && !biometricEnrolled && !localStorage.getItem(offerKey)) {
@@ -82,8 +93,9 @@
       const buf  = await file.arrayBuffer()
       openDatabase(new Uint8Array(buf), password)
       dbItems.set(getDatabaseData())
-      selectedFile.set({ handle: fileHandle, name: fileHandle.name })
-      try { await idbSet('lastHandle', fileHandle) } catch {}
+      const writable = await probeWriteAccess(fileHandle)
+      selectedFile.set({ handle: fileHandle, name: fileHandle.name, readonly: !writable })
+      try { await pushRecentHandle(fileHandle) } catch {}
       afterUnlock()
     } catch (e) {
       error = 'Wrong password or invalid file.'
@@ -98,7 +110,7 @@
     try {
       let pw
       try {
-        pw = await unlockWithBiometric()
+        pw = await unlockWithBiometric(fileHandle.name)
       } catch (e) {
         error = e.name === 'NotAllowedError' ? 'Biometric authentication cancelled.' : e.message
         console.error(e)
@@ -115,14 +127,15 @@
       try {
         openDatabase(new Uint8Array(buf), pw)
       } catch {
-        await clearBiometric()
+        await clearBiometricForFile(fileHandle.name)
         biometricEnrolled = false
-        error = 'Fast unlock is out of date — please enter your master password.'
+        error = 'Biometric/PIN unlock is out of date — please enter your master password.'
         return
       }
       dbItems.set(getDatabaseData())
-      selectedFile.set({ handle: fileHandle, name: fileHandle.name })
-      await idbSet('lastHandle', fileHandle)
+      const writable = await probeWriteAccess(fileHandle)
+      selectedFile.set({ handle: fileHandle, name: fileHandle.name, readonly: !writable })
+      await pushRecentHandle(fileHandle)
       onopened()
     } finally {
       busy = false
@@ -159,12 +172,25 @@
     }
   }
 
+  async function probeWriteAccess(handle) {
+    try {
+      const w = await handle.createWritable()
+      await w.abort()
+      return true
+    } catch {
+      return false
+    }
+  }
+
   function switchFile() {
     fileHandle = null; password = ''; error = ''; mode = 'landing'
   }
 
   async function handleFileMissing() {
-    try { await idbDel('lastHandle') } catch {}
+    try {
+      const handles = await getRecentHandles()
+      await idbSet('recentHandles', handles.filter(h => h.name !== fileHandle?.name))
+    } catch {}
     fileHandle = null; password = ''; mode = 'landing'
     error = 'Vault file not found — it may have been moved or deleted.'
   }
@@ -173,7 +199,7 @@
 {#if mode === 'landing'}
   <div class="start-landing">
     <div class="start-mark">
-      <img src="{import.meta.env.BASE_URL}icon.svg" alt="Portpass" style="width:64px;height:64px" />
+      <img src="{import.meta.env.BASE_URL}icon.svg" alt="Portpass" style="width:80px;height:80px" />
     </div>
     <div class="start-title">Portpass</div>
     <div class="start-sub muted">Your passwords, on your device.</div>
@@ -200,7 +226,7 @@
   <div class="unlock-screen">
     <div class="unlock-stack">
       <div class="unlock-mark">
-        <img src="{import.meta.env.BASE_URL}icon.svg" alt="Portpass" style="width:56px;height:56px" />
+        <img src="{import.meta.env.BASE_URL}icon.svg" alt="Portpass" style="width:64px;height:64px" />
       </div>
       <div class="unlock-vault">{fileHandle?.name ?? 'Vault'}</div>
       <div class="unlock-sub muted">Vault is locked</div>
@@ -208,7 +234,7 @@
       {#if biometricEnrolled}
         <button class="btn btn-biometric" disabled={busy} onclick={unlockBiometric}>
           <Icon name="face-id" size={22}/>
-          <span>Fast unlock</span>
+          <span>Unlock with biometric/PIN</span>
         </button>
         <div class="unlock-or muted">or use master password</div>
       {/if}
@@ -242,7 +268,7 @@
   <div class="unlock-screen">
     <div class="unlock-stack">
       <div class="unlock-mark"><Icon name="face-id" size={28}/></div>
-      <div class="unlock-vault">Enable fast unlock?</div>
+      <div class="unlock-vault">Enable biometric/PIN unlock?</div>
       <div class="unlock-sub muted" style="text-align:left;max-width:320px">
         Skip typing your master password each time you open Portpass. Your device will offer one or more options:
       </div>
@@ -256,7 +282,7 @@
       {#if error}<div class="unlock-error">{error}</div>{/if}
 
       <button class="btn btn-primary" disabled={busy} onclick={enableBiometric}>
-        {busy ? 'Setting up…' : 'Enable fast unlock'}
+        {busy ? 'Setting up…' : 'Enable biometric/PIN unlock'}
       </button>
 
       <button class="btn-text muted" onclick={onopened}>Not now</button>
@@ -268,7 +294,7 @@
   <div class="unlock-screen">
     <div class="unlock-stack">
       <div class="unlock-mark">
-        <img src="{import.meta.env.BASE_URL}icon.svg" alt="Portpass" style="width:56px;height:56px" />
+        <img src="{import.meta.env.BASE_URL}icon.svg" alt="Portpass" style="width:64px;height:64px" />
       </div>
       <div class="unlock-vault">New vault</div>
       <div class="unlock-sub muted">Choose a master password</div>

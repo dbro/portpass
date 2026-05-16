@@ -22,6 +22,7 @@ Portpass is different: your passwords live in a file on your device, or in a clo
 * encrypts your vault using an established open source format (pwsafe v3)
 * stores your vault as a file on your device, for easy sync/backup
 * supports convenient alternate unlock methods: fingerprint, face recognition, and PIN
+* has a mobile-first design with both light and dark modes
 
 ## Installation
 
@@ -45,14 +46,39 @@ Because your vault is a regular file, syncing across devices is straightforward 
 
 Portpass reads and writes the [Password Safe v3](https://github.com/pwsafe/pwsafe/blob/master/docs/formatV3.txt) format, the same format used by [dozens of apps](https://pwsafe.org/relatedprojects.shtml) across all major platforms. This means you can switch apps at any time without losing your data — your vault file works with any compatible application, now and in the future.
 
+## Compared to Password Safe
+
+[Password Safe](https://pwsafe.org/) is the original app for this file format, available as a native desktop app for Windows and Linux. Portpass and Password Safe share the same vault format, so your data is never locked in.
+
+**Features in Password Safe not currently supported by Portpass:**
+
+- Autofill passwords into other apps (requires a browser extension or native helper app)
+- Automatic vault lock after an idle timeout
+- Password strength indicator and breach alerts
+- Password entry aliases (re-using a password across multiple sites)
+- Passphrase generation (diceware / word lists)
+- Multiple password generation policies
+- File attachments and passkeys stored in the vault
+- Export and import in other formats
+- SSH agent integration
+- Automatic file version backups
+- Adjustable unlock difficulty count
+
+**What Portpass offers that Password Safe does not:**
+
+- Runs in any modern browser — no installation required
+- Works on mobile (iOS, Android) with a touch-friendly interface
+- Biometric/PIN unlock via fingerprint, face recognition, PIN, or hardware security key (WebAuthn PRF — YubiKey series 5+ may work but is untested)
+- Light/dark themes with selectable accent colors
+
 ## How it works
 
 Portpass runs entirely in your browser using WebAssembly, a technology that lets compiled code run securely in the browser at near-native speed. All cryptography happens on your device. Your vault file and master password never leave it.
 There is no server, no account, and nothing to trust except the open source code, which is freely available to inspect on GitHub.
 
-**Fast unlock** can be enabled to use your device's built-in authentication (fingerprint, face recognition, or PIN) so you don't have to type your master password on repeat visits. Your master password is encrypted with a key only your device can produce and stored locally, it is never transmitted anywhere.
+**Biometric/PIN unlock** can be enabled to use your device's built-in authentication (fingerprint, face recognition, or PIN) so you don't have to type your master password on repeat visits. Your master password is encrypted with a key only your device can produce and stored locally, it is never transmitted anywhere.
 
-On Android, Chrome routes fast unlock setup through [Google Password Manager](https://passwords.google.com/), which requires a recovery PIN to have been set up previously. Google Password Manager stores a synced copy of the passkey in Google's cloud (but not your vault's master password, which always stays on your device). To set up or reset a Google Password Manager recovery PIN, visit [passwords.google.com/passkeys/reset/intro](https://passwords.google.com/passkeys/reset/intro).
+On Android, Chrome routes biometric/PIN unlock setup through [Google Password Manager](https://passwords.google.com/), which requires a recovery PIN to have been set up previously. Google Password Manager stores a synced copy of the passkey in Google's cloud (but not your vault's master password, which always stays on your device). To set up or reset a Google Password Manager recovery PIN, visit [passwords.google.com/passkeys/reset/intro](https://passwords.google.com/passkeys/reset/intro).
 
 ## Security
 

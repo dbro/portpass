@@ -1,7 +1,17 @@
 import { get, set, del } from 'idb-keyval'
 
-const STORAGE_KEY = 'biometric-v1'
-const PRF_SALT    = new TextEncoder().encode('portpass-v1')
+const STORAGE_KEY    = 'biometric-v1'
+const PRF_SALT       = new TextEncoder().encode('portpass-v1')
+const MAX_ENROLLMENTS = 10
+
+async function getEnrollments() {
+  return (await get(STORAGE_KEY)) ?? []
+}
+
+async function saveEnrollments(arr) {
+  if (arr.length === 0) await del(STORAGE_KEY)
+  else await set(STORAGE_KEY, arr)
+}
 
 export async function isBiometricSupported() {
   if (!window.PublicKeyCredential) return false
@@ -14,8 +24,8 @@ export async function isBiometricSupported() {
 export async function isBiometricEnrolled(vaultUuid) {
   if (!vaultUuid) return false
   try {
-    const stored = await get(STORAGE_KEY)
-    return !!(stored && stored.vaultUuid === vaultUuid)
+    const enrollments = await getEnrollments()
+    return enrollments.some(e => e.vaultUuid === vaultUuid)
   } catch { return false }
 }
 
@@ -23,12 +33,12 @@ export async function isBiometricEnrolled(vaultUuid) {
 export async function isBiometricEnrolledForFile(filename) {
   if (!filename) return false
   try {
-    const stored = await get(STORAGE_KEY)
-    return !!(stored && stored.filename === filename)
+    const enrollments = await getEnrollments()
+    return enrollments.some(e => e.filename === filename)
   } catch { return false }
 }
 
-// Overwrites any existing enrollment with a new credential tied to this vault.
+// Upserts an enrollment for this vault, keeping up to MAX_ENROLLMENTS total.
 export async function enrollBiometric(masterPassword, vaultUuid, filename) {
   const challenge = crypto.getRandomValues(new Uint8Array(32))
   const userId    = crypto.getRandomValues(new Uint8Array(16))
@@ -63,17 +73,22 @@ export async function enrollBiometric(masterPassword, vaultUuid, filename) {
     new TextEncoder().encode(masterPassword)
   )
 
-  await set(STORAGE_KEY, {
+  const enrollment = {
     vaultUuid,
     filename,
     credentialId: Array.from(new Uint8Array(cred.rawId)),
     iv:           Array.from(iv),
     ciphertext:   Array.from(new Uint8Array(ciphertext)),
-  })
+  }
+
+  const existing = await getEnrollments()
+  const filtered = existing.filter(e => e.vaultUuid !== vaultUuid)
+  await saveEnrollments([enrollment, ...filtered].slice(0, MAX_ENROLLMENTS))
 }
 
-export async function unlockWithBiometric() {
-  const stored = await get(STORAGE_KEY)
+export async function unlockWithBiometric(filename) {
+  const enrollments = await getEnrollments()
+  const stored = enrollments.find(e => e.filename === filename)
   if (!stored) throw new Error('No biometric enrollment found.')
 
   const assertion = await navigator.credentials.get({
@@ -99,8 +114,16 @@ export async function unlockWithBiometric() {
   return new TextDecoder().decode(plaintext)
 }
 
-export async function clearBiometric() {
-  await del(STORAGE_KEY)
+// Remove enrollment for a specific vault UUID (used when disabling from vault settings).
+export async function clearBiometric(vaultUuid) {
+  const enrollments = await getEnrollments()
+  await saveEnrollments(enrollments.filter(e => e.vaultUuid !== vaultUuid))
+}
+
+// Remove enrollment by filename (used when a stale credential is detected on unlock).
+export async function clearBiometricForFile(filename) {
+  const enrollments = await getEnrollments()
+  await saveEnrollments(enrollments.filter(e => e.filename !== filename))
 }
 
 async function deriveKey(prfOutput) {

@@ -8,6 +8,8 @@
   let wasmReady = $state(false)
   let wasmError = $state(null)
   let view = $state('start') // 'start' | 'dashboard'
+  let hasBeenUnlocked = $state(false)
+  let multipleInstances = $state(false)
 
   let theme  = $state(localStorage.getItem('theme')  || 'dark')
   let accent = $state(localStorage.getItem('accent') || 'amber')
@@ -51,6 +53,16 @@
     isDesktop = mq.matches
     mq.addEventListener('change', e => { isDesktop = e.matches })
 
+    if (navigator.locks) {
+      const held = await new Promise(resolve => {
+        navigator.locks.request('portpass-singleton', { ifAvailable: true }, lock => {
+          resolve(!!lock)
+          if (lock) return new Promise(() => {}) // hold for app lifetime
+        })
+      })
+      if (!held) multipleInstances = true
+    }
+
     try {
       await loadWasm()
       wasmReady = true
@@ -74,7 +86,7 @@
       Loading…
     </div>
   {:else if view === 'start'}
-    <StartPage onopened={() => view = 'dashboard'} />
+    <StartPage autoBiometric={!hasBeenUnlocked} onopened={() => { hasBeenUnlocked = true; view = 'dashboard' }} />
   {:else}
     <Dashboard
       onclosed={() => view = 'start'}
@@ -85,5 +97,25 @@
       onaccent={a => accent = a}
     />
   {/if}
+  {#if multipleInstances}
+    <div class="multi-instance-warning">
+      Portpass is already open in another tab — saving from both may cause conflicts.
+    </div>
+  {/if}
   <Toast />
 </div>
+
+<style>
+  .multi-instance-warning {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    padding: 10px 16px;
+    background: var(--danger);
+    color: #fff;
+    font-size: 13px;
+    text-align: center;
+  }
+</style>
