@@ -85,7 +85,7 @@
   padding-top: 56px;
 }
 .vault-app .unlock-mark {
-  width: 64px; height: 64px; border-radius: 999px;
+  width: 64px; height: 64px; border-radius: 20%; overflow: hidden;
   background: var(--accent-soft); color: var(--accent-strong);
   display: flex; align-items: center; justify-content: center;
   margin-bottom: 4px;
@@ -119,7 +119,7 @@
   padding: 24px;
 }
 .vault-app .start-mark {
-  width: 80px; height: 80px; border-radius: 999px;
+  width: 80px; height: 80px; border-radius: 20%; overflow: hidden;
   background: var(--accent-soft); color: var(--accent-strong);
   display: flex; align-items: center; justify-content: center;
   margin-bottom: 8px;
