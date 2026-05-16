@@ -54,8 +54,8 @@ async function openVaultAndEnroll(page: Page) {
   await page.getByPlaceholder('Master password').fill('three3#;')
   await page.getByRole('button', { name: 'Unlock' }).click()
 
-  await expect(page.getByText('Enable fast unlock?')).toBeVisible({ timeout: 10000 })
-  await page.getByRole('button', { name: 'Enable fast unlock' }).click()
+  await expect(page.getByText('Enable biometric/PIN unlock?')).toBeVisible({ timeout: 10000 })
+  await page.getByRole('button', { name: 'Enable biometric/PIN unlock' }).click()
   await expect(page.getByPlaceholder('Search vault')).toBeVisible({ timeout: 10000 })
 }
 
@@ -70,7 +70,7 @@ async function openVaultNoEnroll(page: Page) {
   await page.getByPlaceholder('Master password').fill('three3#;')
   await page.getByRole('button', { name: 'Unlock' }).click()
 
-  await expect(page.getByText('Enable fast unlock?')).toBeVisible({ timeout: 10000 })
+  await expect(page.getByText('Enable biometric/PIN unlock?')).toBeVisible({ timeout: 10000 })
   await page.getByRole('button', { name: 'Not now' }).click()
   await expect(page.getByPlaceholder('Search vault')).toBeVisible({ timeout: 10000 })
 }
@@ -85,7 +85,7 @@ async function lockVault(page: Page) {
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 
-test.describe('Fast unlock', () => {
+test.describe('Biometric/PIN unlock', () => {
 
   test.describe('VaultSheet modal enrollment', () => {
 
@@ -97,9 +97,9 @@ test.describe('Fast unlock', () => {
       await expect(page.locator('.vault-toggle-help')).not.toHaveText('Enabled')
 
       // Click toggle — modal should appear
-      await page.getByRole('button', { name: 'Fast unlock' }).click()
+      await page.getByRole('button', { name: 'Biometric/PIN unlock' }).click()
       await expect(page.locator('.modal')).toBeVisible()
-      await expect(page.getByText('Enable fast unlock')).toBeVisible()
+      await expect(page.getByText('Enable biometric/PIN unlock')).toBeVisible()
 
       // Enter password and confirm
       await page.locator('.modal').getByPlaceholder('Master password').fill('three3#;')
@@ -114,7 +114,7 @@ test.describe('Fast unlock', () => {
       await openVaultNoEnroll(page)
 
       await page.locator('.vault-pill').click()
-      await page.getByRole('button', { name: 'Fast unlock' }).click()
+      await page.getByRole('button', { name: 'Biometric/PIN unlock' }).click()
       await expect(page.locator('.modal')).toBeVisible()
 
       await page.locator('.modal').getByRole('button', { name: 'Cancel' }).click()
@@ -127,7 +127,7 @@ test.describe('Fast unlock', () => {
       await openVaultNoEnroll(page)
 
       await page.locator('.vault-pill').click()
-      await page.getByRole('button', { name: 'Fast unlock' }).click()
+      await page.getByRole('button', { name: 'Biometric/PIN unlock' }).click()
       await expect(page.locator('.modal')).toBeVisible()
 
       await page.locator('.modal-overlay').click({ position: { x: 5, y: 5 } })
@@ -140,7 +140,7 @@ test.describe('Fast unlock', () => {
       await openVaultNoEnroll(page)
 
       await page.locator('.vault-pill').click()
-      await page.getByRole('button', { name: 'Fast unlock' }).click()
+      await page.getByRole('button', { name: 'Biometric/PIN unlock' }).click()
       await expect(page.locator('.modal')).toBeVisible()
 
       await page.locator('.modal').getByPlaceholder('Master password').fill('wrongpassword')

@@ -21,7 +21,7 @@
   })
 
   async function disableBiometric() {
-    await clearBiometric()
+    await clearBiometric(info?.uuid)
     biometricEnrolled = false
     setupMode = false
   }
@@ -182,6 +182,26 @@
     </div>
   </div>
 
+  {#if biometricAvailable}
+    <div class="vault-section">
+      <div class="vault-section-title">SECURITY</div>
+      <div class="vault-toggle">
+        <div class="vault-toggle-label">
+          <span class="vault-toggle-name">Biometric/PIN unlock</span>
+          <span class="vault-toggle-help">
+            {biometricEnrolled ? 'Enabled' : 'Use Face ID, fingerprint, or PIN instead of typing your password'}
+          </span>
+        </div>
+        <button
+          class="switch"
+          class:on={biometricEnrolled}
+          onclick={biometricEnrolled ? disableBiometric : startSetup}
+          aria-label="Biometric/PIN unlock"
+        ></button>
+      </div>
+    </div>
+  {/if}
+
   <div class="vault-section">
     <div class="vault-section-title">APPEARANCE</div>
     <div class="vault-row">
@@ -202,26 +222,6 @@
       </div>
     </div>
   </div>
-
-  {#if biometricAvailable}
-    <div class="vault-section">
-      <div class="vault-section-title">SECURITY</div>
-      <div class="vault-toggle">
-        <div class="vault-toggle-label">
-          <span class="vault-toggle-name">Biometric/PIN unlock</span>
-          <span class="vault-toggle-help">
-            {biometricEnrolled ? 'Enabled' : 'Use Face ID, fingerprint, or PIN instead of typing your password'}
-          </span>
-        </div>
-        <button
-          class="switch"
-          class:on={biometricEnrolled}
-          onclick={biometricEnrolled ? disableBiometric : startSetup}
-          aria-label="Biometric/PIN unlock"
-        ></button>
-      </div>
-    </div>
-  {/if}
 
   <div class="vault-section">
     <div class="vault-section-title">ABOUT</div>

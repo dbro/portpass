@@ -1,11 +1,11 @@
 <script>
   import { onMount } from 'svelte'
-  import { get as idbGet, set as idbSet, del as idbDel } from 'idb-keyval'
+  import { get as idbGet, set as idbSet } from 'idb-keyval'
   import { openDatabase, createDatabase, getDatabaseData, getDatabaseInfo } from '../wasm.js'
   import { selectedFile, dbItems } from '../store.js'
   import {
     isBiometricSupported, isBiometricEnrolledForFile,
-    enrollBiometric, unlockWithBiometric, clearBiometric,
+    enrollBiometric, unlockWithBiometric, clearBiometricForFile,
   } from './biometric.js'
   import Icon from './Icon.svelte'
 
@@ -28,16 +28,26 @@
 
   const supportsFilePicker = typeof window !== 'undefined' && 'showOpenFilePicker' in window
 
+  async function getRecentHandles() {
+    return (await idbGet('recentHandles')) ?? []
+  }
+
+  async function pushRecentHandle(handle) {
+    const handles = await getRecentHandles()
+    const updated = [handle, ...handles.filter(h => h.name !== handle.name)].slice(0, 10)
+    await idbSet('recentHandles', updated)
+  }
+
   onMount(async () => {
     biometricAvailable = await isBiometricSupported()
 
     if (!supportsFilePicker) return
     try {
-      const handle = await idbGet('lastHandle')
-      if (!handle) return
-      fileHandle = handle
+      const handles = await getRecentHandles()
+      if (!handles.length) return
+      fileHandle = handles[0]
       mode = 'unlock'
-      biometricEnrolled = await isBiometricEnrolledForFile(handle.name)
+      biometricEnrolled = await isBiometricEnrolledForFile(fileHandle.name)
       if (biometricEnrolled && autoBiometric) unlockBiometric()
     } catch {}
   })
@@ -85,7 +95,7 @@
       dbItems.set(getDatabaseData())
       const writable = await probeWriteAccess(fileHandle)
       selectedFile.set({ handle: fileHandle, name: fileHandle.name, readonly: !writable })
-      try { await idbSet('lastHandle', fileHandle) } catch {}
+      try { await pushRecentHandle(fileHandle) } catch {}
       afterUnlock()
     } catch (e) {
       error = 'Wrong password or invalid file.'
@@ -100,7 +110,7 @@
     try {
       let pw
       try {
-        pw = await unlockWithBiometric()
+        pw = await unlockWithBiometric(fileHandle.name)
       } catch (e) {
         error = e.name === 'NotAllowedError' ? 'Biometric authentication cancelled.' : e.message
         console.error(e)
@@ -117,7 +127,7 @@
       try {
         openDatabase(new Uint8Array(buf), pw)
       } catch {
-        await clearBiometric()
+        await clearBiometricForFile(fileHandle.name)
         biometricEnrolled = false
         error = 'Biometric/PIN unlock is out of date — please enter your master password.'
         return
@@ -125,7 +135,7 @@
       dbItems.set(getDatabaseData())
       const writable = await probeWriteAccess(fileHandle)
       selectedFile.set({ handle: fileHandle, name: fileHandle.name, readonly: !writable })
-      await idbSet('lastHandle', fileHandle)
+      await pushRecentHandle(fileHandle)
       onopened()
     } finally {
       busy = false
@@ -177,7 +187,10 @@
   }
 
   async function handleFileMissing() {
-    try { await idbDel('lastHandle') } catch {}
+    try {
+      const handles = await getRecentHandles()
+      await idbSet('recentHandles', handles.filter(h => h.name !== fileHandle?.name))
+    } catch {}
     fileHandle = null; password = ''; mode = 'landing'
     error = 'Vault file not found — it may have been moved or deleted.'
   }
