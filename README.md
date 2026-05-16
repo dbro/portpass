@@ -22,6 +22,7 @@ Portpass is different: your passwords live in a file on your device, or in a clo
 * encrypts your vault using an established open source format (pwsafe v3)
 * stores your vault as a file on your device, for easy sync/backup
 * supports convenient alternate unlock methods: fingerprint, face recognition, and PIN
+* has a mobile-first design with both light and dark modes
 
 ## Installation
 
@@ -44,6 +45,31 @@ Because your vault is a regular file, syncing across devices is straightforward 
 ## Compatibility & no vendor lock-in
 
 Portpass reads and writes the [Password Safe v3](https://github.com/pwsafe/pwsafe/blob/master/docs/formatV3.txt) format, the same format used by [dozens of apps](https://pwsafe.org/relatedprojects.shtml) across all major platforms. This means you can switch apps at any time without losing your data — your vault file works with any compatible application, now and in the future.
+
+## Compared to Password Safe
+
+[Password Safe](https://pwsafe.org/) is the original app for this file format, available as a native desktop app for Windows and Linux. Portpass and Password Safe share the same vault format, so your data is never locked in.
+
+**Features in Password Safe not currently supported by Portpass:**
+
+- Autofill passwords into other apps (requires a browser extension or native helper app)
+- Automatic vault lock after an idle timeout
+- Password strength indicator and breach alerts
+- Password entry aliases (re-using a password across multiple sites)
+- Passphrase generation (diceware / word lists)
+- Multiple password generation policies
+- File attachments and passkeys stored in the vault
+- Export and import in other formats
+- SSH agent integration
+- Automatic file version backups
+- Adjustable unlock difficulty count
+
+**What Portpass offers that Password Safe does not:**
+
+- Runs in any modern browser — no installation required
+- Works on mobile (iOS, Android) with a touch-friendly interface
+- Fast unlock via fingerprint, face recognition, PIN, or hardware security key (WebAuthn PRF — YubiKey series 5+ may work but is untested)
+- Light/dark themes with selectable accent colors
 
 ## How it works
 
