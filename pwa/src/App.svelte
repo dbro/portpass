@@ -8,6 +8,7 @@
   let wasmReady = $state(false)
   let wasmError = $state(null)
   let view = $state('start') // 'start' | 'dashboard'
+  let hasBeenUnlocked = $state(false)
 
   let theme  = $state(localStorage.getItem('theme')  || 'dark')
   let accent = $state(localStorage.getItem('accent') || 'amber')
@@ -74,7 +75,7 @@
       Loading…
     </div>
   {:else if view === 'start'}
-    <StartPage onopened={() => view = 'dashboard'} />
+    <StartPage autoBiometric={!hasBeenUnlocked} onopened={() => { hasBeenUnlocked = true; view = 'dashboard' }} />
   {:else}
     <Dashboard
       onclosed={() => view = 'start'}

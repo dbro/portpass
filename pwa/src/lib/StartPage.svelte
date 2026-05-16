@@ -9,7 +9,7 @@
   } from './biometric.js'
   import Icon from './Icon.svelte'
 
-  let { onopened } = $props()
+  let { onopened, autoBiometric = true } = $props()
 
   function focusOnMount(node, condition = true) {
     if (condition) setTimeout(() => node.focus(), 0)
@@ -38,6 +38,7 @@
       fileHandle = handle
       mode = 'unlock'
       biometricEnrolled = await isBiometricEnrolledForFile(handle.name)
+      if (biometricEnrolled && autoBiometric) unlockBiometric()
     } catch {}
   })
 
