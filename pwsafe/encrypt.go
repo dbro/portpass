@@ -19,7 +19,9 @@ func (db *V3) Encrypt(dbBuf io.Writer) error {
 	//update the LastSave time in the DB
 	db.Header.LastSave = time.Now()
 	db.Header.Version = [2]byte{0x10, 0x03} // DB Format version 0x0310
-	db.Header.LastSaveBy = []byte("github.com/dbro/gopwsafe " + Version)
+	db.Header.LastSaveBy = []byte("Portpass " + Version)
+	db.Header.LastSaveUser = nil
+	db.Header.LastSaveHost = nil
 
 	// Set unencrypted DB headers
 	if err := binary.Write(dbBuf, binary.LittleEndian, []byte("PWS3")); err != nil {
