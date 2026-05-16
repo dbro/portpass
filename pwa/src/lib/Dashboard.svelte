@@ -503,6 +503,12 @@
 
 <svelte:window onkeydown={handleKeydown}/>
 
+{#if $selectedFile?.readonly}
+  <div class="readonly-warning">
+    This vault is read-only — changes cannot be saved.
+  </div>
+{/if}
+
 <!-- TOP BAR -->
 <div class="topbar">
   <div class="topbar-left">
@@ -713,5 +719,18 @@
     border: 1px solid var(--border-strong);
     border-radius: 4px;
     padding: 1px 6px;
+  }
+
+  .readonly-warning {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    padding: 10px 16px;
+    background: var(--danger);
+    color: #fff;
+    font-size: 13px;
+    text-align: center;
   }
 </style>

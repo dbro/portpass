@@ -83,7 +83,8 @@
       const buf  = await file.arrayBuffer()
       openDatabase(new Uint8Array(buf), password)
       dbItems.set(getDatabaseData())
-      selectedFile.set({ handle: fileHandle, name: fileHandle.name })
+      const writable = await probeWriteAccess(fileHandle)
+      selectedFile.set({ handle: fileHandle, name: fileHandle.name, readonly: !writable })
       try { await idbSet('lastHandle', fileHandle) } catch {}
       afterUnlock()
     } catch (e) {
@@ -122,7 +123,8 @@
         return
       }
       dbItems.set(getDatabaseData())
-      selectedFile.set({ handle: fileHandle, name: fileHandle.name })
+      const writable = await probeWriteAccess(fileHandle)
+      selectedFile.set({ handle: fileHandle, name: fileHandle.name, readonly: !writable })
       await idbSet('lastHandle', fileHandle)
       onopened()
     } finally {
@@ -157,6 +159,16 @@
       error = e.message
     } finally {
       busy = false
+    }
+  }
+
+  async function probeWriteAccess(handle) {
+    try {
+      const w = await handle.createWritable()
+      await w.abort()
+      return true
+    } catch {
+      return false
     }
   }
 
