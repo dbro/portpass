@@ -208,7 +208,7 @@
       <div class="vault-section-title">SECURITY</div>
       <div class="vault-toggle">
         <div class="vault-toggle-label">
-          <span class="vault-toggle-name">Fast unlock</span>
+          <span class="vault-toggle-name">Biometric/PIN unlock</span>
           <span class="vault-toggle-help">
             {biometricEnrolled ? 'Enabled' : 'Use Face ID, fingerprint, or PIN instead of typing your password'}
           </span>
@@ -217,7 +217,7 @@
           class="switch"
           class:on={biometricEnrolled}
           onclick={biometricEnrolled ? disableBiometric : startSetup}
-          aria-label="Fast unlock"
+          aria-label="Biometric/PIN unlock"
         ></button>
       </div>
     </div>
@@ -249,7 +249,7 @@
     onclick={e => { e.stopPropagation(); setupMode = false; setupError = '' }}
     onkeydown={e => { if (e.key === 'Escape') { setupMode = false; setupError = '' } }}>
     <div class="modal" role="dialog" aria-modal="true" tabindex="-1" onclick={e => e.stopPropagation()} onkeydown={e => e.stopPropagation()}>
-      <div class="modal-title">Enable fast unlock</div>
+      <div class="modal-title">Enable biometric/PIN unlock</div>
       <p class="modal-desc muted">Confirm your master password to set up biometric unlock.</p>
       <div class="modal-pw">
         <input

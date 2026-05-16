@@ -58,7 +58,7 @@
 
   // After a successful vault open, check whether to offer biometric enrollment.
   // The offer is shown at most once per vault file — if dismissed, the user can
-  // enable fast unlock later from the vault settings sheet.
+  // enable biometric/PIN unlock later from the vault settings sheet.
   function afterUnlock() {
     const offerKey = `biometric-offered-${fileHandle?.name}`
     if (biometricAvailable && !biometricEnrolled && !localStorage.getItem(offerKey)) {
@@ -119,7 +119,7 @@
       } catch {
         await clearBiometric()
         biometricEnrolled = false
-        error = 'Fast unlock is out of date — please enter your master password.'
+        error = 'Biometric/PIN unlock is out of date — please enter your master password.'
         return
       }
       dbItems.set(getDatabaseData())
@@ -221,7 +221,7 @@
       {#if biometricEnrolled}
         <button class="btn btn-biometric" disabled={busy} onclick={unlockBiometric}>
           <Icon name="face-id" size={22}/>
-          <span>Fast unlock</span>
+          <span>Unlock with biometric/PIN</span>
         </button>
         <div class="unlock-or muted">or use master password</div>
       {/if}
@@ -255,7 +255,7 @@
   <div class="unlock-screen">
     <div class="unlock-stack">
       <div class="unlock-mark"><Icon name="face-id" size={28}/></div>
-      <div class="unlock-vault">Enable fast unlock?</div>
+      <div class="unlock-vault">Enable biometric/PIN unlock?</div>
       <div class="unlock-sub muted" style="text-align:left;max-width:320px">
         Skip typing your master password each time you open Portpass. Your device will offer one or more options:
       </div>
@@ -269,7 +269,7 @@
       {#if error}<div class="unlock-error">{error}</div>{/if}
 
       <button class="btn btn-primary" disabled={busy} onclick={enableBiometric}>
-        {busy ? 'Setting up…' : 'Enable fast unlock'}
+        {busy ? 'Setting up…' : 'Enable biometric/PIN unlock'}
       </button>
 
       <button class="btn-text muted" onclick={onopened}>Not now</button>

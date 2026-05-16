@@ -67,13 +67,13 @@ Extensions are installed per-profile. A profile with no extensions has no extens
 
 ---
 
-## Fast unlock (biometric)
+## Biometric/PIN unlock
 
-The optional biometric fast-unlock feature uses your fingerprint or face to encrypt your master password on-device. The encrypted password is stored in your browser's local storage (IndexedDB), and the decryption key is derived from your biometric via the WebAuthn PRF extension and it never leaves your device.
+The optional biometric/PIN unlock feature uses your fingerprint, face, or PIN to encrypt your master password on-device. The encrypted password is stored in your browser's local storage (IndexedDB), and the decryption key is derived from your biometric via the WebAuthn PRF extension and it never leaves your device.
 
 An attacker with physical access to your device and browser profile could extract the ciphertext from IndexedDB, but cannot decrypt it without the biometric credential held in your device's secure hardware.
 
-If your master password changes, re-enroll biometric fast-unlock. The old enrollment is automatically cleared on the next failed unlock attempt.
+If your master password changes, re-enroll biometric/PIN unlock. The old enrollment is automatically cleared on the next failed unlock attempt.
 
 ---
 
