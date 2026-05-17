@@ -120,6 +120,17 @@ test.describe('Custom fields', () => {
     await expect(menuBtn.locator('.ctx-keys')).toContainText('1')
   })
 
+  test('Ctrl+1 copies the first custom field value to clipboard', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    await createVault(page)
+    await createRecordWithCustomField(page, 'API Key', 'my-secret-token')
+
+    // Record is already selected; press Ctrl+1
+    await page.keyboard.press('Control+1')
+    const text = await page.evaluate(() => navigator.clipboard.readText())
+    expect(text).toBe('my-secret-token')
+  })
+
   test('editing a record preserves existing custom fields', async ({ page }) => {
     await createVault(page)
     await createRecordWithCustomField(page, 'Security Q', 'Fluffy')

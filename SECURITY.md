@@ -69,11 +69,19 @@ Extensions are installed per-profile. A profile with no extensions has no extens
 
 ## Biometric/PIN unlock
 
-The optional biometric/PIN unlock feature uses your fingerprint, face, or PIN to encrypt your master password on-device. The encrypted password is stored in your browser's local storage (IndexedDB), and the decryption key is derived from your biometric via the WebAuthn PRF extension and it never leaves your device.
+The optional biometric/PIN unlock feature uses your fingerprint, face, or PIN to encrypt your master password on-device. The encrypted password is stored in your browser's local storage (IndexedDB), and the decryption key is derived from your biometric via the WebAuthn PRF extension and it never leaves your device. When biometric/PIN unlock is used, the master password is decrypted from your device's secure storage and passed directly to the vault-opening function. Portpass explicitly clears the master password variable immediately after the vault opens and it is not retained in JavaScript memory beyond that single call.
 
 An attacker with physical access to your device and browser profile could extract the ciphertext from IndexedDB, but cannot decrypt it without the biometric credential held in your device's secure hardware.
 
 If your master password changes, re-enroll biometric/PIN unlock. The old enrollment is automatically cleared on the next failed unlock attempt.
+
+---
+
+## Secondary vault associations
+
+When secondary vaults are linked to a primary vault, their master passwords are stored encrypted in your browser's IndexedDB. The encryption uses AES-256-GCM with a key derived inside the WASM engine from the primary vault's stretched key and this key never appears in JavaScript. JavaScript only ever handles ciphertext and nonces, which are not sensitive.
+
+**Changing the primary vault's master password** generates a new encryption key and any previously linked secondary vaults will no longer auto-unlock and must be re-linked.
 
 ---
 

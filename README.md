@@ -2,7 +2,7 @@
 
 *A simple password manager that keeps your data in your control, across all your devices.*
 
-<img src="https://github.com/user-attachments/assets/6917e607-a4ce-4ba8-bf76-b926f830713f" width="65%" alt="Screenshots of mobile layouts">
+<img src="https://github.com/user-attachments/assets/8e2f7a5b-1b88-40e5-b630-e770f669a440" width="80%" alt="Screenshots of mobile version">
 
 **Free and open source. Try it: [https://dbro.github.io/portpass](https://dbro.github.io/portpass)**
 
@@ -14,14 +14,16 @@ Portpass is different: your passwords live in a file on your device, or in a clo
 
 * streamlines login to apps and websites
 * works fully offline, no internet connection required
-* runs on all your devices: mobile, tablet, and desktop
-* generates strong passwords
-* generates one-time codes (TOTP) for two-factor authentication (2FA)
-* organizes password records into groups for browsing
-* supports custom fields (eg. PIN codes, account numbers, API keys)
 * encrypts your vault using an established open source format (pwsafe v3)
+* runs on all your devices: mobile, tablet, and desktop
+* supports convenient WebAuthn unlock methods: fingerprint, face recognition, and PIN
+* generates strong passwords
+* organizes password records into groups for browsing
+* generates one-time codes (TOTP) for two-factor authentication (2FA)
+* supports custom fields (eg. PIN codes, account numbers, API keys)
 * stores your vault as a file on your device, for easy sync/backup
-* supports convenient alternate unlock methods: fingerprint, face recognition, and PIN
+* opens multiple vaults simultaneously (eg. personal, work, family), allowing sharing settings for each vault
+* supports read-only access to each vault according to file's permission settings
 * has a mobile-first design with both light and dark modes
 
 ## Installation
@@ -34,13 +36,38 @@ Portpass runs in your browser and can be installed as an app on any device. Inst
 
 Portpass will then be visible as a standalone app and can be launched with a tap. It works offline and uses your local vault file.
 
-For best security, install Portpass in a [dedicated browser profile with no extensions](SECURITY.md#mitigation-use-a-dedicated-browser-profile).
+For improved security, install Portpass in a [dedicated browser profile with no extensions](SECURITY.md#mitigation-use-a-dedicated-browser-profile).
 
 ## Cross-platform + how to sync
 
 Portpass runs as a Progressive Web App (PWA) on any device with a modern browser (eg. iPhone, Android, Windows, Mac, Linux). Install it to your home screen for quick access, just like a native app.
 
 Because your vault is a regular file, syncing across devices is straightforward using any file storage service you already trust (eg. Dropbox, Google Drive, iCloud, Syncthing). [See sync options →]
+
+## Multiple vaults and password sharing
+
+Portpass can open multiple vault files at the same time. This is believed to be unique among Password Safe-compatible apps. All open vaults appear together in a single merged list, grouped by vault, with a unified search across all of them.
+
+**How secondary vaults work**
+
+After opening a vault, tap the vault name in the top bar to open vault settings, then tap **Unlock additional vault**. Pick another vault file, enter its master password, and Portpass remembers it as a secondary vault of the original, primary vault you opened. On future sessions, secondary vaults unlock automatically when you open the same original vault. One biometric tap or master password entry unlocks all of these vaults at once.
+
+Each secondary vault can be read+write (you can add, edit, and delete its records) or read-only (if the file's permissions prevent writing). Read-only vaults are clearly labelled; their records appear normally in the list and search results but cannot be edited.
+
+**Sharing passwords with a team or family**
+
+Because vault files are just files, you can share them using the same cloud storage services you already use for file sharing:
+
+1. Create a vault containing the shared passwords (team credentials, family Wi-Fi, subscriptions, etc.).
+2. Place the vault file in a shared folder: a Dropbox shared folder, an iCloud shared album, a Google Drive shared drive, a NAS share, or any similar service.
+3. Give the people you want to share with access to that folder using the cloud service's own sharing permissions. Grant read+write access to people who should be able to add or change shared passwords, and read-only access to everyone else.
+4. Each person opens Portpass on their own device, unlocks their personal vault, and adds the shared vault as a secondary vault.
+
+From that point on, the shared vault opens automatically alongside each person's personal vault. Adding new records to the shared vault or editing existing ones writes the changes back to the shared file, where they propagate to everyone else via normal cloud sync.
+
+**Sync conflicts are not reconciled automatically**
+
+Two people editing the shared vault at exactly the same time may produce a sync conflict in the cloud service (the same limitation that applies to any shared file). Portpass does not merge conflicts; if that happens, use the cloud service's version history to recover the version you want. For most teams and families this is rarely a problem in practice. To reduce the chance of colliding edits, select one person to have read+write access and everyone else to have read-only access to each vault file.
 
 ## Compatibility & no vendor lock-in
 
@@ -69,6 +96,7 @@ Portpass reads and writes the [Password Safe v3](https://github.com/pwsafe/pwsaf
 - Runs in any modern browser — no installation required
 - Works on mobile (iOS, Android) with a touch-friendly interface
 - Biometric/PIN unlock via fingerprint, face recognition, PIN, or hardware security key (WebAuthn PRF — YubiKey series 5+ may work but is untested)
+- Opens multiple vault files simultaneously, especially useful for sharing passwords
 - Light/dark themes with selectable accent colors
 
 ## How it works

@@ -1,11 +1,11 @@
 <script>
   import { get } from 'svelte/store'
-  import { tick } from 'svelte'
-  import { dbItems, clipboardSession, clipboardContext } from '../store.js'
+  import { tick, untrack } from 'svelte'
+  import { selectedFile, dbItems, secondaryVaults, clipboardSession, clipboardContext } from '../store.js'
   import { searchRecords, getRecordData, getTOTP } from '../wasm.js'
   import Icon from './Icon.svelte'
 
-  let { selectedUUID = null, excludeUUID = null, query = '', ontap, oncopy, oncopytotp, storageKey = null } = $props()
+  let { selectedUUID = null, excludeUUID = null, query = '', primaryVaultName = '', collapseSeq = 0, ontap, oncopy, oncopytotp, storageKey = null } = $props()
 
   function loadGroupState() {
     if (!storageKey) return {}
@@ -58,10 +58,11 @@
     ;(async () => {
       try {
         let value
+        const ctxVaultUuid = vaultUuidForRecord(ctx.uuid)
         if (ctx.field === 'otp') {
-          value = getTOTP(ctx.uuid)?.code
+          value = getTOTP(ctxVaultUuid, ctx.uuid)?.code
         } else {
-          const rec = getRecordData(ctx.uuid)
+          const rec = getRecordData(ctxVaultUuid, ctx.uuid)
           if (ctx.field.startsWith('custom-')) {
             const idx = parseInt(ctx.field.slice(7))
             value = rec.CustomFields?.[idx]?.Value
@@ -111,16 +112,21 @@
     return `--clip-delay: -${elapsed}ms; --drain-name: clip-drain-${animVariant}; --flash-name: clip-flash-${animVariant}; --flash-duration: ${flash}`
   }
 
-  let groups = $derived.by(() => {
-    const items = $dbItems
-    let list = items
-    // Filter out excluded UUID (pending delete)
-    if (excludeUUID) {
-      list = list.filter(i => i.uuid !== excludeUUID)
+  function vaultUuidForRecord(recordUuid) {
+    for (const sv of get(secondaryVaults)) {
+      if (sv.items.find(i => i.uuid === recordUuid)) return sv.uuid
     }
-    if (query.trim()) {
-      const matched = new Set(searchRecords(query, false))
-      list = list.filter(i => matched.has(i.uuid))
+    return get(selectedFile)?.uuid ?? ''
+  }
+
+  function buildGroups(items, q, vaultUuid) {
+    let list = items
+    if (excludeUUID) list = list.filter(i => i.uuid !== excludeUUID)
+    if (q.trim() && vaultUuid) {
+      try {
+        const matched = new Set(searchRecords(vaultUuid, q, false))
+        list = list.filter(i => matched.has(i.uuid))
+      } catch { /* vault temporarily unavailable — show unfiltered */ }
     }
     const byGroup = {}
     list.forEach(r => {
@@ -137,7 +143,47 @@
         return { group: g, items: sorted }
       })
       .sort((a, b) => a.group.localeCompare(b.group))
+  }
+
+  let groups = $derived.by(() => buildGroups($dbItems, query, get(selectedFile)?.uuid ?? ''))
+
+  let allVaultGroups = $derived.by(() => {
+    if ($secondaryVaults.length === 0) return null
+    return [
+      { vaultName: primaryVaultName || 'Primary vault', filename: null, readonly: false, groups: buildGroups($dbItems, query, get(selectedFile)?.uuid ?? '') },
+      ...$secondaryVaults.map(sv => ({
+        vaultName: sv.name, filename: sv.filename, readonly: sv.readonly,
+        groups: buildGroups(sv.items, query, sv.uuid),
+      })),
+    ]
   })
+
+  let openVaults = $state({})
+
+  $effect(() => {
+    if (collapseSeq === 0) return
+    untrack(() => {
+      const allGroupNames = [
+        ...groups.map(g => g.group),
+        ...(allVaultGroups?.flatMap(v => v.groups.map(g => g.group)) ?? [])
+      ]
+      const allCollapsed = allGroupNames.length > 0 && allGroupNames.every(g => openGroups[g] === false)
+      if (allCollapsed) {
+        openGroups = {}
+        saveGroupState({})
+      } else {
+        const next = Object.fromEntries(allGroupNames.map(g => [g, false]))
+        openGroups = next
+        saveGroupState(next)
+      }
+    })
+  })
+
+  function isVaultOpen(name) {
+    if (query.trim()) return true
+    return name in openVaults ? openVaults[name] : true
+  }
+  function toggleVault(name) { openVaults = { ...openVaults, [name]: !isVaultOpen(name) } }
 
   function toggle(group) {
     const next = { ...openGroups, [group]: !isOpen(group) }
@@ -151,23 +197,24 @@
     return true
   }
 
-  function handleClick(uuid) {
+  function handleClick(uuid, vaultUuid = null) {
     if (contextMenu) { contextMenu = null; return }
-    if (uuid === selectedUUID) {
+    if (uuid === selectedUUID && !vaultUuid) {
       copyPassword(uuid)
     } else {
-      ontap(uuid)
+      ontap(uuid, vaultUuid)
     }
   }
 
-  function handleDblClick(uuid) {
+  function handleDblClick(uuid, vaultUuid = null) {
+    if (vaultUuid) { ontap(uuid, vaultUuid); return }
     copyPassword(uuid)
   }
 
   function handleContextMenu(e, uuid) {
     e.preventDefault()
     try {
-      const rec = getRecordData(uuid)
+      const rec = getRecordData(vaultUuidForRecord(uuid), uuid)
       // Clamp to viewport so menu doesn't appear off-screen
       const menuW = 180, menuH = 500
       const x = Math.min(e.clientX, window.innerWidth  - menuW - 8)
@@ -178,7 +225,7 @@
 
   function copyPassword(uuid) {
     try {
-      const rec = getRecordData(uuid)
+      const rec = getRecordData(vaultUuidForRecord(uuid), uuid)
       if (rec.Password) handleCopy(rec.Password, uuid, 'Password')
     } catch {}
   }
@@ -231,7 +278,39 @@
 />
 
 <div class="list-collapsible">
-  {#if groups.length === 0}
+  {#if allVaultGroups}
+    <!-- Multi-vault display: vault name as top-level collapsible group -->
+    {#each allVaultGroups as vault}
+      <section class="coll-vault" class:is-open={isVaultOpen(vault.vaultName)}>
+        <button class="coll-vault-header" onclick={() => toggleVault(vault.vaultName)}>
+          <Icon name={isVaultOpen(vault.vaultName) ? 'chevron-down' : 'chevron-right'} size={16} stroke="var(--text-soft)"/>
+          <span class="coll-vault-name">{vault.vaultName}</span>
+          {#if vault.readonly}<span class="coll-vault-ro muted">read-only</span>{/if}
+        </button>
+        {#if isVaultOpen(vault.vaultName)}
+          {#each vault.groups as { group, items }}
+            <section class="coll-group coll-group-nested" class:is-open={isOpen(group)}>
+              <button class="coll-header" onclick={() => toggle(group)}>
+                <Icon name={isOpen(group) ? 'chevron-down' : 'chevron-right'} size={16} stroke="var(--text-soft)"/>
+                <span class="coll-name">{#each hl(group, query) as part}{#if part.matched}<span class="hl-secondary">{part.text}</span>{:else}{part.text}{/if}{/each}</span>
+                <span class="coll-count muted">{items.length}</span>
+              </button>
+              {#if isOpen(group)}
+                <div class="coll-body">
+                  {#each items as r}
+                    {@render recordRow(r)}
+                  {/each}
+                </div>
+              {/if}
+            </section>
+          {/each}
+          {#if vault.groups.length === 0 && query}
+            <div class="muted" style="padding:6px 16px 6px 32px;font-size:13px">No matches</div>
+          {/if}
+        {/if}
+      </section>
+    {/each}
+  {:else if groups.length === 0}
     {#if !query && $dbItems.length === 0}
       <div class="empty-vault">
         <img src="{import.meta.env.BASE_URL}icon-512.png" alt="Portpass" class="empty-vault-logo"/>
@@ -258,31 +337,7 @@
         {#if isOpen(group)}
           <div class="coll-body">
             {#each items as r}
-              <button
-                class="record-row"
-                class:is-selected={r.uuid === selectedUUID}
-                class:clipboard-active={flashedUUID === r.uuid}
-                style={flashedUUID === r.uuid
-                  ? (flashedField === 'otp'
-                     ? `--drain-name: clip-drain-${animVariant}; --flash-name: clip-flash-${animVariant}; --clip-delay: -30000ms; --flash-duration: 450ms`
-                     : drainStyle())
-                  : ''}
-                onclick={() => handleClick(r.uuid)}
-                ondblclick={() => handleDblClick(r.uuid)}
-                oncontextmenu={e => handleContextMenu(e, r.uuid)}
-              >
-                <div class="record-row-main">
-                  <span class="record-row-title">
-                    {#each hl(r.title, query) as part}
-                      {#if part.matched}<mark class="hl-primary">{part.text}</mark>{:else}{part.text}{/if}
-                    {/each}
-                  </span>
-                  {#if r.showUsername && r.username}
-                    <span class="record-row-sub muted">{r.username}</span>
-                  {/if}
-                </div>
-                <Icon name="chevron-right" size={16} stroke="var(--text-soft)"/>
-              </button>
+              {@render recordRow(r)}
             {/each}
           </div>
         {/if}
@@ -290,6 +345,35 @@
     {/each}
   {/if}
 </div>
+
+{#snippet recordRow(r)}
+  <button
+    class="record-row"
+    class:is-selected={r.uuid === selectedUUID}
+    class:clipboard-active={flashedUUID === r.uuid}
+    class:is-secondary={!!r.vaultUuid}
+    style={flashedUUID === r.uuid
+      ? (flashedField === 'otp'
+         ? `--drain-name: clip-drain-${animVariant}; --flash-name: clip-flash-${animVariant}; --clip-delay: -30000ms; --flash-duration: 450ms`
+         : drainStyle())
+      : ''}
+    onclick={() => handleClick(r.uuid, r.vaultUuid)}
+    ondblclick={() => handleDblClick(r.uuid, r.vaultUuid)}
+    oncontextmenu={e => r.vaultUuid ? null : handleContextMenu(e, r.uuid)}
+  >
+    <div class="record-row-main">
+      <span class="record-row-title">
+        {#each hl(r.title, query) as part}
+          {#if part.matched}<mark class="hl-primary">{part.text}</mark>{:else}{part.text}{/if}
+        {/each}
+      </span>
+      {#if r.showUsername && r.username}
+        <span class="record-row-sub muted">{r.username}</span>
+      {/if}
+    </div>
+    <Icon name="chevron-right" size={16} stroke="var(--text-soft)"/>
+  </button>
+{/snippet}
 
 {#if contextMenu}
   <div
@@ -329,6 +413,18 @@
 {/if}
 
 <style>
+  .coll-vault { border-bottom: 1px solid var(--border); }
+  .coll-vault-header {
+    display: flex; align-items: center; gap: 6px;
+    width: 100%; padding: 10px 12px; border: none; background: var(--surface-2);
+    cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text);
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .coll-vault-name { flex: 1; text-align: left; }
+  .coll-vault-ro { font-size: 11px; font-weight: 400; text-transform: none; letter-spacing: 0; }
+  .coll-group-nested .coll-header { padding-left: 24px; }
+  .coll-group-nested .coll-body .record-row { padding-left: 32px; }
+
   :global(.hl-primary) {
     background: var(--accent-soft);
     color: var(--accent-strong);

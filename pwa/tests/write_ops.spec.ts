@@ -71,4 +71,22 @@ test.describe('Record write operations', () => {
     await expect(page.locator('.history-toggle')).toBeVisible()
   })
 
+  test('password history shows the previous password value', async ({ page }) => {
+    await openVault(page)
+
+    await page.locator('.record-row', { hasText: 'three entry 1' }).click()
+    await page.getByRole('button', { name: 'Edit' }).click()
+
+    const pwInput = page.locator('input.mono').first()
+    await pwInput.fill('brand-new-password')
+    await page.getByRole('button', { name: 'Save' }).click()
+
+    // Reveal password in detail view, then open history
+    await page.getByLabel('Reveal password').click()
+    await page.locator('.history-toggle').click()
+
+    // Old password should be visible in the history list
+    await expect(page.locator('.history-pw').first()).toHaveText('three1!@$%^&*()')
+  })
+
 })

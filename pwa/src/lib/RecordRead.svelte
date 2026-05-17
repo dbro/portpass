@@ -5,7 +5,7 @@
   import { getTOTP } from '../wasm.js'
   import Icon from './Icon.svelte'
 
-  let { record, uuid, isDesktop, onback, onedit, oncopy, oncopytotp } = $props()
+  let { record, uuid, isDesktop, vaultUuid, onback, onedit, oncopy, oncopytotp } = $props()
 
   let revealed      = $state(false)
   let showHistory   = $state(false)
@@ -19,7 +19,7 @@
     if (!record.TwoFactorKey) return
     function refresh() {
       try {
-        const data = getTOTP(uuid)
+        const data = getTOTP(vaultUuid, uuid)
         // Detect period rollover — snap the bar instantly instead of animating
         if (totpPrevSeconds > 0 && data.seconds > totpPrevSeconds + 5) {
           totpBarInstant = true
@@ -157,16 +157,18 @@
     <Icon name="back" size={22}/>
   </button>
   <div class="record-bar-group muted">{record.Group ?? ''}</div>
-  <button class="btn-text primary" onclick={onedit}>Edit</button>
+  <button class="btn-text primary" onclick={onedit} style={onedit ? '' : 'visibility:hidden;pointer-events:none'}>Edit</button>
 </div>
 
 <!-- Desktop pane header (hidden on mobile via CSS) -->
 {#if isDesktop}
   <div class="record-pane-header">
     <span class="record-bar-group muted">{record.Group ?? ''}</span>
-    <div class="record-pane-actions">
-      <button class="btn btn-ghost" onclick={onedit} style="height:36px;padding:0 14px;font-size:14px">Edit</button>
-    </div>
+    {#if onedit}
+      <div class="record-pane-actions">
+        <button class="btn btn-ghost" onclick={onedit} style="height:36px;padding:0 14px;font-size:14px">Edit</button>
+      </div>
+    {/if}
   </div>
 {/if}
 

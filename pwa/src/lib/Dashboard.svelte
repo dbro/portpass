@@ -1,12 +1,14 @@
 <script>
   import { onMount } from 'svelte'
   import { get } from 'svelte/store'
-  import { selectedFile, dbItems, toast, clipboardSession, clipboardContext } from '../store.js'
+  import { selectedFile, dbItems, secondaryVaults, toast, clipboardSession, clipboardContext } from '../store.js'
   import {
     getRecordData, getDatabaseData, saveDatabase, getDatabaseInfo,
     updateRecordFields, updateDBFields, deleteRecord as wasmDeleteRecord,
-    searchRecords, getTOTP,
+    searchRecords, getTOTP, closeDatabase, loadVaultFile,
   } from '../wasm.js'
+  import { addSecondaryCredential, removeSecondaryCredential } from './secondaryVaults.js'
+  import { isBiometricEnrolledForFile, unlockWithBiometric } from './biometric.js'
   import Icon from './Icon.svelte'
   import RecordList from './RecordList.svelte'
   import RecordRead from './RecordRead.svelte'
@@ -19,21 +21,35 @@
     setTimeout(() => node.focus(), 0)
   }
 
-  let query        = $state('')
-  let selectedUUID = $state(null)
-  let record       = $state(null)
-  let isEditing    = $state(false)
-  let isNew        = $state(false)
-  let sheetOpen    = $state(false)
-  let isDirty      = $state(false)
-  let editDirty    = $state(false)
-  let vaultDirty   = $state(false)
+  let query                  = $state('')
+  let selectedUUID           = $state(null)
+  let selectedVaultUuid      = $state(null) // null = primary vault
+  let record                 = $state(null)
+  let isEditing              = $state(false)
+  let isNew                  = $state(false)
+  let sheetOpen              = $state(false)
+  let isDirty                = $state(false)
+  let editDirty              = $state(false)
+  let vaultDirty             = $state(false)
   let dbName   = $state('')
   let dbKey    = $state('')
   let lastSave = $state('')
 
-  let passwordCount = $derived($dbItems.length)
-  let groupCount    = $derived(new Set($dbItems.map(i => i.group).filter(Boolean)).size)
+  let passwordCount = $derived(
+    $dbItems.length + $secondaryVaults.reduce((n, v) => n + (v.items?.length ?? 0), 0)
+  )
+  let groupCount = $derived(
+    new Set($dbItems.map(i => i.group).filter(Boolean)).size
+    + $secondaryVaults.reduce((n, v) => n + new Set(v.items?.map(i => i.group).filter(Boolean)).size, 0)
+  )
+  let secondaryCount    = $derived($secondaryVaults.length)
+  let allVaultsReadonly = $derived($selectedFile?.readonly && $secondaryVaults.every(v => v.readonly))
+
+  // State for the "unlock additional vault" modal flow.
+  // handle is kept outside $state to prevent Svelte 5 from deep-proxying the FileSystemFileHandle.
+  let _secondaryHandle = null
+  let secondarySetup = $state(null) // { password, showPw, busy, error, needsAuth, filename }
+  let newRecordVaultUuid = $state(null) // null = primary vault
 
   function relSaveTime(when) {
     if (!when) return ''
@@ -52,9 +68,9 @@
 
   onMount(() => {
     try {
-      const info = getDatabaseInfo()
+      dbKey = get(selectedFile)?.uuid ?? ''
+      const info = getDatabaseInfo(dbKey)
       dbName   = info?.name ?? ''
-      dbKey    = info?.uuid ?? ''
       lastSave = info?.when ?? ''
     } catch (e) {}
     document.addEventListener('visibilitychange', onVisibilityChange)
@@ -69,24 +85,27 @@
     toast.set({ message, action, duration })
   }
 
-  // Load a record by UUID
-  function selectRecord(uuid) {
+  // Load a record by UUID. vaultUuid is null for primary vault records.
+  function selectRecord(uuid, vaultUuid = null) {
     if (isEditing && editDirty) {
       if (!confirm('Discard unsaved changes?')) return
     }
     if (sheetOpen && vaultDirty) {
       if (!confirm('Discard unsaved changes?')) return
     }
+    // Reset navigation state first so the sheet always closes even if load fails.
+    sheetOpen = false
+    vaultDirty = false
+    isEditing = false
+    isNew = false
+    editDirty = false
     try {
-      record = getRecordData(uuid)
+      record = getRecordData(vaultUuid || dbKey, uuid)
       selectedUUID = uuid
-      isEditing = false
-      isNew = false
-      editDirty = false
-      sheetOpen = false
-      vaultDirty = false
+      selectedVaultUuid = vaultUuid
     } catch (e) {
       console.error(e)
+      showToast('Could not load record.')
     }
   }
 
@@ -94,10 +113,16 @@
     isEditing = true
   }
 
+  let rwVaults = $derived([
+    { uuid: dbKey, name: dbName || $selectedFile?.name || 'Vault' },
+    ...$secondaryVaults.filter(v => !v.readonly).map(v => ({ uuid: v.uuid, name: v.name || v.filename })),
+  ])
+
   function startNew() {
     if (sheetOpen && vaultDirty) {
       if (!confirm('Discard unsaved changes?')) return
     }
+    newRecordVaultUuid = dbKey // default to primary
     record = { Title: '', Group: '', Username: '', Password: '', URL: '', Notes: '' }
     selectedUUID = null
     isNew = true
@@ -118,16 +143,36 @@
 
   async function saveRecord(draft) {
     try {
-      const uuid = updateRecordFields(isNew ? null : selectedUUID, draft)
-      const items = getDatabaseData()
-      dbItems.set(items)
+      const targetVault = isNew ? (newRecordVaultUuid || dbKey) : (selectedVaultUuid || dbKey)
+      const uuid = updateRecordFields(targetVault, isNew ? null : selectedUUID, draft)
       selectedUUID = uuid ?? selectedUUID
-      record = getRecordData(selectedUUID)
+      record = getRecordData(targetVault, selectedUUID)
       isNew = false
       isEditing = false
       editDirty = false
-      isDirty = true
-      await saveFile(true)
+      newRecordVaultUuid = null
+
+      if (targetVault === dbKey) {
+        dbItems.set(getDatabaseData(dbKey))
+        isDirty = true
+        await saveFile(true)
+      } else {
+        // Secondary vault — update its item list and save to its file
+        const sv = get(secondaryVaults).find(v => v.uuid === targetVault)
+        if (sv) {
+          const items = getDatabaseData(targetVault)
+          secondaryVaults.update(vs => vs.map(v => v.uuid === targetVault
+            ? { ...v, items: items.map(i => ({ ...i, vaultUuid: targetVault })) }
+            : v
+          ))
+          selectedVaultUuid = targetVault
+          const data = saveDatabase(targetVault)
+          const w = await sv.handle.createWritable()
+          await w.write(data)
+          await w.close()
+          showToast('Saved to ' + (sv.name || sv.filename), null, 2000)
+        }
+      }
     } catch (e) {
       showToast('Failed to save: ' + e.message)
     }
@@ -138,35 +183,42 @@
   let pendingDeleteTitle = $state(null)
 
   async function deleteRecord(uuid) {
+    const targetVault = selectedVaultUuid || dbKey
     try {
-      // Capture title and UUID for toast and undo
-      const snapshot = getRecordData(uuid)
+      const snapshot = getRecordData(targetVault, uuid)
       pendingDeleteUUID = uuid
       pendingDeleteTitle = snapshot.Title
 
-      // Clear UI state (record disappears from view)
       record = null
       selectedUUID = null
       isEditing = false
       isNew = false
 
-      // Clear any existing pending delete timer
       if (pendingDeleteTimer) clearTimeout(pendingDeleteTimer)
 
-      // Show undo toast
-      showToast(`Deleting "${pendingDeleteTitle}"...`, {
-        label: 'Cancel',
-        fn: undoDelete
-      }, 5000)
+      showToast(`Deleting "${pendingDeleteTitle}"...`, { label: 'Cancel', fn: undoDelete }, 5000)
 
-      // Auto-delete and save after 5 seconds if not undone
       pendingDeleteTimer = setTimeout(async () => {
         try {
-          wasmDeleteRecord(pendingDeleteUUID)
-          const items = getDatabaseData()
-          dbItems.set(items)
-          isDirty = true
-          await saveFile(true)
+          wasmDeleteRecord(targetVault, pendingDeleteUUID)
+          if (targetVault === dbKey) {
+            dbItems.set(getDatabaseData(dbKey))
+            isDirty = true
+            await saveFile(true)
+          } else {
+            const sv = get(secondaryVaults).find(v => v.uuid === targetVault)
+            if (sv) {
+              const items = getDatabaseData(targetVault)
+              secondaryVaults.update(vs => vs.map(v => v.uuid === targetVault
+                ? { ...v, items: items.map(i => ({ ...i, vaultUuid: targetVault })) }
+                : v
+              ))
+              const data = saveDatabase(targetVault)
+              const w = await sv.handle.createWritable()
+              await w.write(data)
+              await w.close()
+            }
+          }
         } catch (e) {
           showToast('Failed to delete: ' + e.message)
         } finally {
@@ -196,7 +248,7 @@
     if (uuid) {
       try {
         selectedUUID = uuid
-        record = getRecordData(uuid)
+        record = getRecordData(selectedVaultUuid || dbKey, uuid)
         isEditing = false
         showToast('Delete cancelled', null, 2000)
       } catch (e) {
@@ -207,7 +259,7 @@
 
   async function saveFile(silent = false) {
     try {
-      const data = saveDatabase()
+      const data = saveDatabase(dbKey)
       let handle = $selectedFile?.handle
 
       if (!handle) {
@@ -222,7 +274,7 @@
       await w.write(data)
       await w.close()
       isDirty = false
-      try { lastSave = getDatabaseInfo()?.when ?? '' } catch {}
+      try { lastSave = getDatabaseInfo(dbKey)?.when ?? '' } catch {}
       if (!silent) showToast('Vault saved')
     } catch (e) {
       if (e.name !== 'AbortError') showToast('Save failed: ' + e.message)
@@ -317,7 +369,7 @@
 
   async function copyTOTPForUUID(uuid) {
     try {
-      const totp = getTOTP(uuid)
+      const totp = getTOTP(dbKey, uuid)
       await navigator.clipboard.writeText(totp.code)
       if (clearTimer) { clearTimeout(clearTimer); clearTimer = null }
       clipHash = null
@@ -345,7 +397,7 @@
 
   async function saveDBFields(fields) {
     try {
-      updateDBFields(fields)
+      updateDBFields(dbKey, fields)
       await saveFile(true)
       dbName = fields.Name ?? dbName  // fields uses PascalCase for the WASM write API
       vaultDirty = false
@@ -364,8 +416,99 @@
   }
 
   function lockVault() {
+    get(secondaryVaults).forEach(v => closeDatabase(v.uuid))
+    closeDatabase(dbKey)
+    secondaryVaults.set([])
     onclosed()
   }
+
+  async function lockSecondaryVault(vaultUuid) {
+    await removeSecondaryCredential(dbKey, vaultUuid)
+    closeDatabase(vaultUuid)
+    secondaryVaults.update(vs => vs.filter(v => v.uuid !== vaultUuid))
+    if (selectedVaultUuid === vaultUuid) {
+      record = null; selectedUUID = null; selectedVaultUuid = null
+    }
+  }
+
+  async function lockAllVaults() {
+    get(secondaryVaults).forEach(v => closeDatabase(v.uuid))
+    closeDatabase(dbKey)
+    secondaryVaults.set([])
+    onclosed()
+  }
+
+  async function unlockAdditionalVault() {
+    sheetOpen = false
+    let secondaryHandle
+    try {
+      ;[secondaryHandle] = await window.showOpenFilePicker({
+        types: [{ description: 'Password Safe', accept: { 'application/octet-stream': ['.psafe3', '.dat'] } }],
+      })
+    } catch (e) {
+      sheetOpen = true
+      if (e.name !== 'AbortError') showToast('Could not open file: ' + e.message)
+      return
+    }
+    _secondaryHandle = secondaryHandle
+    secondarySetup = {
+      filename: secondaryHandle.name,
+      password: '', showPw: false, busy: false, error: '',
+      needsAuth: await isBiometricEnrolledForFile($selectedFile?.name ?? ''),
+    }
+  }
+
+  async function confirmSecondarySetup() {
+    if (!secondarySetup?.password) return
+    secondarySetup = { ...secondarySetup, busy: true, error: '' }
+
+    // Biometric confirmation gesture if enrolled (proves identity without exposing master password)
+    if (secondarySetup.needsAuth) {
+      try {
+        await unlockWithBiometric($selectedFile?.name ?? '')
+      } catch (e) {
+        secondarySetup = { ...secondarySetup, busy: false,
+          error: e.name === 'NotAllowedError' ? 'Authentication cancelled.' : 'Authentication failed: ' + e.message }
+        return
+      }
+    }
+
+    try {
+      const secondaryUuid = await loadVaultFile(_secondaryHandle, secondarySetup.password)
+
+      if (secondaryUuid === dbKey) {
+        closeDatabase(secondaryUuid)
+        secondarySetup = { ...secondarySetup, busy: false,
+          error: `"${secondarySetup.filename}" is already open as your primary vault and cannot also be added as a secondary vault.` }
+        return
+      }
+
+      const info  = getDatabaseInfo(secondaryUuid)
+      const items = getDatabaseData(secondaryUuid)
+      let readonly = true
+      try { const w = await _secondaryHandle.createWritable(); await w.abort(); readonly = false } catch {}
+
+      await addSecondaryCredential(dbKey, secondarySetup.filename, secondaryUuid, secondarySetup.password, _secondaryHandle)
+
+      secondaryVaults.update(vs => {
+        const filtered = vs.filter(v => v.uuid !== secondaryUuid)
+        return [...filtered, {
+          handle: _secondaryHandle,
+          name: info?.name || secondarySetup.filename,
+          filename: secondarySetup.filename,
+          readonly,
+          items: items.map(i => ({ ...i, vaultUuid: secondaryUuid })),
+          uuid: secondaryUuid,
+          masterPassword: secondarySetup.password,
+        }]
+      })
+      secondarySetup = null
+      sheetOpen = true
+    } catch (e) {
+      secondarySetup = { ...secondarySetup, busy: false, error: 'Wrong password or invalid file.' }
+    }
+  }
+
 
   // Warn on tab close with unsaved changes
   $effect(() => {
@@ -378,14 +521,15 @@
   let showRecord = $derived(!!record || isEditing || sheetOpen)
 
   let searchInput = $state(null)
-  let showHelp    = $state(false)
+  let showHelp      = $state(false)
+  let collapseSeq   = $state(0)
 
   // Flat ordered UUID list matching RecordList's sort, used for arrow navigation.
   let flatList = $derived.by(() => {
     let list = $dbItems
     if (pendingDeleteUUID) list = list.filter(i => i.uuid !== pendingDeleteUUID)
     if (query.trim()) {
-      const matched = new Set(searchRecords(query, false))
+      const matched = new Set(searchRecords(dbKey, query, false))
       list = list.filter(i => matched.has(i.uuid))
     }
     return [...list].sort((a, b) => {
@@ -475,7 +619,8 @@
 
     if (inSearch) return  // no other shortcuts while typing in search
 
-    if (e.ctrlKey && e.key === 'l') { e.preventDefault(); lockVault(); return }
+    if (e.ctrlKey && e.key === 'l') { e.preventDefault(); lockAllVaults(); return }
+    if (e.ctrlKey && e.key === '-') { e.preventDefault(); collapseSeq++; return }
     if (e.ctrlKey && (e.key === '+' || e.key === '=')) { e.preventDefault(); startNew(); return }
 
     if (!record) return
@@ -503,9 +648,38 @@
 
 <svelte:window onkeydown={handleKeydown}/>
 
-{#if $selectedFile?.readonly}
-  <div class="readonly-warning">
-    This vault is read-only — changes cannot be saved.
+{#if secondarySetup}
+  <div class="modal-overlay" role="presentation"
+    onclick={e => { if (!secondarySetup.busy) secondarySetup = null; sheetOpen = true }}
+    onkeydown={e => { if (e.key === 'Escape' && !secondarySetup.busy) { secondarySetup = null; sheetOpen = true } }}>
+    <div class="modal" role="dialog" aria-modal="true" tabindex="-1"
+      onclick={e => e.stopPropagation()} onkeydown={e => e.stopPropagation()}>
+      <div class="modal-title">Unlock {secondarySetup.filename}</div>
+      {#if secondarySetup.needsAuth}
+        <p class="modal-desc muted">You'll need to verify your primary vault identity before adding a secondary vault.</p>
+      {/if}
+      {#if secondarySetup.error}
+        <p class="unlock-error" style="text-align:left;margin-bottom:8px">{secondarySetup.error}</p>
+      {/if}
+      <div class="modal-pw">
+        <input
+          type={secondarySetup.showPw ? 'text' : 'password'}
+          bind:value={secondarySetup.password}
+          placeholder="Master password for this vault"
+          disabled={secondarySetup.busy}
+          onkeydown={e => { if (e.key === 'Enter') confirmSecondarySetup() }}
+        />
+        <button class="icon-btn-flat" onclick={() => secondarySetup = { ...secondarySetup, showPw: !secondarySetup.showPw }} aria-label="Toggle visibility">
+          <Icon name={secondarySetup.showPw ? 'eye-off' : 'eye'} size={18}/>
+        </button>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" disabled={!secondarySetup.password || secondarySetup.busy} onclick={confirmSecondarySetup}>
+          {secondarySetup.busy ? 'Unlocking…' : secondarySetup.needsAuth ? 'Unlock & verify identity' : 'Unlock'}
+        </button>
+        <button class="btn btn-ghost" disabled={secondarySetup.busy} onclick={() => { secondarySetup = null; sheetOpen = true }}>Cancel</button>
+      </div>
+    </div>
   </div>
 {/if}
 
@@ -514,7 +688,7 @@
   <div class="topbar-left">
     <button class="vault-pill" onclick={() => sheetOpen = true}>
       <Icon name="unlock" size={16}/>
-      <span>{vaultName}</span>
+      <span>{vaultName}{secondaryCount > 0 ? ` (+${secondaryCount})` : ''}</span>
       <Icon name="chevron-down" size={16}/>
     </button>
   </div>
@@ -541,15 +715,17 @@
     {/if}
   </div>
 
-  <RecordList {query} {selectedUUID} excludeUUID={pendingDeleteUUID} storageKey={dbKey} ontap={selectRecord} oncopy={copyToClipboard} oncopytotp={copyTOTPForUUID}/>
+  <RecordList {query} {selectedUUID} {collapseSeq} excludeUUID={pendingDeleteUUID} storageKey={dbKey} primaryVaultName={vaultName} ontap={selectRecord} oncopy={copyToClipboard} oncopytotp={copyTOTPForUUID}/>
 
-  <!-- FAB (mobile) -->
-  <button class="fab" onclick={startNew} aria-label="New">
-    <Icon name="plus" size={22} stroke="var(--accent-on)"/>
-  </button>
+  <!-- FAB (mobile) — hidden when all open vaults are read-only -->
+  {#if !allVaultsReadonly}
+    <button class="fab" onclick={startNew} aria-label="New">
+      <Icon name="plus" size={22} stroke="var(--accent-on)"/>
+    </button>
+  {/if}
 
   <!-- New button (desktop, bottom of left panel) -->
-  {#if isDesktop}
+  {#if isDesktop && !allVaultsReadonly}
     <button class="desktop-new-btn" onclick={startNew}>
       <Icon name="plus" size={18}/>
       <span>New</span>
@@ -575,6 +751,7 @@
       <div class="help-title">Keyboard shortcuts</div>
       <div class="help-rows">
         <div class="help-row"><span>Focus search</span><div class="help-keys"><kbd>/</kbd></div></div>
+        <div class="help-row"><span>Clear search / close</span><div class="help-keys"><kbd>Esc</kbd></div></div>
         <div class="help-row"><span>Navigate list</span><div class="help-keys"><kbd>↑</kbd><kbd>↓</kbd></div></div>
         <div class="help-row"><span>Copy username</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>B</kbd></div></div>
         <div class="help-row"><span>Copy password</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>C</kbd></div></div>
@@ -585,9 +762,8 @@
         <div class="help-row"><span>Copy custom field 1–9</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>1–9</kbd></div></div>
         <div class="help-row"><span>Edit entry</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>↵</kbd></div></div>
         <div class="help-row"><span>New entry</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>+</kbd></div></div>
-        <div class="help-row"><span>Lock vault</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>L</kbd></div></div>
-        <div class="help-row"><span>Clear search / close</span><div class="help-keys"><kbd>Esc</kbd></div></div>
-        <div class="help-row"><span>This help</span><div class="help-keys"><kbd>?</kbd></div></div>
+        <div class="help-row"><span>Collapse / expand groups</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>−</kbd></div></div>
+        <div class="help-row"><span>Lock all vaults</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>L</kbd></div></div>
       </div>
     </div>
   </div>
@@ -602,6 +778,9 @@
       {accent}
       onback={closeVaultSheet}
       onlock={lockVault}
+      onlockall={lockAllVaults}
+      onlocksecondary={lockSecondaryVault}
+      onunlockadditional={unlockAdditionalVault}
       ondbsave={saveDBFields}
       ondirtychange={(d) => vaultDirty = d}
       {ontheme}
@@ -612,6 +791,9 @@
       {record}
       {isNew}
       {isDesktop}
+      vaultUuid={isNew ? (newRecordVaultUuid || dbKey) : (selectedVaultUuid || dbKey)}
+      {rwVaults}
+      onvaultchange={(uuid) => newRecordVaultUuid = uuid}
       oncancel={cancelEdit}
       onsave={saveRecord}
       ondelete={() => deleteRecord(selectedUUID)}
@@ -623,8 +805,9 @@
         {record}
         uuid={selectedUUID}
         {isDesktop}
-        onback={() => { record = null; selectedUUID = null }}
-        onedit={startEdit}
+        vaultUuid={selectedVaultUuid || dbKey}
+        onback={() => { record = null; selectedUUID = null; selectedVaultUuid = null }}
+        onedit={($secondaryVaults.find(v => v.uuid === selectedVaultUuid)?.readonly ?? $selectedFile?.readonly) ? null : startEdit}
         oncopy={copyToClipboard}
         oncopytotp={copyTOTPForUUID}
       />
@@ -637,17 +820,24 @@
         <div class="empty-nudge muted">↙</div>
       {:else}
         <div class="empty-stats">
-          <div class="empty-stat">
-            <span class="empty-num">{passwordCount}</span>
-            <span class="empty-label muted">passwords</span>
-          </div>
-          {#if groupCount > 0}
+          {#if secondaryCount > 0}
+            <div class="empty-stat">
+              <span class="empty-num">{1 + secondaryCount}</span>
+              <span class="empty-label muted">vaults</span>
+            </div>
             <div class="empty-divider"></div>
+          {/if}
+          {#if groupCount > 0}
             <div class="empty-stat">
               <span class="empty-num">{groupCount}</span>
               <span class="empty-label muted">groups</span>
             </div>
+            <div class="empty-divider"></div>
           {/if}
+          <div class="empty-stat">
+            <span class="empty-num">{passwordCount}</span>
+            <span class="empty-label muted">passwords</span>
+          </div>
         </div>
         {#if lastSave}
           <div class="empty-save muted">Last saved {relSaveTime(lastSave)}</div>
@@ -721,16 +911,4 @@
     padding: 1px 6px;
   }
 
-  .readonly-warning {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    z-index: 1000;
-    padding: 10px 16px;
-    background: var(--danger);
-    color: #fff;
-    font-size: 13px;
-    text-align: center;
-  }
 </style>

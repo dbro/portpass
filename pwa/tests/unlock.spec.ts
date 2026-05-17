@@ -19,7 +19,7 @@ test.describe('Unlock screen', () => {
         getFile:           async () => new File([new Uint8Array(fileData)], 'three.dat'),
         queryPermission:   async () => 'granted',
         requestPermission: async () => 'granted',
-        createWritable:    async () => ({ write: async () => {}, close: async () => {} }),
+        createWritable:    async () => ({ write: async () => {}, close: async () => {}, abort: async () => {} }),
       }]
     }, data)
 
@@ -56,7 +56,7 @@ test.describe('Unlock screen', () => {
         getFile:           async () => new File([new Uint8Array(fileData)], 'three.dat'),
         queryPermission:   async () => 'granted',
         requestPermission: async () => 'granted',
-        createWritable:    async () => ({ write: async () => {}, close: async () => {} }),
+        createWritable:    async () => ({ write: async () => {}, close: async () => {}, abort: async () => {} }),
       }]
     }, data)
 

@@ -1,12 +1,14 @@
 <script>
   import { onMount } from 'svelte'
   import { get as idbGet, set as idbSet } from 'idb-keyval'
-  import { openDatabase, createDatabase, getDatabaseData, getDatabaseInfo } from '../wasm.js'
-  import { selectedFile, dbItems } from '../store.js'
+  import { openDatabase, createDatabase, closeDatabase, getDatabaseData, getDatabaseInfo, loadVaultFile } from '../wasm.js'
+  import { selectedFile, dbItems, secondaryVaults } from '../store.js'
   import {
-    isBiometricSupported, isBiometricEnrolledForFile,
+    isBiometricSupported, isBiometricEnrolled, isBiometricEnrolledForFile,
     enrollBiometric, unlockWithBiometric, clearBiometricForFile,
   } from './biometric.js'
+  import { getSecondaryCredentials } from './secondaryVaults.js'
+  import { getRecentHandles, pushRecentHandle } from './recentHandles.js'
   import Icon from './Icon.svelte'
 
   let { onopened, autoBiometric = true } = $props()
@@ -28,16 +30,6 @@
 
   const supportsFilePicker = typeof window !== 'undefined' && 'showOpenFilePicker' in window
 
-  async function getRecentHandles() {
-    return (await idbGet('recentHandles')) ?? []
-  }
-
-  async function pushRecentHandle(handle) {
-    const handles = await getRecentHandles()
-    const updated = [handle, ...handles.filter(h => h.name !== handle.name)].slice(0, 10)
-    await idbSet('recentHandles', updated)
-  }
-
   onMount(async () => {
     biometricAvailable = await isBiometricSupported()
 
@@ -45,9 +37,12 @@
     try {
       const handles = await getRecentHandles()
       if (!handles.length) return
-      fileHandle = handles[0]
+      const entry = handles[0]
+      fileHandle = entry.handle
       mode = 'unlock'
-      biometricEnrolled = await isBiometricEnrolledForFile(fileHandle.name)
+      biometricEnrolled = entry.uuid
+        ? await isBiometricEnrolled(entry.uuid)
+        : await isBiometricEnrolledForFile(fileHandle.name)
       if (biometricEnrolled && autoBiometric) unlockBiometric()
     } catch {}
   })
@@ -91,11 +86,13 @@
         throw e
       }
       const buf  = await file.arrayBuffer()
-      openDatabase(new Uint8Array(buf), password)
-      dbItems.set(getDatabaseData())
+      const vaultUuid = openDatabase(new Uint8Array(buf), password)
+      dbItems.set(getDatabaseData(vaultUuid))
+      const info     = getDatabaseInfo(vaultUuid)
       const writable = await probeWriteAccess(fileHandle)
-      selectedFile.set({ handle: fileHandle, name: fileHandle.name, readonly: !writable })
-      try { await pushRecentHandle(fileHandle) } catch {}
+      selectedFile.set({ handle: fileHandle, name: fileHandle.name, readonly: !writable, uuid: vaultUuid })
+      try { await pushRecentHandle(fileHandle, vaultUuid) } catch {}
+      await autoUnlockSecondaries(vaultUuid)
       afterUnlock()
     } catch (e) {
       error = 'Wrong password or invalid file.'
@@ -108,34 +105,40 @@
   async function unlockBiometric() {
     busy = true; error = ''
     try {
-      let pw
+      // Retrieve the master password from biometric, use it immediately, let it go out of scope.
+      let biometricPassword
       try {
-        pw = await unlockWithBiometric(fileHandle.name)
+        biometricPassword = await unlockWithBiometric(fileHandle.name)
       } catch (e) {
         error = e.name === 'NotAllowedError' ? 'Biometric authentication cancelled.' : e.message
         console.error(e)
         return
       }
       const perm = await fileHandle.requestPermission({ mode: 'read' })
-      if (perm !== 'granted') { error = 'File access was denied.'; return }
+      if (perm !== 'granted') { biometricPassword = null; error = 'File access was denied.'; return }
       let file
       try { file = await fileHandle.getFile() } catch (e) {
-        if (e.name === 'NotFoundError') { await handleFileMissing(); return }
+        if (e.name === 'NotFoundError') { biometricPassword = null; await handleFileMissing(); return }
         throw e
       }
       const buf  = await file.arrayBuffer()
+      let vaultUuid
       try {
-        openDatabase(new Uint8Array(buf), pw)
+        vaultUuid = openDatabase(new Uint8Array(buf), biometricPassword)
       } catch {
+        biometricPassword = null
         await clearBiometricForFile(fileHandle.name)
         biometricEnrolled = false
         error = 'Biometric/PIN unlock is out of date — please enter your master password.'
         return
       }
-      dbItems.set(getDatabaseData())
+      biometricPassword = null
+      dbItems.set(getDatabaseData(vaultUuid))
+      const info     = getDatabaseInfo(vaultUuid)
       const writable = await probeWriteAccess(fileHandle)
-      selectedFile.set({ handle: fileHandle, name: fileHandle.name, readonly: !writable })
-      await pushRecentHandle(fileHandle)
+      selectedFile.set({ handle: fileHandle, name: fileHandle.name, readonly: !writable, uuid: vaultUuid })
+      await pushRecentHandle(fileHandle, vaultUuid)
+      await autoUnlockSecondaries(vaultUuid)
       onopened()
     } finally {
       busy = false
@@ -145,7 +148,7 @@
   async function enableBiometric() {
     busy = true; error = ''
     try {
-      const info = getDatabaseInfo()
+      const info = getDatabaseInfo($selectedFile?.uuid ?? '')
       await enrollBiometric(password, info?.uuid, fileHandle?.name)
       biometricEnrolled = true
       onopened()
@@ -161,15 +164,44 @@
     if (!password) return
     busy = true; error = ''
     try {
-      createDatabase(password)
-      dbItems.set(getDatabaseData())
-      selectedFile.set({ handle: null, name: 'New vault' })
+      const vaultUuid = createDatabase(password)
+      dbItems.set(getDatabaseData(vaultUuid))
+      selectedFile.set({ handle: null, name: 'New vault', uuid: vaultUuid })
       onopened()
     } catch (e) {
       error = e.message
     } finally {
       busy = false
     }
+  }
+
+  async function autoUnlockSecondaries(primaryUuid) {
+    try {
+      const credentials = await getSecondaryCredentials(primaryUuid)
+      if (credentials.length === 0) return
+      const opened = []
+      for (const cred of credentials) {
+        const handle = cred.handle
+        if (!handle) continue // no stored handle; user must manually re-link
+        try {
+          const perm = await handle.requestPermission({ mode: 'read' })
+          if (perm !== 'granted') continue
+          const vaultUuid = await loadVaultFile(handle, cred.masterPassword)
+          if (vaultUuid !== cred.vaultUuid) { closeDatabase(vaultUuid); continue }
+          const info  = getDatabaseInfo(vaultUuid)
+          const items = getDatabaseData(vaultUuid)
+          let readonly = true
+          try { const w = await handle.createWritable(); await w.abort(); readonly = false } catch {}
+          opened.push({
+            handle, name: info?.name || handle.name,
+            filename: handle.name, readonly,
+            items: items.map(i => ({ ...i, vaultUuid })),
+            uuid: vaultUuid, masterPassword: cred.masterPassword,
+          })
+        } catch {}
+      }
+      secondaryVaults.set(opened)
+    } catch {}
   }
 
   async function probeWriteAccess(handle) {
@@ -184,12 +216,13 @@
 
   function switchFile() {
     fileHandle = null; password = ''; error = ''; mode = 'landing'
+    secondaryVaults.set([])
   }
 
   async function handleFileMissing() {
     try {
-      const handles = await getRecentHandles()
-      await idbSet('recentHandles', handles.filter(h => h.name !== fileHandle?.name))
+      const handles = (await idbGet('recentHandles')) ?? []
+      await idbSet('recentHandles', handles.filter(h => h.handle?.name !== fileHandle?.name))
     } catch {}
     fileHandle = null; password = ''; mode = 'landing'
     error = 'Vault file not found — it may have been moved or deleted.'
@@ -229,7 +262,14 @@
         <img src="{import.meta.env.BASE_URL}icon.svg" alt="Portpass" style="width:64px;height:64px" />
       </div>
       <div class="unlock-vault">{fileHandle?.name ?? 'Vault'}</div>
-      <div class="unlock-sub muted">Vault is locked</div>
+      <div class="unlock-sub" class:muted={!busy} class:unlock-busy={busy}>
+        {busy ? 'Unlocking…' : 'Vault is locked'}
+      </div>
+
+      {#if busy}
+        <div class="unlock-shimmer-wrap"><div class="unlock-shimmer"></div></div>
+        <div class="unlock-hint muted">Your vault uses strong encryption — this takes a moment.</div>
+      {/if}
 
       {#if biometricEnrolled}
         <button class="btn btn-biometric" disabled={busy} onclick={unlockBiometric}>
