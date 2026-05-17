@@ -133,4 +133,26 @@ test.describe('Multi-vault', () => {
     await expect(page.getByRole('button', { name: 'Lock vault' })).not.toBeVisible()
   })
 
+  test('vault selector appears in new record form when multiple RW vaults are open', async ({ page }) => {
+    await openWithSecondary(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    await expect(page.locator('.vault-select-trigger')).toBeVisible()
+    // Primary vault should be selected by default
+    await expect(page.locator('.vault-select-trigger')).toContainText('three.dat')
+  })
+
+  test('vault selector allows switching to secondary vault for new record', async ({ page }) => {
+    await openWithSecondary(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+
+    // Open dropdown and pick the secondary vault
+    await page.locator('.vault-select-trigger').click()
+    await expect(page.locator('.vault-select-menu')).toBeVisible()
+    await page.locator('.vault-select-option').last().click()
+
+    // Dropdown closes and trigger reflects new selection
+    await expect(page.locator('.vault-select-menu')).not.toBeVisible()
+    await expect(page.locator('.vault-select-trigger')).toContainText('simple.dat')
+  })
+
 })

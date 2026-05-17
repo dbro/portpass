@@ -116,6 +116,39 @@ test.describe('Keyboard shortcuts', () => {
     expect(text).toContain('group1.com')
   })
 
+  // ── Escape key ───────────────────────────────────────────────────────────────
+
+  test('Escape clears search query when search is focused', async ({ page }) => {
+    await page.getByPlaceholder('Search vault').fill('entry')
+    await expect(page.locator('.record-row')).toHaveCount(3) // all match
+    await page.keyboard.press('Escape')
+    await expect(page.getByPlaceholder('Search vault')).toHaveValue('')
+  })
+
+  test('Escape deselects selected record', async ({ page }) => {
+    await page.locator('.record-row').first().click()
+    await expect(page.locator('.record-title')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.record-title')).not.toBeVisible()
+  })
+
+  // ── Help modal ────────────────────────────────────────────────────────────────
+
+  test('? opens help modal', async ({ page }) => {
+    await page.keyboard.press('ArrowDown') // move focus off search
+    await page.keyboard.press('?')
+    await expect(page.locator('.help-modal')).toBeVisible()
+    await expect(page.locator('.help-modal')).toContainText('Keyboard shortcuts')
+  })
+
+  test('Escape closes help modal', async ({ page }) => {
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('?')
+    await expect(page.locator('.help-modal')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.help-modal')).not.toBeVisible()
+  })
+
   // ── Collapse / expand groups ─────────────────────────────────────────────────
 
   test('Ctrl+- collapses all groups', async ({ page }) => {

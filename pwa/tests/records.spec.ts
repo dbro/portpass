@@ -111,6 +111,26 @@ test.describe('Clipboard copy', () => {
     await expect(page.locator('.copy-row.clipboard-active')).toBeVisible({ timeout: 3000 })
   })
 
+  test('Copy password button puts password on clipboard', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    await openVault(page)
+    // First record is "three entry 3" — password ",./<>?`~0"
+    await page.locator('.record-row').first().click()
+    await page.getByLabel('Copy password').click()
+    const text = await page.evaluate(() => navigator.clipboard.readText())
+    expect(text).toBe(',./<>?`~0')
+  })
+
+  test('Copy username button puts username on clipboard', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    await openVault(page)
+    // "three entry 1" — username "three1_user"
+    await page.locator('.record-row', { hasText: 'three entry 1' }).click()
+    await page.getByLabel('Copy username').click()
+    const text = await page.evaluate(() => navigator.clipboard.readText())
+    expect(text).toBe('three1_user')
+  })
+
   test('double-click flashes the record row', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write'])
     await openVault(page)
