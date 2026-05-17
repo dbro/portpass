@@ -158,6 +158,26 @@
     ]
   })
 
+  // Auto-expand the group containing the newly-selected record (e.g. via arrow key navigation)
+  $effect(() => {
+    const uuid = selectedUUID
+    if (!uuid) return
+    const allItems = [
+      ...get(dbItems),
+      ...get(secondaryVaults).flatMap(sv => sv.items ?? [])
+    ]
+    const item = allItems.find(i => i.uuid === uuid)
+    if (!item) return
+    const group = item.group || 'Ungrouped'
+    untrack(() => {
+      if (openGroups[group] === false) {
+        const next = { ...openGroups, [group]: true }
+        openGroups = next
+        saveGroupState(next)
+      }
+    })
+  })
+
   let openVaults = $state({})
 
   $effect(() => {

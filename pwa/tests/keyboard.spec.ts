@@ -135,6 +135,7 @@ test.describe('Keyboard shortcuts', () => {
 
   test('? opens help modal', async ({ page }) => {
     await page.keyboard.press('ArrowDown') // move focus off search
+    await expect(page.locator('.record-title')).toBeVisible() // wait for selection to settle
     await page.keyboard.press('?')
     await expect(page.locator('.help-modal')).toBeVisible()
     await expect(page.locator('.help-modal')).toContainText('Keyboard shortcuts')
@@ -153,16 +154,15 @@ test.describe('Keyboard shortcuts', () => {
   test('Ctrl+Up collapses all groups', async ({ page }) => {
     await page.keyboard.press('ArrowDown') // move focus off search
     await page.keyboard.press('Control+ArrowUp')
-    const openCount = await page.locator('.coll-group.is-open').count()
-    expect(openCount).toBe(0)
+    await expect(page.locator('.coll-group.is-open')).toHaveCount(0)
   })
 
   test('Ctrl+Down expands all groups', async ({ page }) => {
     await page.keyboard.press('ArrowDown')
     await page.keyboard.press('Control+ArrowUp') // collapse all first
+    await expect(page.locator('.coll-group.is-open')).toHaveCount(0)
     await page.keyboard.press('Control+ArrowDown') // expand all
-    const openCount = await page.locator('.coll-group.is-open').count()
-    expect(openCount).toBeGreaterThan(0)
+    await expect(page.locator('.coll-group.is-open')).toHaveCount(3)
   })
 
   // ── Ctrl+E ───────────────────────────────────────────────────────────────────

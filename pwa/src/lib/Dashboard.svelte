@@ -524,19 +524,28 @@
   let showHelp      = $state(false)
   let collapseSeq   = $state('')
 
-  // Flat ordered UUID list matching RecordList's sort, used for arrow navigation.
+  // Flat ordered {uuid, vaultUuid} list spanning all open vaults, matching RecordList's sort.
+  // vaultUuid is null for primary vault records (selectRecord defaults to dbKey).
   let flatList = $derived.by(() => {
-    let list = $dbItems
-    if (pendingDeleteUUID) list = list.filter(i => i.uuid !== pendingDeleteUUID)
-    if (query.trim()) {
-      const matched = new Set(searchRecords(dbKey, query, false))
-      list = list.filter(i => matched.has(i.uuid))
+    function sortedEntries(items, vaultUuid) {
+      let list = items
+      if (pendingDeleteUUID) list = list.filter(i => i.uuid !== pendingDeleteUUID)
+      if (query.trim()) {
+        try {
+          const matched = new Set(searchRecords(vaultUuid ?? dbKey, query, false))
+          list = list.filter(i => matched.has(i.uuid))
+        } catch {}
+      }
+      return [...list].sort((a, b) => {
+        const ga = a.group || 'Ungrouped', gb = b.group || 'Ungrouped'
+        const gc = ga.localeCompare(gb)
+        return gc !== 0 ? gc : a.title.localeCompare(b.title)
+      }).map(i => ({ uuid: i.uuid, vaultUuid }))
     }
-    return [...list].sort((a, b) => {
-      const ga = a.group || 'Ungrouped', gb = b.group || 'Ungrouped'
-      const gc = ga.localeCompare(gb)
-      return gc !== 0 ? gc : a.title.localeCompare(b.title)
-    }).map(i => i.uuid)
+    return [
+      ...sortedEntries($dbItems, null),
+      ...$secondaryVaults.flatMap(sv => sortedEntries(sv.items ?? [], sv.uuid)),
+    ]
   })
 
   async function copyRecordField(field) {
@@ -589,14 +598,14 @@
       e.preventDefault()
       if (inSearch) {
         const next = flatList[0]
-        if (next) { selectRecord(next); searchInput?.blur() }
+        if (next) { selectRecord(next.uuid, next.vaultUuid); searchInput?.blur() }
       } else {
-        const idx = flatList.indexOf(selectedUUID)
+        const idx = flatList.findIndex(i => i.uuid === selectedUUID)
         if (idx === flatList.length - 1) {
           record = null; selectedUUID = null; searchInput?.focus()
         } else {
           const next = idx === -1 ? flatList[0] : flatList[idx + 1]
-          if (next) selectRecord(next)
+          if (next) selectRecord(next.uuid, next.vaultUuid)
         }
       }
       return
@@ -605,14 +614,14 @@
       e.preventDefault()
       if (inSearch) {
         const prev = flatList[flatList.length - 1]
-        if (prev) { selectRecord(prev); searchInput?.blur() }
+        if (prev) { selectRecord(prev.uuid, prev.vaultUuid); searchInput?.blur() }
       } else {
-        const idx = flatList.indexOf(selectedUUID)
+        const idx = flatList.findIndex(i => i.uuid === selectedUUID)
         if (idx === 0) {
           record = null; selectedUUID = null; searchInput?.focus()
         } else {
           const prev = idx <= 0 ? flatList[flatList.length - 1] : flatList[idx - 1]
-          if (prev) selectRecord(prev)
+          if (prev) selectRecord(prev.uuid, prev.vaultUuid)
         }
       }
       return
