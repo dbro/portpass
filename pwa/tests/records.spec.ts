@@ -151,6 +151,44 @@ test.describe('Clipboard copy', () => {
 
 })
 
+test.describe('Group collapse persistence', () => {
+
+  test('collapsed group state is saved to localStorage', async ({ page }) => {
+    await openVault(page)
+    await page.locator('.coll-header').first().click()
+    await expect(page.locator('.coll-group').first()).not.toHaveClass(/is-open/)
+
+    const state = await page.evaluate(() => {
+      const key = Object.keys(localStorage).find(k => k.startsWith('groups-'))
+      return key ? JSON.parse(localStorage.getItem(key) ?? 'null') : null
+    })
+    expect(state).not.toBeNull()
+    expect(Object.values(state as Record<string, boolean>)).toContain(false)
+  })
+
+  test('collapsed group stays collapsed after opening and closing a record', async ({ page }) => {
+    await openVault(page)
+    await page.locator('.coll-header').first().click()
+    await expect(page.locator('.coll-group').first()).not.toHaveClass(/is-open/)
+
+    // Open a record from a different (still-open) group, then close it
+    await page.locator('.record-row', { hasText: 'three entry 1' }).click()
+    await page.keyboard.press('Escape')
+
+    // First group should still be collapsed
+    await expect(page.locator('.coll-group').first()).not.toHaveClass(/is-open/)
+  })
+
+  test('expanded group stays expanded after collapsing and re-expanding another group', async ({ page }) => {
+    await openVault(page)
+    // All groups start expanded — collapse second, verify first is still open
+    await page.locator('.coll-header').nth(1).click()
+    await expect(page.locator('.coll-group').nth(1)).not.toHaveClass(/is-open/)
+    await expect(page.locator('.coll-group').first()).toHaveClass(/is-open/)
+  })
+
+})
+
 test.describe('Context menu', () => {
 
   test('right-click shows context menu', async ({ page }) => {
