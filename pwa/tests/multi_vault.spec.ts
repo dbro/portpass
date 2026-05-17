@@ -92,7 +92,8 @@ test.describe('Multi-vault', () => {
 
     await page.locator('.vault-pill').click()
     await expect(page.locator('.vault-settings-body')).toBeVisible()
-    await page.locator('.vault-secondary').getByRole('button', { name: 'Lock' }).click()
+    await page.locator('.vault-card').last().click()
+    await page.getByRole('button', { name: 'Lock this vault' }).click()
     await page.keyboard.press('Escape')
 
     await expect(page.locator('.vault-pill')).not.toContainText('(+1)')
@@ -106,8 +107,9 @@ test.describe('Multi-vault', () => {
     await openWithSecondary(page)
     await page.locator('.vault-pill').click()
     await expect(page.locator('.vault-settings-body')).toBeVisible()
-    await expect(page.locator('.vault-secondary-name')).toBeVisible()
-    await expect(page.locator('.vault-secondary-meta').last()).toContainText('password')
+    await page.locator('.vault-card').last().click()
+    await expect(page.locator('.vault-file-value')).toBeVisible()
+    await expect(page.locator('.vault-detail-stat-label').first()).toContainText('password')
   })
 
   test('read-only secondary vault shows no Edit button for its records', async ({ page }) => {

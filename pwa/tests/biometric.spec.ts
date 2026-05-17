@@ -94,6 +94,7 @@ test.describe('Biometric/PIN unlock', () => {
 
       await page.locator('.vault-pill').click()
       await expect(page.locator('.vault-settings-body')).toBeVisible()
+      await page.locator('.vault-card').first().click()
       await expect(page.locator('.vault-toggle-help')).not.toHaveText('Enabled')
 
       // Click toggle — modal should appear
@@ -114,6 +115,7 @@ test.describe('Biometric/PIN unlock', () => {
       await openVaultNoEnroll(page)
 
       await page.locator('.vault-pill').click()
+      await page.locator('.vault-card').first().click()
       await page.getByRole('button', { name: 'Biometric/PIN unlock' }).click()
       await expect(page.locator('.modal')).toBeVisible()
 
@@ -127,6 +129,7 @@ test.describe('Biometric/PIN unlock', () => {
       await openVaultNoEnroll(page)
 
       await page.locator('.vault-pill').click()
+      await page.locator('.vault-card').first().click()
       await page.getByRole('button', { name: 'Biometric/PIN unlock' }).click()
       await expect(page.locator('.modal')).toBeVisible()
 
@@ -140,6 +143,7 @@ test.describe('Biometric/PIN unlock', () => {
       await openVaultNoEnroll(page)
 
       await page.locator('.vault-pill').click()
+      await page.locator('.vault-card').first().click()
       await page.getByRole('button', { name: 'Biometric/PIN unlock' }).click()
       await expect(page.locator('.modal')).toBeVisible()
 
@@ -158,6 +162,7 @@ test.describe('Biometric/PIN unlock', () => {
 
     await page.locator('.vault-pill').click()
     await expect(page.locator('.vault-settings-body')).toBeVisible()
+    await page.locator('.vault-card').first().click()
     await expect(page.locator('.vault-toggle-help')).toHaveText('Enabled')
   })
 
@@ -173,6 +178,7 @@ test.describe('Biometric/PIN unlock', () => {
 
     await page.locator('.vault-pill').click()
     await expect(page.locator('.vault-settings-body')).toBeVisible()
+    await page.locator('.vault-card').first().click()
     await expect(page.locator('.vault-toggle-help')).not.toHaveText('Enabled')
   })
 

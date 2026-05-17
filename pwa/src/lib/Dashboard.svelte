@@ -681,12 +681,6 @@
   </div>
 {/if}
 
-{#if $selectedFile?.readonly}
-  <div class="readonly-warning">
-    This vault is read-only — changes cannot be saved.
-  </div>
-{/if}
-
 <!-- TOP BAR -->
 <div class="topbar">
   <div class="topbar-left">
@@ -824,17 +818,24 @@
         <div class="empty-nudge muted">↙</div>
       {:else}
         <div class="empty-stats">
-          <div class="empty-stat">
-            <span class="empty-num">{passwordCount}</span>
-            <span class="empty-label muted">passwords</span>
-          </div>
-          {#if groupCount > 0}
+          {#if secondaryCount > 0}
+            <div class="empty-stat">
+              <span class="empty-num">{1 + secondaryCount}</span>
+              <span class="empty-label muted">vaults</span>
+            </div>
             <div class="empty-divider"></div>
+          {/if}
+          {#if groupCount > 0}
             <div class="empty-stat">
               <span class="empty-num">{groupCount}</span>
               <span class="empty-label muted">groups</span>
             </div>
+            <div class="empty-divider"></div>
           {/if}
+          <div class="empty-stat">
+            <span class="empty-num">{passwordCount}</span>
+            <span class="empty-label muted">passwords</span>
+          </div>
         </div>
         {#if lastSave}
           <div class="empty-save muted">Last saved {relSaveTime(lastSave)}</div>
@@ -908,16 +909,4 @@
     padding: 1px 6px;
   }
 
-  .readonly-warning {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    z-index: 1000;
-    padding: 10px 16px;
-    background: var(--danger);
-    color: #fff;
-    font-size: 13px;
-    text-align: center;
-  }
 </style>
