@@ -49,11 +49,10 @@ test.describe('Keyboard shortcuts', () => {
   })
 
   test('ArrowDown navigates through records', async ({ page }) => {
-    await page.keyboard.press('ArrowDown') // select record 0
-    const first = await page.locator('.record-title').textContent()
-    await page.keyboard.press('ArrowDown') // select record 1
-    const second = await page.locator('.record-title').textContent()
-    expect(first).not.toBe(second)
+    await page.keyboard.press('ArrowDown') // three entry 3 (first)
+    await expect(page.locator('.record-title')).toHaveText('three entry 3')
+    await page.keyboard.press('ArrowDown') // three entry 1 (second)
+    await expect(page.locator('.record-title')).toHaveText('three entry 1')
   })
 
   test('ArrowUp from first record returns focus to search', async ({ page }) => {
