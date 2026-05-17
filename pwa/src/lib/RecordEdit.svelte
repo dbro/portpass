@@ -47,7 +47,7 @@
     return { secret: secret.toUpperCase().replace(/[\s-]/g, ''), digits, period }
   }
 
-  let { record, isNew, isDesktop, oncancel, onsave, ondelete, ondirtychange } = $props()
+  let { record, isNew, isDesktop, vaultUuid, rwVaults = [], onvaultchange, oncancel, onsave, ondelete, ondirtychange } = $props()
 
   function focusOnMount(node, condition = true) {
     if (condition) setTimeout(() => node.focus(), 0)
@@ -153,7 +153,7 @@
   // Returns just the suffix to append, or '' if no useful suggestion
   function ghostFor(field, value) {
     if (!value) return ''
-    const suggestion = getAutocompleteSuggestion(field, value)
+    const suggestion = getAutocompleteSuggestion(vaultUuid, field, value)
     if (!suggestion) return ''
     // Only offer if suggestion starts with what the user typed (case-insensitive)
     if (!suggestion.toLowerCase().startsWith(value.toLowerCase())) return ''
@@ -171,7 +171,7 @@
   function onGroupKeydown(e) {
     if (e.key === 'Tab' && groupGhost) {
       e.preventDefault()
-      const suggestion = getAutocompleteSuggestion('group', draft.Group)
+      const suggestion = getAutocompleteSuggestion(vaultUuid, 'group', draft.Group)
       set('Group', suggestion)
       groupGhost = ''
     } else if (e.key === 'Escape') {
@@ -188,7 +188,7 @@
   function onUsernameKeydown(e) {
     if (e.key === 'Tab' && usernameGhost) {
       e.preventDefault()
-      const suggestion = getAutocompleteSuggestion('username', draft.Username)
+      const suggestion = getAutocompleteSuggestion(vaultUuid, 'username', draft.Username)
       set('Username', suggestion)
       usernameGhost = ''
     } else if (e.key === 'Escape') {
@@ -228,6 +228,16 @@
   {/if}
 
   <div class="record-body" style="display:flex;flex-direction:column;gap:16px">
+    {#if isNew && rwVaults.length > 1}
+      <div class="field">
+        <span class="field-label muted">Save to vault</span>
+        <select class="input" value={vaultUuid} onchange={e => onvaultchange?.(e.target.value)}>
+          {#each rwVaults as v}
+            <option value={v.uuid}>{v.name}</option>
+          {/each}
+        </select>
+      </div>
+    {/if}
     <label class="field">
       <span class="field-label muted">Title</span>
       <input class="input" class:warn={dirty && !draft.Title} value={draft.Title} oninput={e => set('Title', e.target.value)}

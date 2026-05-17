@@ -37,11 +37,11 @@ export async function openVault(
       getFile:           async () => new File([bytes], 'three.dat'),
       queryPermission:   async () => 'granted',
       requestPermission: async () => 'granted',
-      createWritable:    async () => ({ write: async () => {}, close: async () => {} }),
+      createWritable:    async () => ({ write: async () => {}, close: async () => {}, abort: async () => {} }),
     }]
     ;(window as any).showSaveFilePicker = async () => ({
       name: 'test.psafe3',
-      createWritable: async () => ({ write: async () => {}, close: async () => {} }),
+      createWritable: async () => ({ write: async () => {}, close: async () => {}, abort: async () => {} }),
     })
   }, b64)
 
@@ -65,7 +65,7 @@ export async function createVault(page: Page, password = 'testpassword') {
     }
     ;(window as any).showSaveFilePicker = async () => ({
       name: 'new.psafe3',
-      createWritable: async () => ({ write: async () => {}, close: async () => {} }),
+      createWritable: async () => ({ write: async () => {}, close: async () => {}, abort: async () => {} }),
     })
   })
 

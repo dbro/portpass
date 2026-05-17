@@ -34,11 +34,11 @@ async function setupThreeFilePicker(page: Page) {
       getFile:           async () => new File([bytes], 'three.dat'),
       queryPermission:   async () => 'granted',
       requestPermission: async () => 'granted',
-      createWritable:    async () => ({ write: async () => {}, close: async () => {} }),
+      createWritable:    async () => ({ write: async () => {}, close: async () => {}, abort: async () => {} }),
     }]
     ;(window as any).showSaveFilePicker = async () => ({
       name: 'test.psafe3',
-      createWritable: async () => ({ write: async () => {}, close: async () => {} }),
+      createWritable: async () => ({ write: async () => {}, close: async () => {}, abort: async () => {} }),
     })
   }, THREE_B64)
 }

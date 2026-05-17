@@ -2,8 +2,14 @@ package main
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base32"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -15,8 +21,25 @@ import (
 	"github.com/dbro/portpass/pwsafe"
 )
 
-var db *pwsafe.V3
+var databases = make(map[string]*pwsafe.V3)
 
+func vaultUUID(db *pwsafe.V3) string {
+	return fmt.Sprintf("%x", db.Header.UUID)
+}
+
+func getDB(args []js.Value) (*pwsafe.V3, string, bool) {
+	if len(args) == 0 {
+		return nil, "missing vault UUID argument", false
+	}
+	uuid := args[0].String()
+	db, ok := databases[uuid]
+	if !ok {
+		return nil, "vault not open: " + uuid, false
+	}
+	return db, uuid, true
+}
+
+// openDB opens a vault and stores it. Returns JSON {"uuid":"..."} on success, error string on failure.
 func openDB(this js.Value, args []js.Value) interface{} {
 	if len(args) != 2 {
 		return "invalid arguments: expected (data, password)"
@@ -25,32 +48,48 @@ func openDB(this js.Value, args []js.Value) interface{} {
 	dataJS := args[0]
 	password := args[1].String()
 
-	// Copy data from JS Uint8Array to Go []byte
 	length := dataJS.Get("length").Int()
 	data := make([]byte, length)
 	js.CopyBytesToGo(data, dataJS)
 
-	reader := bytes.NewReader(data)
-
 	newDB := &pwsafe.V3{}
-	_, err := newDB.Decrypt(reader, password)
-	if err != nil {
+	if _, err := newDB.Decrypt(bytes.NewReader(data), password); err != nil {
 		return fmt.Sprintf("failed to decrypt: %s", err)
 	}
 
-	db = newDB
-	return nil // null means success
+	uuid := vaultUUID(newDB)
+	databases[uuid] = newDB
+
+	result, _ := json.Marshal(map[string]string{"uuid": uuid})
+	return string(result)
+}
+
+// createDatabase creates a new in-memory vault. Returns JSON {"uuid":"..."} on success.
+func createDatabase(this js.Value, args []js.Value) interface{} {
+	if len(args) != 1 {
+		return "invalid arguments: expected (password)"
+	}
+	newDB := pwsafe.NewV3("", args[0].String())
+	uuid := vaultUUID(newDB)
+	databases[uuid] = newDB
+	result, _ := json.Marshal(map[string]string{"uuid": uuid})
+	return string(result)
+}
+
+// closeDB removes a vault from memory.
+func closeDB(this js.Value, args []js.Value) interface{} {
+	if len(args) != 1 {
+		return "invalid arguments: expected (vaultUuid)"
+	}
+	delete(databases, args[0].String())
+	return nil
 }
 
 func getDBData(this js.Value, args []js.Value) interface{} {
-	if db == nil {
-		return "database not open"
+	db, _, ok := getDB(args)
+	if !ok {
+		return "vault not open"
 	}
-
-	// We want to return a tree structure.
-	// For now, let's just return a flat list of items with their groups for the frontend to process,
-	// or build a simplified tree here.
-	// Let's return a list of {uuid, title, group} objects.
 
 	type Item struct {
 		UUID    string `json:"uuid"`
@@ -60,7 +99,6 @@ func getDBData(this js.Value, args []js.Value) interface{} {
 	}
 
 	var items []Item
-
 	for uuidHex, rec := range db.Records {
 		items = append(items, Item{
 			UUID:    uuidHex,
@@ -74,20 +112,19 @@ func getDBData(this js.Value, args []js.Value) interface{} {
 	if err != nil {
 		return fmt.Sprintf("json marshal error: %s", err)
 	}
-
 	return string(jsonData)
 }
 
 func getRecord(this js.Value, args []js.Value) interface{} {
-	if db == nil {
-		return "database not open"
+	db, _, ok := getDB(args)
+	if !ok {
+		return "vault not open"
 	}
-	if len(args) != 1 {
-		return "invalid arguments: expected (uuid)"
+	if len(args) != 2 {
+		return "invalid arguments: expected (vaultUuid, recordUuid)"
 	}
 
-	uuidHex := args[0].String()
-	rec, ok := db.Records[uuidHex]
+	rec, ok := db.Records[args[1].String()]
 	if !ok {
 		return "record not found"
 	}
@@ -96,27 +133,15 @@ func getRecord(this js.Value, args []js.Value) interface{} {
 	if err != nil {
 		return fmt.Sprintf("json marshal error: %s", err)
 	}
-
 	return string(jsonData)
 }
 
-func createDatabase(this js.Value, args []js.Value) interface{} {
-	if len(args) != 1 {
-		return "invalid arguments: expected (password)"
-	}
-	password := args[0].String()
-
-	newDB := pwsafe.NewV3("", password)
-	db = newDB
-	return nil
-}
-
 func getDBInfo(this js.Value, args []js.Value) interface{} {
-	if db == nil {
-		return "database not open"
+	db, _, ok := getDB(args)
+	if !ok {
+		return "vault not open"
 	}
-	// Return header info
-	// db.Header contains the info.
+
 	type DBInfo struct {
 		Version     string `json:"version"`
 		UUID        string `json:"uuid"`
@@ -128,27 +153,11 @@ func getDBInfo(this js.Value, args []js.Value) interface{} {
 		Iter        uint32 `json:"iter"`
 	}
 
-	// UUID to string
-	uuidStr := fmt.Sprintf("%x", db.Header.UUID)
-
-	// Map of known versions
 	versionMap := map[uint16]string{
-		0x0300: "3.01",
-		0x0301: "3.03",
-		0x0302: "3.09",
-		0x0303: "3.12",
-		0x0304: "3.13",
-		0x0305: "3.14",
-		0x0306: "3.19",
-		0x0307: "3.22",
-		0x0308: "3.25",
-		0x0309: "3.26",
-		0x030A: "3.28",
-		0x030B: "3.29",
-		0x030C: "3.29",
-		0x030D: "3.30",
-		0x030E: "3.47",
-		0x030F: "3.68",
+		0x0300: "3.01", 0x0301: "3.03", 0x0302: "3.09", 0x0303: "3.12",
+		0x0304: "3.13", 0x0305: "3.14", 0x0306: "3.19", 0x0307: "3.22",
+		0x0308: "3.25", 0x0309: "3.26", 0x030A: "3.28", 0x030B: "3.29",
+		0x030C: "3.29", 0x030D: "3.30", 0x030E: "3.47", 0x030F: "3.68",
 		0x0310: "3.69",
 	}
 
@@ -162,7 +171,7 @@ func getDBInfo(this js.Value, args []js.Value) interface{} {
 
 	info := DBInfo{
 		Version:     versionStr,
-		UUID:        uuidStr,
+		UUID:        vaultUUID(db),
 		Name:        db.Header.Name,
 		Description: db.Header.Description,
 		What:        string(db.Header.LastSaveBy),
@@ -175,35 +184,30 @@ func getDBInfo(this js.Value, args []js.Value) interface{} {
 	if err != nil {
 		return fmt.Sprintf("json marshal error: %s", err)
 	}
-
 	return string(jsonData)
 }
 
-// updateRecordFields applies a field/value patch to an existing record.
-// Args: uuid, field1, value1, field2, value2, ...
-// Supported fields: Title, Group, Username, Password, URL, Notes
-// updateRecordFields creates or updates a record.
-// Args: uuid, field1, value1, ...
-// Pass empty string for uuid to create a new record (UUID is generated and returned).
-// Supported fields: Title, Group, Username, Password, URL, Notes
-// Title and Password must be non-empty in the final record.
 func updateRecordFields(this js.Value, args []js.Value) interface{} {
-	if db == nil {
-		return "database not open"
+	db, _, ok := getDB(args)
+	if !ok {
+		return "vault not open"
 	}
-	if len(args) < 3 || len(args)%2 == 0 {
-		return "invalid arguments: expected (uuid, field, value, ...)"
+	// args: vaultUuid, recordUuid, field1, value1, ...
+	if len(args) < 4 || len(args)%2 != 0 {
+		return "invalid arguments: expected (vaultUuid, recordUuid, field, value, ...)"
 	}
-	uuidHex := args[0].String()
+
+	uuidHex := args[1].String()
 	var rec pwsafe.Record
 	if uuidHex != "" {
-		var ok bool
-		rec, ok = db.Records[uuidHex]
-		if !ok {
+		var exists bool
+		rec, exists = db.Records[uuidHex]
+		if !exists {
 			return "record not found"
 		}
 	}
-	for i := 1; i+1 < len(args); i += 2 {
+
+	for i := 2; i+1 < len(args); i += 2 {
 		field, value := args[i].String(), args[i+1].String()
 		switch field {
 		case "Title":
@@ -266,6 +270,7 @@ func updateRecordFields(this js.Value, args []js.Value) interface{} {
 			return fmt.Sprintf("unknown field: %s", field)
 		}
 	}
+
 	if rec.Title == "" {
 		return "Title is required"
 	}
@@ -275,17 +280,16 @@ func updateRecordFields(this js.Value, args []js.Value) interface{} {
 	return db.SetRecord(rec)
 }
 
-// updateDBFields applies a field/value patch to the database header.
-// Args: field1, value1, field2, value2, ...
-// Supported fields: Name, Description, LastSaveUser
 func updateDBFields(this js.Value, args []js.Value) interface{} {
-	if db == nil {
-		return "database not open"
+	db, _, ok := getDB(args)
+	if !ok {
+		return "vault not open"
 	}
-	if len(args) < 2 || len(args)%2 != 0 {
-		return "invalid arguments: expected (field, value, ...)"
+	// args: vaultUuid, field1, value1, ...
+	if len(args) < 3 || len(args)%2 == 0 {
+		return "invalid arguments: expected (vaultUuid, field, value, ...)"
 	}
-	for i := 0; i+1 < len(args); i += 2 {
+	for i := 1; i+1 < len(args); i += 2 {
 		field, value := args[i].String(), args[i+1].String()
 		switch field {
 		case "Name":
@@ -301,10 +305,215 @@ func updateDBFields(this js.Value, args []js.Value) interface{} {
 	return nil
 }
 
+func saveDB(this js.Value, args []js.Value) interface{} {
+	db, _, ok := getDB(args)
+	if !ok {
+		return "vault not open"
+	}
+
+	var buf bytes.Buffer
+	if err := db.Encrypt(&buf); err != nil {
+		return fmt.Sprintf("failed to encrypt db: %s", err)
+	}
+
+	dst := js.Global().Get("Uint8Array").New(buf.Len())
+	js.CopyBytesToJS(dst, buf.Bytes())
+	return dst
+}
+
+func deleteRecord(this js.Value, args []js.Value) interface{} {
+	db, _, ok := getDB(args)
+	if !ok {
+		return "vault not open"
+	}
+	if len(args) != 2 {
+		return "invalid arguments: expected (vaultUuid, recordUuid)"
+	}
+	db.DeleteRecord(args[1].String())
+	return nil
+}
+
+func searchRecords(this js.Value, args []js.Value) interface{} {
+	db, _, ok := getDB(args)
+	if !ok {
+		return "database not open"
+	}
+	if len(args) != 3 {
+		return "invalid arguments: expected (vaultUuid, query, namesOnly)"
+	}
+	query := args[1].String()
+	namesOnly := args[2].Bool()
+	uuids := db.Search(query, namesOnly)
+	jsonData, err := json.Marshal(uuids)
+	if err != nil {
+		return fmt.Sprintf("json marshal error: %s", err)
+	}
+	return string(jsonData)
+}
+
+func getSuggestion(this js.Value, args []js.Value) interface{} {
+	db, _, ok := getDB(args)
+	if !ok {
+		return ""
+	}
+	if len(args) != 3 {
+		return ""
+	}
+	field := args[1].String()
+	prefix := args[2].String()
+	if prefix == "" {
+		return ""
+	}
+
+	prefixLower := strings.ToLower(prefix)
+	freq := make(map[string]int)
+	for _, rec := range db.Records {
+		var val string
+		switch field {
+		case "group":
+			val = rec.Group
+		case "username":
+			val = rec.Username
+		default:
+			return ""
+		}
+		if val != "" {
+			freq[val]++
+		}
+	}
+
+	var matches []string
+	for val := range freq {
+		if strings.HasPrefix(strings.ToLower(val), prefixLower) {
+			matches = append(matches, val)
+		}
+	}
+	if len(matches) == 0 {
+		return ""
+	}
+
+	sort.Slice(matches, func(i, j int) bool {
+		fi, fj := freq[matches[i]], freq[matches[j]]
+		if fi != fj {
+			return fi > fj
+		}
+		return strings.ToLower(matches[i]) < strings.ToLower(matches[j])
+	})
+	return matches[0]
+}
+
+func getTOTP(this js.Value, args []js.Value) interface{} {
+	db, _, ok := getDB(args)
+	if !ok {
+		return "vault not open"
+	}
+	if len(args) != 2 {
+		return "invalid arguments: expected (vaultUuid, recordUuid)"
+	}
+	rec, ok := db.Records[args[1].String()]
+	if !ok {
+		return "record not found"
+	}
+	if len(rec.TwoFactorKey) == 0 {
+		return "no TOTP configured"
+	}
+
+	var t0 int64
+	if !rec.TOTPStartTime.IsZero() {
+		t0 = rec.TOTPStartTime.Unix()
+	}
+	code, remaining := pwsafe.ComputeTOTP(rec.TwoFactorKey, time.Now().Unix(), t0, rec.TOTPTimeStep, rec.TOTPLength)
+
+	type Result struct {
+		Code    string `json:"code"`
+		Seconds int64  `json:"seconds"`
+		Period  int    `json:"period"`
+	}
+	period := int(rec.TOTPTimeStep)
+	if period == 0 {
+		period = 30
+	}
+	data, err := json.Marshal(Result{code, remaining, period})
+	if err != nil {
+		return fmt.Sprintf("error: %s", err)
+	}
+	return string(data)
+}
+
+// deriveSecondaryKey derives a 32-byte AES key from the vault's stretched key.
+// The stretched key never leaves WASM; only ciphertext crosses the boundary.
+func deriveSecondaryKey(db *pwsafe.V3) ([]byte, error) {
+	mac := hmac.New(sha256.New, db.StretchedKey[:])
+	mac.Write([]byte("portpass-secondary-vault-v1"))
+	return mac.Sum(nil), nil
+}
+
+// encryptForSecondaryVaults encrypts a plaintext string using the vault's stretched key.
+// Returns JSON {"iv":"<hex>","ciphertext":"<hex>"} on success, error string on failure.
+func encryptForSecondaryVaults(this js.Value, args []js.Value) interface{} {
+	db, _, ok := getDB(args)
+	if !ok {
+		return "vault not open"
+	}
+	if len(args) != 2 {
+		return "invalid arguments: expected (vaultUuid, plaintext)"
+	}
+	key, _ := deriveSecondaryKey(db)
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return fmt.Sprintf("cipher error: %s", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return fmt.Sprintf("gcm error: %s", err)
+	}
+	iv := make([]byte, gcm.NonceSize())
+	if _, err = rand.Read(iv); err != nil {
+		return fmt.Sprintf("rand error: %s", err)
+	}
+	ciphertext := gcm.Seal(nil, iv, []byte(args[1].String()), nil)
+	result, _ := json.Marshal(map[string]string{
+		"iv":         hex.EncodeToString(iv),
+		"ciphertext": hex.EncodeToString(ciphertext),
+	})
+	return string(result)
+}
+
+// decryptForSecondaryVaults decrypts a ciphertext encrypted by encryptForSecondaryVaults.
+// Returns the plaintext string on success, error string on failure.
+func decryptForSecondaryVaults(this js.Value, args []js.Value) interface{} {
+	db, _, ok := getDB(args)
+	if !ok {
+		return "vault not open"
+	}
+	if len(args) != 3 {
+		return "invalid arguments: expected (vaultUuid, ivHex, ciphertextHex)"
+	}
+	key, _ := deriveSecondaryKey(db)
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return fmt.Sprintf("cipher error: %s", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return fmt.Sprintf("gcm error: %s", err)
+	}
+	iv, err := hex.DecodeString(args[1].String())
+	if err != nil {
+		return "invalid IV"
+	}
+	ct, err := hex.DecodeString(args[2].String())
+	if err != nil {
+		return "invalid ciphertext"
+	}
+	plaintext, err := gcm.Open(nil, iv, ct, nil)
+	if err != nil {
+		return "decryption failed"
+	}
+	return string(plaintext)
+}
+
 // pushPasswordHistory appends oldPassword to the pwsafe password history string.
-// Format: fmmnn[T(8hex)L(4hex)P]...
-//   f='1' enabled, mm=max entries (hex), nn=count (hex)
-//   each entry: 8-char hex Unix timestamp, 4-char hex pw length, password
 func pushPasswordHistory(current, oldPassword string) string {
 	type entry struct {
 		ts int64
@@ -368,115 +577,13 @@ func pushPasswordHistory(current, oldPassword string) string {
 	return sb.String()
 }
 
-func searchRecords(this js.Value, args []js.Value) interface{} {
-	if db == nil {
-		return "database not open"
-	}
-	if len(args) != 2 {
-		return "invalid arguments: expected (query, namesOnly)"
-	}
-	query := args[0].String()
-	namesOnly := args[1].Bool()
-	uuids := db.Search(query, namesOnly)
-	jsonData, err := json.Marshal(uuids)
-	if err != nil {
-		return fmt.Sprintf("json marshal error: %s", err)
-	}
-	return string(jsonData)
-}
-
-func getSuggestion(this js.Value, args []js.Value) interface{} {
-	if db == nil {
-		return ""
-	}
-	if len(args) != 2 {
-		return ""
-	}
-	field := args[0].String()
-	prefix := args[1].String()
-	if prefix == "" {
-		return ""
-	}
-
-	prefixLower := strings.ToLower(prefix)
-	freq := make(map[string]int)
-	for _, rec := range db.Records {
-		var val string
-		switch field {
-		case "group":
-			val = rec.Group
-		case "username":
-			val = rec.Username
-		default:
-			return ""
-		}
-		if val != "" {
-			freq[val]++
-		}
-	}
-
-	var matches []string
-	for val := range freq {
-		if strings.HasPrefix(strings.ToLower(val), prefixLower) {
-			matches = append(matches, val)
-		}
-	}
-	if len(matches) == 0 {
-		return ""
-	}
-
-	sort.Slice(matches, func(i, j int) bool {
-		fi, fj := freq[matches[i]], freq[matches[j]]
-		if fi != fj {
-			return fi > fj
-		}
-		return strings.ToLower(matches[i]) < strings.ToLower(matches[j])
-	})
-	return matches[0]
-}
-
-
-func getTOTP(this js.Value, args []js.Value) interface{} {
-	if db == nil {
-		return "database not open"
-	}
-	if len(args) != 1 {
-		return "invalid arguments: expected (uuid)"
-	}
-	rec, ok := db.Records[args[0].String()]
-	if !ok {
-		return "record not found"
-	}
-	if len(rec.TwoFactorKey) == 0 {
-		return "no TOTP configured"
-	}
-
-	var t0 int64
-	if !rec.TOTPStartTime.IsZero() {
-		t0 = rec.TOTPStartTime.Unix()
-	}
-	code, remaining := pwsafe.ComputeTOTP(rec.TwoFactorKey, time.Now().Unix(), t0, rec.TOTPTimeStep, rec.TOTPLength)
-
-	type Result struct {
-		Code    string `json:"code"`
-		Seconds int64  `json:"seconds"`
-		Period  int    `json:"period"`
-	}
-	period := int(rec.TOTPTimeStep)
-	if period == 0 {
-		period = 30
-	}
-	data, err := json.Marshal(Result{code, remaining, period})
-	if err != nil {
-		return fmt.Sprintf("error: %s", err)
-	}
-	return string(data)
-}
-
 func main() {
 	c := make(chan struct{}, 0)
 
 	js.Global().Set("openDB", js.FuncOf(openDB))
+	js.Global().Set("encryptForSecondaryVaults", js.FuncOf(encryptForSecondaryVaults))
+	js.Global().Set("decryptForSecondaryVaults", js.FuncOf(decryptForSecondaryVaults))
+	js.Global().Set("closeDB", js.FuncOf(closeDB))
 	js.Global().Set("getDBData", js.FuncOf(getDBData))
 	js.Global().Set("getRecord", js.FuncOf(getRecord))
 	js.Global().Set("createDatabase", js.FuncOf(createDatabase))
@@ -491,32 +598,4 @@ func main() {
 
 	fmt.Println("WASM initialized")
 	<-c
-}
-
-func saveDB(this js.Value, args []js.Value) interface{} {
-	if db == nil {
-		return "database not open"
-	}
-
-	var buf bytes.Buffer
-	if err := db.Encrypt(&buf); err != nil {
-		return fmt.Sprintf("failed to encrypt db: %s", err)
-	}
-
-	// Return Uint8Array
-	dst := js.Global().Get("Uint8Array").New(buf.Len())
-	js.CopyBytesToJS(dst, buf.Bytes())
-	return dst
-}
-
-func deleteRecord(this js.Value, args []js.Value) interface{} {
-	if db == nil {
-		return "database not open"
-	}
-	if len(args) != 1 {
-		return "invalid arguments: expected (uuid)"
-	}
-
-	db.DeleteRecord(args[0].String())
-	return nil
 }

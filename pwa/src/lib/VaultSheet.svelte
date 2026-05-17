@@ -1,11 +1,12 @@
 <script>
   import { onMount } from 'svelte'
+  import { get } from 'svelte/store'
   import { getDatabaseInfo, openDatabase } from '../wasm.js'
-  import { selectedFile, dbItems } from '../store.js'
+  import { selectedFile, dbItems, secondaryVaults } from '../store.js'
   import { isBiometricSupported, isBiometricEnrolled, enrollBiometric, clearBiometric } from './biometric.js'
   import Icon from './Icon.svelte'
 
-  let { isDesktop, onback, onlock, ondbsave, ondirtychange, theme, accent, ontheme, onaccent } = $props()
+  let { isDesktop, onback, onlock, onlockall, onlocksecondary, onunlockadditional, ondbsave, ondirtychange, theme, accent, ontheme, onaccent } = $props()
 
   let biometricAvailable = $state(false)
   let biometricEnrolled  = $state(false)
@@ -47,7 +48,7 @@
       if (handle) {
         const file = await handle.getFile()
         const buf  = await file.arrayBuffer()
-        openDatabase(new Uint8Array(buf), setupPassword) // throws if wrong
+        openDatabase(new Uint8Array(buf), setupPassword) // throws if wrong; uuid discarded
       }
       // Password correct — now trigger WebAuthn enrollment
       await enrollBiometric(setupPassword, info?.uuid, filename)
@@ -74,7 +75,8 @@
   let filename = $derived($selectedFile?.name ?? '')
 
   // Fetch once on mount — VaultSheet is only rendered while vault is open
-  let info = (() => { try { return getDatabaseInfo() } catch { return null } })()
+  const _vaultUuid = get(selectedFile)?.uuid ?? ''
+  let info = (() => { try { return getDatabaseInfo(_vaultUuid) } catch { return null } })()
 
   let passwordCount = $derived($dbItems.length)
   let groupCount    = $derived(new Set($dbItems.map(i => i.group).filter(Boolean)).size)
@@ -180,6 +182,11 @@
         <span class="vault-file-value">{info?.iter?.toLocaleString() ?? '—'}</span>
       </div>
     </div>
+    <div style="margin-top:16px">
+      <button class="btn btn-ghost" onclick={$secondaryVaults.length > 0 ? onlockall : onlock}>
+        <Icon name="lock" size={16}/> {$secondaryVaults.length > 0 ? 'Lock all vaults' : 'Lock vault'}
+      </button>
+    </div>
   </div>
 
   {#if biometricAvailable}
@@ -201,6 +208,31 @@
       </div>
     </div>
   {/if}
+
+  <div class="vault-section">
+    <div class="vault-section-title">SECONDARY VAULTS</div>
+    {#each $secondaryVaults as sv}
+      {@const svPasswordCount = sv.items?.length ?? 0}
+      {@const svGroupCount = new Set(sv.items?.map(i => i.group).filter(Boolean)).size}
+      <div class="vault-secondary">
+        <div class="vault-secondary-info">
+          <span class="vault-secondary-name">{sv.name}</span>
+          <span class="vault-secondary-meta muted">{sv.filename}</span>
+          <span class="vault-secondary-meta muted">
+            {svPasswordCount} {svPasswordCount === 1 ? 'password' : 'passwords'}
+            {#if svGroupCount > 0} · {svGroupCount} {svGroupCount === 1 ? 'group' : 'groups'}{/if}
+            · {sv.readonly ? 'read-only' : 'read-write'}
+          </span>
+        </div>
+        <button class="btn btn-ghost" style="padding:0 12px;height:32px;font-size:13px;white-space:nowrap" onclick={() => onlocksecondary?.(sv.uuid)}>
+          <Icon name="lock" size={14}/> Lock
+        </button>
+      </div>
+    {/each}
+    <button class="btn btn-ghost" style="margin-top:{$secondaryVaults.length > 0 ? 8 : 0}px" onclick={onunlockadditional}>
+      <Icon name="unlock" size={16}/> Unlock additional vault
+    </button>
+  </div>
 
   <div class="vault-section">
     <div class="vault-section-title">APPEARANCE</div>
@@ -239,9 +271,7 @@
     </div>
   </div>
 
-  <button class="btn btn-ghost" onclick={onlock} style="width:fit-content;margin-top:24px">
-    <Icon name="lock" size={16}/> Lock vault
-  </button>
+
 </div>
 
 {#if setupMode}
@@ -468,6 +498,19 @@
     color: var(--text-soft);
   }
 
+  .vault-secondary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .vault-secondary:last-of-type { border-bottom: none; }
+  .vault-secondary-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .vault-secondary-name { font-size: 15px; font-weight: 500; }
+  .vault-secondary-meta { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
   .about-row {
     display: flex;
     align-items: center;
@@ -506,69 +549,4 @@
     color: var(--accent);
   }
 
-  .modal-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.55);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 100;
-    padding: 24px;
-  }
-
-  .modal {
-    background: var(--surface);
-    border-radius: 16px;
-    padding: 24px;
-    width: 100%;
-    max-width: 340px;
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-  }
-
-  .modal-title {
-    font-size: 17px;
-    font-weight: 600;
-  }
-
-  .modal-desc {
-    font-size: 14px;
-    margin: 0;
-  }
-
-  .modal-actions {
-    display: flex;
-    gap: 8px;
-    justify-content: flex-end;
-  }
-
-  .modal-pw {
-    display: flex;
-    align-items: center;
-    background: var(--surface);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--r-input);
-    padding: 0 6px 0 0;
-  }
-
-  .modal-pw:focus-within {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-soft);
-  }
-
-  .modal-pw input {
-    border: none;
-    background: transparent;
-    padding: 12px 14px;
-    flex: 1;
-    min-width: 0;
-    outline: none;
-    font-family: var(--font-ui);
-    font-size: 17px;
-    color: var(--text);
-    appearance: none;
-    -webkit-appearance: none;
-  }
 </style>

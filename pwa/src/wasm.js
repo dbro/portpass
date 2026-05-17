@@ -13,9 +13,6 @@ export async function loadWasm() {
         let source = response
         const contentEncoding = response.headers.get('Content-Encoding')
 
-        // GitHub Pages serves .gz as a raw binary without Content-Encoding: gzip,
-        // so we decompress manually. Vite dev server sets the header and browsers
-        // decompress transparently.
         if (response.url.endsWith('.gz') && contentEncoding !== 'gzip') {
             const ds = new DecompressionStream('gzip')
             const decompressedStream = response.body.pipeThrough(ds)
@@ -43,41 +40,51 @@ export async function loadWasm() {
     go.run(instance)
 }
 
-export function openDatabase(fileData, password) {
-    const err = window.openDB(fileData, password)
-    if (err) throw new Error(err)
-}
-
 function parseOrThrow(res) {
     if (typeof res !== 'string') return res
     try { return JSON.parse(res) } catch { throw new Error(res) }
 }
 
-export function getDatabaseData() {
-    return parseOrThrow(window.getDBData()) || []
+// Opens a vault from bytes. Returns the vault UUID string on success.
+export function openDatabase(fileData, password) {
+    const res = window.openDB(fileData, password)
+    const parsed = parseOrThrow(res)
+    if (parsed?.uuid) return parsed.uuid
+    throw new Error(res || 'Failed to open database')
 }
 
-export function getRecordData(uuid) {
-    return parseOrThrow(window.getRecord(uuid))
-}
-
+// Creates a new empty vault. Returns the vault UUID string on success.
 export function createDatabase(password) {
-    const err = window.createDatabase(password)
-    if (err) throw new Error(err)
+    const res = window.createDatabase(password)
+    const parsed = parseOrThrow(res)
+    if (parsed?.uuid) return parsed.uuid
+    throw new Error(res || 'Failed to create database')
 }
 
-export function getDatabaseInfo() {
-    return parseOrThrow(window.getDBInfo())
+export function closeDatabase(vaultUuid) {
+    window.closeDB(vaultUuid)
 }
 
-export function saveDatabase() {
-    const res = window.saveDB()
+export function getDatabaseData(vaultUuid) {
+    return parseOrThrow(window.getDBData(vaultUuid)) || []
+}
+
+export function getRecordData(vaultUuid, recordUuid) {
+    return parseOrThrow(window.getRecord(vaultUuid, recordUuid))
+}
+
+export function getDatabaseInfo(vaultUuid) {
+    return parseOrThrow(window.getDBInfo(vaultUuid))
+}
+
+export function saveDatabase(vaultUuid) {
+    const res = window.saveDB(vaultUuid)
     if (typeof res === 'string') throw new Error(res)
     return res // Uint8Array
 }
 
-export function updateRecordFields(uuid, fields) {
-    const args = [uuid ?? '']
+export function updateRecordFields(vaultUuid, recordUuid, fields) {
+    const args = [vaultUuid, recordUuid ?? '']
     for (const [k, v] of Object.entries(fields)) {
         const str = (v == null) ? '' : (typeof v === 'object') ? JSON.stringify(v) : String(v)
         args.push(k, str)
@@ -87,26 +94,46 @@ export function updateRecordFields(uuid, fields) {
     if (res) throw new Error(res)
 }
 
-export function updateDBFields(fields) {
-    const args = []
+export function updateDBFields(vaultUuid, fields) {
+    const args = [vaultUuid]
     for (const [k, v] of Object.entries(fields)) args.push(k, String(v ?? ''))
     const err = window.UpdateDBFields(...args)
     if (err) throw new Error(err)
 }
 
-export function deleteRecord(uuid) {
-    const err = window.deleteRecord(uuid)
+export function deleteRecord(vaultUuid, recordUuid) {
+    const err = window.deleteRecord(vaultUuid, recordUuid)
     if (err) throw new Error(err)
 }
 
-export function searchRecords(query, namesOnly) {
-    return parseOrThrow(window.searchRecords(query, namesOnly))
+export function searchRecords(vaultUuid, query, namesOnly) {
+    return parseOrThrow(window.searchRecords(vaultUuid, query, namesOnly))
 }
 
-export function getAutocompleteSuggestion(field, prefix) {
-    return window.getSuggestion(field, prefix) || ''
+export function getAutocompleteSuggestion(vaultUuid, field, prefix) {
+    return window.getSuggestion(vaultUuid, field, prefix) || ''
 }
 
-export function getTOTP(uuid) {
-    return parseOrThrow(window.getTOTP(uuid))
+export function getTOTP(vaultUuid, recordUuid) {
+    return parseOrThrow(window.getTOTP(vaultUuid, recordUuid))
+}
+
+// Encrypts a plaintext string inside WASM using the vault's stretched key.
+// Returns { iv, ciphertext } (hex strings). No key material leaves WASM.
+export function encryptForSecondaryVaults(vaultUuid, plaintext) {
+    return parseOrThrow(window.encryptForSecondaryVaults(vaultUuid, plaintext))
+}
+
+// Decrypts a ciphertext encrypted by encryptForSecondaryVaults. Returns plaintext string.
+export function decryptForSecondaryVaults(vaultUuid, iv, ciphertext) {
+    const res = window.decryptForSecondaryVaults(vaultUuid, iv, ciphertext)
+    if (typeof res !== 'string' || res === 'decryption failed' || res === 'vault not open') throw new Error(res)
+    return res
+}
+
+// Read a vault file and load it into WASM. Returns the vault UUID.
+export async function loadVaultFile(handle, password) {
+    const file = await handle.getFile()
+    const buf  = await file.arrayBuffer()
+    return openDatabase(new Uint8Array(buf), password)
 }
