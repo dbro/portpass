@@ -522,7 +522,7 @@
 
   let searchInput = $state(null)
   let showHelp      = $state(false)
-  let collapseSeq   = $state(0)
+  let collapseSeq   = $state('')
 
   // Flat ordered UUID list matching RecordList's sort, used for arrow navigation.
   let flatList = $derived.by(() => {
@@ -566,6 +566,7 @@
     if (e.key === 'Escape') {
       if (showHelp) { showHelp = false; return }
       if (inSearch && query) { query = ''; return }
+      if (inSearch) { searchInput?.blur(); return }
       if (sheetOpen) { sheetOpen = false; return }
       if (isEditing) { cancelEdit(); return }
       if (record) { record = null; selectedUUID = null; return }
@@ -584,7 +585,7 @@
     if (isEditing || sheetOpen) return
     if (inInput && !inSearch) return  // block shortcuts in edit form, but allow from search
 
-    if (e.key === 'ArrowDown') {
+    if (e.key === 'ArrowDown' && !e.ctrlKey) {
       e.preventDefault()
       if (inSearch) {
         const next = flatList[0]
@@ -600,7 +601,7 @@
       }
       return
     }
-    if (e.key === 'ArrowUp') {
+    if (e.key === 'ArrowUp' && !e.ctrlKey) {
       e.preventDefault()
       if (inSearch) {
         const prev = flatList[flatList.length - 1]
@@ -620,8 +621,9 @@
     if (inSearch) return  // no other shortcuts while typing in search
 
     if (e.ctrlKey && e.key === 'l') { e.preventDefault(); lockAllVaults(); return }
-    if (e.ctrlKey && e.key === '-') { e.preventDefault(); collapseSeq++; return }
-    if (e.ctrlKey && (e.key === '+' || e.key === '=')) { e.preventDefault(); startNew(); return }
+    if (e.ctrlKey && e.key === 'ArrowUp') { e.preventDefault(); collapseSeq = 'collapse'; return }
+    if (e.ctrlKey && e.key === 'ArrowDown') { e.preventDefault(); collapseSeq = 'expand'; return }
+    if (e.ctrlKey && e.key === ' ') { e.preventDefault(); startNew(); return }
 
     if (!record) return
 
@@ -761,8 +763,9 @@
         <div class="help-row"><span>Copy email</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>E</kbd></div></div>
         <div class="help-row"><span>Copy custom field 1–9</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>1–9</kbd></div></div>
         <div class="help-row"><span>Edit entry</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>↵</kbd></div></div>
-        <div class="help-row"><span>New entry</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>+</kbd></div></div>
-        <div class="help-row"><span>Collapse / expand groups</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>−</kbd></div></div>
+        <div class="help-row"><span>New entry</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>Space</kbd></div></div>
+        <div class="help-row"><span>Collapse groups</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>↑</kbd></div></div>
+        <div class="help-row"><span>Expand groups</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>↓</kbd></div></div>
         <div class="help-row"><span>Lock all vaults</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>L</kbd></div></div>
       </div>
     </div>
