@@ -239,7 +239,7 @@
             <span class="vault-select-arrow">▾</span>
           </button>
           {#if vaultDropOpen}
-            <div class="vault-select-backdrop" onclick={() => vaultDropOpen = false}></div>
+            <button type="button" class="vault-select-backdrop" tabindex="-1" aria-label="Close" onclick={() => vaultDropOpen = false}></button>
             <div class="vault-select-menu">
               {#each rwVaults as v}
                 <button type="button" class="vault-select-option" class:on={v.uuid === vaultUuid}
@@ -468,6 +468,10 @@
     position: fixed;
     inset: 0;
     z-index: 50;
+    border: none;
+    background: none;
+    padding: 0;
+    cursor: default;
   }
 
   .vault-select-menu {
