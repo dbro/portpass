@@ -2,7 +2,7 @@
 
 *A simple password manager that keeps your data in your control, across all your devices.*
 
-<img src="https://github.com/user-attachments/assets/6917e607-a4ce-4ba8-bf76-b926f830713f" width="65%" alt="Screenshots of mobile layouts">
+<img src="https://github.com/user-attachments/assets/8e2f7a5b-1b88-40e5-b630-e770f669a440" width="80%" alt="Screenshots of mobile version">
 
 **Free and open source. Try it: [https://dbro.github.io/portpass](https://dbro.github.io/portpass)**
 
@@ -14,16 +14,17 @@ Portpass is different: your passwords live in a file on your device, or in a clo
 
 * streamlines login to apps and websites
 * works fully offline, no internet connection required
-* runs on all your devices: mobile, tablet, and desktop
-* generates strong passwords
-* generates one-time codes (TOTP) for two-factor authentication (2FA)
-* organizes password records into groups for browsing
-* supports custom fields (eg. PIN codes, account numbers, API keys)
 * encrypts your vault using an established open source format (pwsafe v3)
+* runs on all your devices: mobile, tablet, and desktop
+* supports convenient WebAuthn unlock methods: fingerprint, face recognition, and PIN
+* generates strong passwords
+* organizes password records into groups for browsing
+* generates one-time codes (TOTP) for two-factor authentication (2FA)
+* supports custom fields (eg. PIN codes, account numbers, API keys)
 * stores your vault as a file on your device, for easy sync/backup
-* supports convenient alternate unlock methods: fingerprint, face recognition, and PIN
+* opens multiple vaults simultaneously (eg. personal, work, family), allowing sharing settings for each vault
+* supports read-only access to each vault according to file's permission settings
 * has a mobile-first design with both light and dark modes
-* opens multiple vaults simultaneously — personal, work, family, shared — with full read/write or read-only access per vault
 
 ## Installation
 
@@ -49,7 +50,7 @@ Portpass can open multiple vault files at the same time. This is believed to be 
 
 **How secondary vaults work**
 
-After opening a vault, tap the vault name in the top bar to open vault settings, then tap **Unlock additional vault**. Pick another vault file, enter its master password, and Portpass remembers it as a secondary vault of the original vault opened. On future sessions, secondary vaults unlock automatically when you open the same original vault. One biometric tap or master password entry unlocks all of these vaults at once.
+After opening a vault, tap the vault name in the top bar to open vault settings, then tap **Unlock additional vault**. Pick another vault file, enter its master password, and Portpass remembers it as a secondary vault of the original, primary vault you opened. On future sessions, secondary vaults unlock automatically when you open the same original vault. One biometric tap or master password entry unlocks all of these vaults at once.
 
 Each secondary vault can be read+write (you can add, edit, and delete its records) or read-only (if the file's permissions prevent writing). Read-only vaults are clearly labelled; their records appear normally in the list and search results but cannot be edited.
 
