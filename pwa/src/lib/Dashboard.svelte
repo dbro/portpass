@@ -521,7 +521,8 @@
   let showRecord = $derived(!!record || isEditing || sheetOpen)
 
   let searchInput = $state(null)
-  let showHelp    = $state(false)
+  let showHelp      = $state(false)
+  let collapseSeq   = $state(0)
 
   // Flat ordered UUID list matching RecordList's sort, used for arrow navigation.
   let flatList = $derived.by(() => {
@@ -618,7 +619,8 @@
 
     if (inSearch) return  // no other shortcuts while typing in search
 
-    if (e.ctrlKey && e.key === 'l') { e.preventDefault(); lockVault(); return }
+    if (e.ctrlKey && e.key === 'l') { e.preventDefault(); lockAllVaults(); return }
+    if (e.ctrlKey && e.key === '-') { e.preventDefault(); collapseSeq++; return }
     if (e.ctrlKey && (e.key === '+' || e.key === '=')) { e.preventDefault(); startNew(); return }
 
     if (!record) return
@@ -713,7 +715,7 @@
     {/if}
   </div>
 
-  <RecordList {query} {selectedUUID} excludeUUID={pendingDeleteUUID} storageKey={dbKey} primaryVaultName={vaultName} ontap={selectRecord} oncopy={copyToClipboard} oncopytotp={copyTOTPForUUID}/>
+  <RecordList {query} {selectedUUID} {collapseSeq} excludeUUID={pendingDeleteUUID} storageKey={dbKey} primaryVaultName={vaultName} ontap={selectRecord} oncopy={copyToClipboard} oncopytotp={copyTOTPForUUID}/>
 
   <!-- FAB (mobile) — hidden when all open vaults are read-only -->
   {#if !allVaultsReadonly}
@@ -749,6 +751,7 @@
       <div class="help-title">Keyboard shortcuts</div>
       <div class="help-rows">
         <div class="help-row"><span>Focus search</span><div class="help-keys"><kbd>/</kbd></div></div>
+        <div class="help-row"><span>Clear search / close</span><div class="help-keys"><kbd>Esc</kbd></div></div>
         <div class="help-row"><span>Navigate list</span><div class="help-keys"><kbd>↑</kbd><kbd>↓</kbd></div></div>
         <div class="help-row"><span>Copy username</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>B</kbd></div></div>
         <div class="help-row"><span>Copy password</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>C</kbd></div></div>
@@ -759,9 +762,8 @@
         <div class="help-row"><span>Copy custom field 1–9</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>1–9</kbd></div></div>
         <div class="help-row"><span>Edit entry</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>↵</kbd></div></div>
         <div class="help-row"><span>New entry</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>+</kbd></div></div>
-        <div class="help-row"><span>Lock vault</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>L</kbd></div></div>
-        <div class="help-row"><span>Clear search / close</span><div class="help-keys"><kbd>Esc</kbd></div></div>
-        <div class="help-row"><span>This help</span><div class="help-keys"><kbd>?</kbd></div></div>
+        <div class="help-row"><span>Collapse / expand groups</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>−</kbd></div></div>
+        <div class="help-row"><span>Lock all vaults</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>L</kbd></div></div>
       </div>
     </div>
   </div>

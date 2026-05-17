@@ -1,11 +1,11 @@
 <script>
   import { get } from 'svelte/store'
-  import { tick } from 'svelte'
+  import { tick, untrack } from 'svelte'
   import { selectedFile, dbItems, secondaryVaults, clipboardSession, clipboardContext } from '../store.js'
   import { searchRecords, getRecordData, getTOTP } from '../wasm.js'
   import Icon from './Icon.svelte'
 
-  let { selectedUUID = null, excludeUUID = null, query = '', primaryVaultName = '', ontap, oncopy, oncopytotp, storageKey = null } = $props()
+  let { selectedUUID = null, excludeUUID = null, query = '', primaryVaultName = '', collapseSeq = 0, ontap, oncopy, oncopytotp, storageKey = null } = $props()
 
   function loadGroupState() {
     if (!storageKey) return {}
@@ -159,6 +159,26 @@
   })
 
   let openVaults = $state({})
+
+  $effect(() => {
+    if (collapseSeq === 0) return
+    untrack(() => {
+      const allGroupNames = [
+        ...groups.map(g => g.group),
+        ...(allVaultGroups?.flatMap(v => v.groups.map(g => g.group)) ?? [])
+      ]
+      const allCollapsed = allGroupNames.length > 0 && allGroupNames.every(g => openGroups[g] === false)
+      if (allCollapsed) {
+        openGroups = {}
+        saveGroupState({})
+      } else {
+        const next = Object.fromEntries(allGroupNames.map(g => [g, false]))
+        openGroups = next
+        saveGroupState(next)
+      }
+    })
+  })
+
   function isVaultOpen(name) {
     if (query.trim()) return true
     return name in openVaults ? openVaults[name] : true
