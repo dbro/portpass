@@ -159,7 +159,10 @@
   })
 
   let openVaults = $state({})
-  function isVaultOpen(name) { return name in openVaults ? openVaults[name] : true }
+  function isVaultOpen(name) {
+    if (query.trim()) return true
+    return name in openVaults ? openVaults[name] : true
+  }
   function toggleVault(name) { openVaults = { ...openVaults, [name]: !isVaultOpen(name) } }
 
   function toggle(group) {
@@ -282,7 +285,7 @@
             </section>
           {/each}
           {#if vault.groups.length === 0 && query}
-            <div class="empty-state muted" style="padding-left:32px">No matches</div>
+            <div class="muted" style="padding:6px 16px 6px 32px;font-size:13px">No matches</div>
           {/if}
         {/if}
       </section>

@@ -49,6 +49,8 @@
 
   let { record, isNew, isDesktop, vaultUuid, rwVaults = [], onvaultchange, oncancel, onsave, ondelete, ondirtychange } = $props()
 
+  let vaultDropOpen = $state(false)
+
   function focusOnMount(node, condition = true) {
     if (condition) setTimeout(() => node.focus(), 0)
   }
@@ -231,11 +233,23 @@
     {#if isNew && rwVaults.length > 1}
       <div class="field">
         <span class="field-label muted">Save to vault</span>
-        <select class="input" value={vaultUuid} onchange={e => onvaultchange?.(e.target.value)}>
-          {#each rwVaults as v}
-            <option value={v.uuid}>{v.name}</option>
-          {/each}
-        </select>
+        <div class="vault-select-wrap">
+          <button type="button" class="input vault-select-trigger" onclick={() => vaultDropOpen = !vaultDropOpen}>
+            <span>{rwVaults.find(v => v.uuid === vaultUuid)?.name ?? ''}</span>
+            <span class="vault-select-arrow">▾</span>
+          </button>
+          {#if vaultDropOpen}
+            <div class="vault-select-backdrop" onclick={() => vaultDropOpen = false}></div>
+            <div class="vault-select-menu">
+              {#each rwVaults as v}
+                <button type="button" class="vault-select-option" class:on={v.uuid === vaultUuid}
+                  onclick={() => { onvaultchange?.(v.uuid); vaultDropOpen = false }}>
+                  {v.name}
+                </button>
+              {/each}
+            </div>
+          {/if}
+        </div>
       </div>
     {/if}
     <label class="field">
@@ -429,6 +443,62 @@
 {/if}
 
 <style>
+  .vault-select-wrap {
+    position: relative;
+  }
+
+  .vault-select-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    font-size: 15px;
+    color: var(--text);
+    text-align: left;
+  }
+
+  .vault-select-arrow {
+    color: var(--text-soft);
+    font-size: 14px;
+    flex-shrink: 0;
+    margin-left: 8px;
+  }
+
+  .vault-select-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+  }
+
+  .vault-select-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    z-index: 51;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-input);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .vault-select-option {
+    display: block;
+    width: 100%;
+    padding: 11px 14px;
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    font-size: 15px;
+    color: var(--text);
+    text-align: left;
+  }
+  .vault-select-option:last-child { border-bottom: none; }
+  .vault-select-option:hover { background: var(--surface-2); }
+  .vault-select-option.on { font-weight: 600; color: var(--accent); }
+
   .ac-wrap {
     position: relative;
   }
