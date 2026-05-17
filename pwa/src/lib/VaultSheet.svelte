@@ -508,6 +508,7 @@
   .vault-stats {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 28px;
     margin: 20px 0 20px;
   }
@@ -515,6 +516,7 @@
   .vault-stat {
     display: flex;
     flex-direction: column;
+    align-items: center;
     gap: 2px;
   }
 
@@ -522,10 +524,12 @@
     font-size: 32px;
     font-weight: 700;
     line-height: 1;
+    text-align: center;
   }
 
   .vault-stat-label {
     font-size: 13px;
+    text-align: center;
   }
 
   .vault-stat-divider {
