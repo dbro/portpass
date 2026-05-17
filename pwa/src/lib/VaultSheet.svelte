@@ -162,23 +162,27 @@
   <button class="icon-btn" onclick={selectedDetailVault ? () => selectedDetailVault = null : onback} aria-label="Back">
     <Icon name="back" size={22}/>
   </button>
-  <div class="record-bar-group" style="text-transform:uppercase;font-size:13px;letter-spacing:0.04em;font-weight:600">
+  <div class="record-bar-group vs-title">
     {selectedDetailVault ? 'Vault' : 'Vault settings'}
   </div>
   {#if selectedDetailVault === 'primary' && dirty}
     <button class="btn-text primary" onclick={saveAndBack}>Save</button>
   {:else if selectedDetailVault && selectedDetailVault !== 'primary' && svDetailDirty}
     <button class="btn-text primary" onclick={saveSvAndBack}>Save</button>
+  {:else}
+    <div style="width:40px"></div>
   {/if}
 </div>
 
 <!-- ── Desktop header ─────────────────────────────────────────────────────── -->
 {#if isDesktop}
   <div class="record-pane-header">
-    <button class="icon-btn" onclick={selectedDetailVault ? () => selectedDetailVault = null : onback} aria-label="Back" style="margin-right:8px">
-      <Icon name="back" size={20}/>
-    </button>
-    <span class="record-bar-group" style="text-transform:uppercase;font-size:13px;letter-spacing:0.04em;font-weight:600;flex:1">
+    <div style="min-width:80px;display:flex;align-items:center">
+      <button class="icon-btn" onclick={selectedDetailVault ? () => selectedDetailVault = null : onback} aria-label="Back">
+        <Icon name="back" size={20}/>
+      </button>
+    </div>
+    <span class="record-bar-group vs-title" style="flex:1;text-align:center">
       {selectedDetailVault ? 'Vault' : 'Vault settings'}
     </span>
     <div class="record-pane-actions" style="min-width:80px">
@@ -490,6 +494,11 @@
 <style>
   .vault-settings-body {
     max-width: none !important;
+  }
+
+  .vs-title {
+    color: var(--text-muted);
+    text-align: center;
   }
 
   .vault-section {

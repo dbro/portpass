@@ -91,7 +91,26 @@
   margin-bottom: 4px;
 }
 .vault-app .unlock-vault { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
-.vault-app .unlock-sub { font-size: 14px; margin-bottom: 24px; }
+.vault-app .unlock-sub { font-size: 14px; margin-bottom: 24px; transition: color 0.15s ease; }
+.vault-app .unlock-sub.unlock-busy { color: var(--accent); margin-bottom: 0; animation: unlock-pulse 2s ease-in-out infinite; }
+@keyframes unlock-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+.vault-app .unlock-shimmer-wrap {
+  width: 100%; height: 2px; border-radius: 1px;
+  background: var(--border); overflow: hidden;
+  animation: unlock-fadein 0.2s ease forwards;
+}
+.vault-app .unlock-shimmer {
+  height: 100%; width: 40%;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: unlock-shimmer-slide 1.5s ease-in-out infinite;
+}
+.vault-app .unlock-hint {
+  font-size: 14px; text-align: center; max-width: 280px; line-height: 1.5;
+  animation: unlock-fadein 0.2s ease 0.1s both;
+}
+@keyframes unlock-shimmer-slide { from { transform: translateX(-300%); } to { transform: translateX(400%); } }
+@keyframes unlock-fadein { from { opacity: 0; } to { opacity: 1; } }
 .vault-app .offer-list { font-size: 14px; padding-left: 20px; margin: 0; display: flex; flex-direction: column; gap: 6px; width: 100%; max-width: 320px; }
 .vault-app .offer-note { font-size: 12px; }
 .vault-app .offer-footer { font-size: 13px; text-align: center; }

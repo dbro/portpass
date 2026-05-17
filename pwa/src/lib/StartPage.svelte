@@ -262,7 +262,14 @@
         <img src="{import.meta.env.BASE_URL}icon.svg" alt="Portpass" style="width:64px;height:64px" />
       </div>
       <div class="unlock-vault">{fileHandle?.name ?? 'Vault'}</div>
-      <div class="unlock-sub muted">Vault is locked</div>
+      <div class="unlock-sub" class:muted={!busy} class:unlock-busy={busy}>
+        {busy ? 'Unlocking…' : 'Vault is locked'}
+      </div>
+
+      {#if busy}
+        <div class="unlock-shimmer-wrap"><div class="unlock-shimmer"></div></div>
+        <div class="unlock-hint muted">Your vault uses strong encryption — this takes a moment.</div>
+      {/if}
 
       {#if biometricEnrolled}
         <button class="btn btn-biometric" disabled={busy} onclick={unlockBiometric}>
