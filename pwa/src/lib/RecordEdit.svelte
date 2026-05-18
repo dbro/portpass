@@ -388,7 +388,7 @@
           value={totpSecret}
           oninput={onTOTPInput}
           onfocus={() => { totpFieldTouched = true }}
-          placeholder="Base32 secret or otpauth:// URI"
+          placeholder={totpWasConfigured && !totpSecret ? '••••••••••••' : 'Base32 secret or otpauth:// URI'}
           autocomplete="off"
           spellcheck="false"
         />
