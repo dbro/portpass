@@ -336,12 +336,33 @@ func updateRecordFields(this js.Value, args []js.Value) interface{} {
 			if value == "" {
 				rec.CustomFields = nil
 			} else {
-				var cfs []pwsafe.CustomField
-				if err := json.Unmarshal([]byte(value), &cfs); err != nil {
+				// Use *string for Value so JSON null (withheld) can be distinguished from "" (clear).
+				type cfInput struct {
+					Name      string  `json:"Name"`
+					Value     *string `json:"Value"`
+					Sensitive bool    `json:"Sensitive"`
+				}
+				var inputs []cfInput
+				if err := json.Unmarshal([]byte(value), &inputs); err != nil {
 					return fmt.Sprintf("invalid CustomFields JSON: %s", err)
 				}
-				if len(cfs) > 9 {
-					cfs = cfs[:9]
+				if len(inputs) > 9 {
+					inputs = inputs[:9]
+				}
+				cfs := make([]pwsafe.CustomField, len(inputs))
+				for i, inp := range inputs {
+					cfs[i] = pwsafe.CustomField{Name: inp.Name, Sensitive: inp.Sensitive}
+					if inp.Value != nil {
+						cfs[i].Value = *inp.Value
+					} else {
+						// null = preserve existing value for this field name
+						for _, ex := range rec.CustomFields {
+							if ex.Name == inp.Name {
+								cfs[i].Value = ex.Value
+								break
+							}
+						}
+					}
 				}
 				rec.CustomFields = cfs
 			}

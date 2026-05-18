@@ -98,6 +98,18 @@
     }
   }
   let showPw      = $state(false)
+  let pwLoading   = $state(false)
+
+  async function revealOrTogglePassword() {
+    if (passwordWasWithheld && !draft.Password) {
+      // Load the withheld password into the draft on first reveal
+      pwLoading = true
+      const val = getFieldValue(vaultUuid, record?.UUID, 'Password')
+      set('Password', val ?? '')
+      pwLoading = false
+    }
+    showPw = !showPw
+  }
   let genOpen     = $state(false)
   let showHistory = $state(false)
 
@@ -328,17 +340,18 @@
 
     <div class="field">
       <span class="field-label muted">Password</span>
-      <div class="input-wrap" class:warn={dirty && !draft.Password}>
+      <div class="input-wrap" class:warn={dirty && !draft.Password && !passwordWasWithheld}>
         <input
           class="input mono"
           type={showPw ? 'text' : 'password'}
           value={draft.Password}
+          placeholder={passwordWasWithheld && !draft.Password ? '••••••••••••' : ''}
           oninput={e => set('Password', e.target.value)}
         />
         <button class="icon-btn-flat" onclick={() => genOpen = true} aria-label="Open password generator">
           <Icon name="refresh" size={18}/>
         </button>
-        <button class="icon-btn-flat" onclick={() => showPw = !showPw} aria-label="Toggle visibility">
+        <button class="icon-btn-flat" onclick={revealOrTogglePassword} disabled={pwLoading} aria-label="Toggle visibility">
           <Icon name={showPw ? 'eye-off' : 'eye'} size={18}/>
         </button>
       </div>
@@ -429,11 +442,11 @@
           value={cf.Name}
           oninput={e => { customFields = customFields.map((f, j) => j === i ? { ...f, Name: e.target.value } : f) }}
         />
-        <div class="input-wrap custom-field-value" class:warn={!cf.Value.trim()}>
+        <div class="input-wrap custom-field-value" class:warn={cf.Value !== null && !cf.Value.trim()}>
           <input class="input"
             type={cf.Sensitive ? 'password' : 'text'}
-            placeholder="Value"
-            value={cf.Value}
+            placeholder={cf.Value === null ? '••••••••••••' : 'Value'}
+            value={cf.Value ?? ''}
             oninput={e => { customFields = customFields.map((f, j) => j === i ? { ...f, Value: e.target.value } : f) }}
           />
           <button class="icon-btn-flat" type="button"
