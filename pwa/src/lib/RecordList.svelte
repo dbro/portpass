@@ -5,7 +5,7 @@
   import { searchRecords, getRecordData, getTOTP } from '../wasm.js'
   import Icon from './Icon.svelte'
 
-  let { selectedUUID = null, excludeUUID = null, query = '', primaryVaultName = '', collapseSeq = '', ontap, oncopy, oncopytotp, storageKey = null } = $props()
+  let { selectedUUID = null, excludeUUID = null, query = '', primaryVaultName = '', collapseSeq = '', ontap, oncopy, oncopytotp, onwasmcopyfield = null, storageKey = null } = $props()
 
   function loadGroupState() {
     if (!storageKey) return {}
@@ -48,32 +48,47 @@
     }
   })
 
-  // Reactively restore (or update) the drain whenever the clipboard context changes —
-  // this fires on mount AND when a copy happens in RecordRead while the list is mounted.
+  // Reactively restore (or update) the drain whenever the clipboard context changes.
+  // For sensitive fields (null value), skip hash verification — trust the token.
   $effect(() => {
     const s = $clipboardSession
     const ctx = $clipboardContext
     if (!s || !ctx || ctx.token !== s.token || !ctx.uuid || !ctx.field || !ctx.hash) return
-    if (flashedToken === ctx.token) return  // already showing the right drain
+    if (flashedToken === ctx.token) return
     ;(async () => {
       try {
-        let value
         const ctxVaultUuid = vaultUuidForRecord(ctx.uuid)
+        const rec = ctx.field === 'otp' ? null : getRecordData(ctxVaultUuid, ctx.uuid)
+
+        const isSensitive = ctx.field === 'Password'
+          || (ctx.field.startsWith('custom-') && rec?.CustomFields?.[parseInt(ctx.field.slice(7))]?.Value === null)
+
+        if (isSensitive) {
+          if (get(clipboardSession)?.token !== ctx.token) return
+          flashedToken = ctx.token
+          flashedUUID  = null
+          flashedField = null
+          await tick()
+          if (get(clipboardSession)?.token !== ctx.token) return
+          animVariant ^= 1
+          flashedUUID  = ctx.uuid
+          flashedField = ctx.field
+          return
+        }
+
+        let value
         if (ctx.field === 'otp') {
           value = getTOTP(ctxVaultUuid, ctx.uuid)?.code
+        } else if (ctx.field.startsWith('custom-')) {
+          const idx = parseInt(ctx.field.slice(7))
+          value = rec.CustomFields?.[idx]?.Value
         } else {
-          const rec = getRecordData(ctxVaultUuid, ctx.uuid)
-          if (ctx.field.startsWith('custom-')) {
-            const idx = parseInt(ctx.field.slice(7))
-            value = rec.CustomFields?.[idx]?.Value
-          } else {
-            value = { Username: rec.Username, Password: rec.Password, URL: rec.URL, Email: rec.Email }[ctx.field]
-          }
+          value = { Username: rec.Username, URL: rec.URL, Email: rec.Email }[ctx.field]
         }
         if (!value) return
         if (hashesEqual(await sha256(value), new Uint8Array(ctx.hash))
             && get(clipboardSession)?.token === ctx.token) {
-          flashedToken = ctx.token  // claim before yielding
+          flashedToken = ctx.token
           flashedUUID  = null
           flashedField = null
           await tick()
@@ -85,6 +100,21 @@
       } catch {}
     })()
   })
+
+  async function handleWasmCopy(vaultUuid, uuid, field) {
+    if (!onwasmcopyfield) return
+    const { token, hashBytes } = await onwasmcopyfield(vaultUuid, uuid, field)
+    if (token !== null) {
+      clipboardContext.set({ token, field, uuid, hash: Array.from(hashBytes) })
+      flashedToken = token
+      flashedUUID  = null
+      flashedField = null
+      await tick()
+      animVariant ^= 1
+      flashedUUID  = uuid
+      flashedField = field
+    }
+  }
 
   async function handleCopy(value, uuid, field = 'Password') {
     const token = await oncopy(value)
@@ -245,8 +275,10 @@
 
   function copyPassword(uuid) {
     try {
-      const rec = getRecordData(vaultUuidForRecord(uuid), uuid)
-      if (rec.Password) handleCopy(rec.Password, uuid, 'Password')
+      const vaultUuid = vaultUuidForRecord(uuid)
+      const rec = getRecordData(vaultUuid, uuid)
+      if (rec.Password === null) handleWasmCopy(vaultUuid, uuid, 'Password')  // withheld — use WASM
+      else if (rec.Password) handleCopy(rec.Password, uuid, 'Password')
     } catch {}
   }
 
@@ -406,8 +438,12 @@
         <span>Copy username</span><span class="ctx-keys"><kbd>Ctrl</kbd><kbd>B</kbd></span>
       </button>
     {/if}
-    {#if contextMenu.rec.Password}
-      <button onclick={() => { handleCopy(contextMenu.rec.Password, contextMenu.uuid, 'Password'); closeMenu() }}>
+    {#if contextMenu.rec.Password !== ''}
+      <button onclick={() => {
+        if (contextMenu.rec.Password === null) handleWasmCopy(vaultUuidForRecord(contextMenu.uuid), contextMenu.uuid, 'Password')
+        else handleCopy(contextMenu.rec.Password, contextMenu.uuid, 'Password')
+        closeMenu()
+      }}>
         <span>Copy password</span><span class="ctx-keys"><kbd>Ctrl</kbd><kbd>C</kbd></span>
       </button>
     {/if}
@@ -419,7 +455,7 @@
         <span>Visit URL</span><span class="ctx-keys"><kbd>↵</kbd></span>
       </button>
     {/if}
-    {#if contextMenu.rec.TwoFactorKey}
+    {#if contextMenu.rec.TwoFactorKey !== undefined}
       <button onclick={async () => { const u = contextMenu.uuid; closeMenu(); await oncopytotp(u) }}>
         <span>Copy one-time code</span><span class="ctx-keys"><kbd>Ctrl</kbd><kbd>T</kbd></span>
       </button>

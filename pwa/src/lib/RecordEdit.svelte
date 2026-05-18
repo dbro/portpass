@@ -3,7 +3,7 @@
   import Icon from './Icon.svelte'
   import PasswordGenerator from './PasswordGenerator.svelte'
   import { generatePassword, loadOpts } from './passwordgen.js'
-  import { getAutocompleteSuggestion } from '../wasm.js'
+  import { getAutocompleteSuggestion, getFieldValue } from '../wasm.js'
 
   // --- TOTP helpers ---
   const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
@@ -55,8 +55,16 @@
     if (condition) setTimeout(() => node.focus(), 0)
   }
 
-  // Destructure once to capture initial prop values — draft is an independent editable copy
-  const { Title = '', Group = '', Username = '', Password = '', URL = '', Email = '', Notes = '' } = untrack(() => record ?? {})
+  // Track which sensitive fields were withheld in the original record (null = withheld, '' = empty)
+  const passwordWasWithheld = untrack(() => record?.Password === null)
+  const notesWasWithheld    = untrack(() => record?.Notes    === null)
+  const totpWasConfigured   = untrack(() => record?.TwoFactorKey === null)
+
+  // Destructure once — null sensitive values start as '' in the edit form
+  const initRec = untrack(() => record ?? {})
+  const { Title = '', Group = '', Username = '', URL = '', Email = '' } = initRec
+  const Password = initRec.Password ?? ''
+  const Notes    = initRec.Notes    ?? ''
   let draft = $state({ Title, Group, Username, Password, URL, Email, Notes })
 
   // TOTP state — kept separate from draft; merged into save call
@@ -69,10 +77,14 @@
   let totpGearOpen = $state(false)
   let totpRevealed = $state(false)
   let totpError    = $state('')
+  // When TOTP was configured (withheld), track if user has focused the field
+  // (indicating intent to interact with it — used to detect intentional clearing)
+  let totpFieldTouched = $state(false)
 
   function onTOTPInput(e) {
     const val = e.target.value.trim()
     totpSecret = val
+    totpFieldTouched = true
     totpError = ''
     if (!val) return
     if (val.toLowerCase().startsWith('otpauth://')) {
@@ -115,12 +127,24 @@
     return d.toLocaleDateString()
   }
 
-  let history = $derived(parseHistory(record?.PasswordHistory))
+  // PasswordHistory is null (withheld) — load lazily on first access
+  let loadedHistory = $state(null)
+  $effect(() => {
+    if (record?.PasswordHistory === null && loadedHistory === null) {
+      const raw = getFieldValue(vaultUuid, record?.UUID, 'PasswordHistory')
+      loadedHistory = parseHistory(raw ?? '')
+    }
+  })
+  let history = $derived(
+    typeof record?.PasswordHistory === 'string' ? parseHistory(record.PasswordHistory) :
+    loadedHistory ?? []
+  )
 
   let groupGhost    = $state('')
   let usernameGhost = $state('')
 
   let totpChanged = $derived(
+    (totpWasConfigured && totpFieldTouched && !totpSecret) ||  // user focused and cleared
     totpSecret !== base64ToBase32(record?.TwoFactorKey ?? '') ||
     (totpDigits !== (record?.TOTPLength || 6)) ||
     (totpPeriod !== (record?.TOTPTimeStep || 30))
@@ -133,14 +157,21 @@
     )
   })
   let dirty   = $derived(!record || Object.keys(draft).some(k => (record[k] ?? '') !== draft[k]) || totpChanged || customFieldsDirty)
-  let customFieldsValid = $derived(customFields.every(cf => cf.Name.trim() !== '' && cf.Value !== ''))
-  let canSave = $derived(dirty && !!draft.Title && !!draft.Password && !totpError && customFieldsValid)
+  // null Value = withheld sensitive field (counts as valid — keep existing)
+  let customFieldsValid = $derived(customFields.every(cf => cf.Name.trim() !== '' && (cf.Value !== '' || cf.Value === null)))
+  let canSave = $derived(dirty && !!draft.Title && (!!draft.Password || passwordWasWithheld) && !totpError && customFieldsValid)
 
   function buildSaveDraft() {
     const d = { ...draft }
-    d.TwoFactorKey = totpSecret
-    d.TOTPLength   = String(totpDigits)
-    d.TOTPTimeStep = String(totpPeriod)
+    // Omit withheld sensitive fields that the user didn't change — keep existing vault values
+    if (passwordWasWithheld && !draft.Password) delete d.Password
+    if (notesWasWithheld    && !draft.Notes)    delete d.Notes
+    // Only update TOTP if the user changed it or is setting it for the first time
+    if (!totpWasConfigured || totpChanged) {
+      d.TwoFactorKey = totpSecret
+      d.TOTPLength   = String(totpDigits)
+      d.TOTPTimeStep = String(totpPeriod)
+    }
     d.CustomFields = customFields.slice()
     return d
   }
@@ -342,6 +373,7 @@
           type={totpRevealed ? 'text' : 'password'}
           value={totpSecret}
           oninput={onTOTPInput}
+          onfocus={() => { totpFieldTouched = true }}
           placeholder="Base32 secret or otpauth:// URI"
           autocomplete="off"
           spellcheck="false"
