@@ -79,7 +79,8 @@
   let totpError    = $state('')
   // When TOTP was configured (withheld), track if user has focused the field
   // (indicating intent to interact with it — used to detect intentional clearing)
-  let totpFieldTouched = $state(false)
+  let totpFieldTouched  = $state(false)
+  let totpLoadedSecret  = $state('')  // base32 secret loaded via GetFieldValue; used as baseline
 
   function onTOTPInput(e) {
     const val = e.target.value.trim()
@@ -157,7 +158,7 @@
 
   let totpChanged = $derived(
     (totpWasConfigured && totpFieldTouched && !totpSecret) ||  // user focused and cleared
-    totpSecret !== base64ToBase32(record?.TwoFactorKey ?? '') ||
+    totpSecret !== (totpLoadedSecret || base64ToBase32(record?.TwoFactorKey ?? '')) ||
     (totpDigits !== (record?.TOTPLength || 6)) ||
     (totpPeriod !== (record?.TOTPTimeStep || 30))
   )
@@ -395,7 +396,14 @@
           aria-label="TOTP settings" class:active={totpGearOpen}>
           <Icon name="settings" size={18}/>
         </button>
-        <button class="icon-btn-flat" type="button" onclick={() => totpRevealed = !totpRevealed}
+        <button class="icon-btn-flat" type="button" onclick={() => {
+          if (totpWasConfigured && !totpLoadedSecret && !totpRevealed) {
+            // Load withheld TOTP secret on first reveal (returned as base32)
+            const val = getFieldValue(vaultUuid, record?.UUID, 'TwoFactorKey')
+            if (val) { totpSecret = val; totpLoadedSecret = val; totpFieldTouched = false }
+          }
+          totpRevealed = !totpRevealed
+        }}
           aria-label={totpRevealed ? 'Hide secret' : 'Reveal secret'}>
           <Icon name={totpRevealed ? 'eye-off' : 'eye'} size={18}/>
         </button>

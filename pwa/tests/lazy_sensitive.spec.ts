@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { openVault, THREE_DB_PATH } from './helpers'
+import { openVault, createVault, THREE_DB_PATH } from './helpers'
 import fs from 'fs'
 
 // three.dat known values (see helpers.ts)
@@ -247,6 +247,43 @@ test.describe('Lazy sensitive WASM functions', () => {
     )
     const field = rec.CustomFields?.find((cf: any) => cf.Name === 'PublicNote')
     expect(field?.Value).toBe('hello')
+  })
+
+})
+
+// ── Context menu and RecordRead copy for sensitive custom fields ─────────────
+
+test.describe('Sensitive custom field copy', () => {
+
+  test.beforeEach(async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    await createVault(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    await page.getByPlaceholder('e.g. Bank of America').fill('CF Sensitive Test')
+    await page.locator('input.mono').first().fill('testpass')
+    await page.locator('button.add-custom-field').click()
+    await page.getByPlaceholder('Field name').fill('SecretPin')
+    await page.getByPlaceholder('Value').fill('9876')
+    await page.getByRole('button', { name: 'Hide value' }).click()
+    await page.getByRole('button', { name: 'Save' }).click()
+    await expect(page.locator('.record-row', { hasText: 'CF Sensitive Test' })).toBeVisible()
+  })
+
+  test('context menu copies sensitive custom field correctly (not "null")', async ({ page }) => {
+    await page.locator('.record-row', { hasText: 'CF Sensitive Test' }).click({ button: 'right' })
+    await expect(page.locator('.ctx-menu')).toBeVisible()
+    await page.locator('.ctx-menu button', { hasText: 'Copy SecretPin' }).click()
+    const clip = await page.evaluate(() => navigator.clipboard.readText())
+    expect(clip).toBe('9876')
+  })
+
+  test('RecordRead copy button copies sensitive custom field correctly (not "null")', async ({ page }) => {
+    await page.locator('.record-row', { hasText: 'CF Sensitive Test' }).click()
+    const pinRow = page.locator('.copy-row').filter({ hasText: 'SecretPin' })
+    await expect(pinRow).toBeVisible()
+    await pinRow.locator('button[aria-label="Copy SecretPin"]').click()
+    const clip = await page.evaluate(() => navigator.clipboard.readText())
+    expect(clip).toBe('9876')
   })
 
 })

@@ -5,7 +5,7 @@
   import { searchRecords, getRecordData, getTOTP } from '../wasm.js'
   import Icon from './Icon.svelte'
 
-  let { selectedUUID = null, excludeUUID = null, query = '', primaryVaultName = '', collapseSeq = '', ontap, oncopy, oncopytotp, onwasmcopyfield = null, storageKey = null } = $props()
+  let { selectedUUID = null, excludeUUID = null, query = '', primaryVaultName = '', collapseSeq = '', ontap, oncopy, oncopytotp, onwasmcopyfield = null, onwasmcopycustomfield = null, storageKey = null } = $props()
 
   function loadGroupState() {
     if (!storageKey) return {}
@@ -113,6 +113,21 @@
       animVariant ^= 1
       flashedUUID  = uuid
       flashedField = field
+    }
+  }
+
+  async function handleWasmCustomCopy(vaultUuid, uuid, fieldName, displayField) {
+    if (!onwasmcopycustomfield) return
+    const { token, hashBytes } = await onwasmcopycustomfield(vaultUuid, uuid, fieldName)
+    if (token !== null) {
+      clipboardContext.set({ token, field: displayField, uuid, hash: Array.from(hashBytes) })
+      flashedToken = token
+      flashedUUID  = null
+      flashedField = null
+      await tick()
+      animVariant ^= 1
+      flashedUUID  = uuid
+      flashedField = displayField
     }
   }
 
@@ -461,7 +476,12 @@
       </button>
     {/if}
     {#each (contextMenu.rec.CustomFields ?? []).slice(0, 9) as cf, i}
-      <button onclick={() => { handleCopy(cf.Value, contextMenu.uuid, `custom-${i}`); closeMenu() }}>
+      <button onclick={() => {
+        const vaultUuid = vaultUuidForRecord(contextMenu.uuid)
+        if (cf.Value === null) handleWasmCustomCopy(vaultUuid, contextMenu.uuid, cf.Name, `custom-${i}`)
+        else handleCopy(cf.Value, contextMenu.uuid, `custom-${i}`)
+        closeMenu()
+      }}>
         <span>Copy {truncate(cf.Name, 14)}</span><span class="ctx-keys"><kbd>Ctrl</kbd><kbd>{i + 1}</kbd></span>
       </button>
     {/each}
