@@ -169,7 +169,11 @@
   }
 
   async function toggleRevealPassword() {
-    if (revealedPassword !== null) { revealedPassword = null; revealed = false; return }
+    if (revealedPassword !== null) {
+      revealedPassword = null; revealed = false
+      showHistory = false; revealedHistory = null
+      return
+    }
     revealedPassword = getFieldValue(vaultUuid, uuid, 'Password')
     revealed = true
   }
