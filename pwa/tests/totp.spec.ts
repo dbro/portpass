@@ -153,7 +153,8 @@ test.describe('TOTP', () => {
     await expect(page.locator('.copy-row-label', { hasText: 'One-time code' })).toBeVisible()
 
     await page.getByRole('button', { name: 'Edit' }).click()
-    await page.locator('input[placeholder="Base32 secret or otpauth:// URI"]').fill('')
+    // Placeholder changes to •••• when secret is already set — locate by field label instead
+    await page.locator('.field').filter({ hasText: 'One-time code secret' }).locator('input').fill('')
     await page.getByRole('button', { name: 'Save' }).click()
 
     await expect(page.locator('.copy-row-label', { hasText: 'One-time code' })).toHaveCount(0)

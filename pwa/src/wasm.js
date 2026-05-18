@@ -115,7 +115,36 @@ export function getAutocompleteSuggestion(vaultUuid, field, prefix) {
 }
 
 export function getTOTP(vaultUuid, recordUuid) {
-    return parseOrThrow(window.getTOTP(vaultUuid, recordUuid))
+    return parseOrThrow(window.getTOTP(vaultUuid, recordUuid, true))
+}
+
+
+// Copies a standard field value directly to clipboard from WASM.
+// returnHash=true causes a SHA-256 hash of the value to be returned (for clipboard drain).
+export function copyFieldToClipboard(vaultUuid, recordUuid, fieldname, returnHash = false) {
+    return parseOrThrow(window.copyFieldToClipboard(vaultUuid, recordUuid, fieldname, returnHash))
+}
+
+// Copies a custom field value directly to clipboard from WASM.
+export function copyCustomFieldToClipboard(vaultUuid, recordUuid, customFieldName, returnHash = false) {
+    return parseOrThrow(window.copyCustomFieldToClipboard(vaultUuid, recordUuid, customFieldName, returnHash))
+}
+
+// Copies the current TOTP code directly to clipboard from WASM. No drain needed (codes expire).
+export function copyTOTP(vaultUuid, recordUuid) {
+    return parseOrThrow(window.copyTOTP(vaultUuid, recordUuid))
+}
+
+// Returns the plaintext value of a standard sensitive field for display only.
+export function getFieldValue(vaultUuid, recordUuid, fieldname) {
+    const res = parseOrThrow(window.GetFieldValue(vaultUuid, recordUuid, fieldname))
+    return res?.value ?? null
+}
+
+// Returns the plaintext value of a custom field for display only.
+export function getCustomFieldValue(vaultUuid, recordUuid, customFieldName) {
+    const res = parseOrThrow(window.GetCustomFieldValue(vaultUuid, recordUuid, customFieldName))
+    return res?.value ?? null
 }
 
 // Encrypts a plaintext string inside WASM using the vault's stretched key.

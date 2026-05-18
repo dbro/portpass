@@ -115,6 +115,85 @@ func getDBData(this js.Value, args []js.Value) interface{} {
 	return string(jsonData)
 }
 
+// recordView is the JSON-safe view of a record returned to JS.
+// Sensitive fields use *string: nil marshals as JSON null ("withheld"),
+// pointer-to-empty-string marshals as "" ("not set").
+// null means "I have this data; ask via GetFieldValue/copyFieldToClipboard."
+// TwoFactorKey uses json.RawMessage with omitempty: nil = absent (not configured),
+// RawMessage("null") = present but withheld.
+type recordView struct {
+	UUID            string            `json:"UUID"`
+	Title           string            `json:"Title"`
+	Group           string            `json:"Group"`
+	Username        string            `json:"Username"`
+	URL             string            `json:"URL"`
+	Email           string            `json:"Email"`
+	ModTime         string            `json:"ModTime"`
+	Password        *string           `json:"Password"`
+	Notes           *string           `json:"Notes"`
+	PasswordHistory *string           `json:"PasswordHistory"`
+	TwoFactorKey    json.RawMessage   `json:"TwoFactorKey,omitempty"`
+	CustomFields    []customFieldView `json:"CustomFields"`
+}
+
+type customFieldView struct {
+	Name      string  `json:"Name"`
+	Value     *string `json:"Value"`
+	Sensitive bool    `json:"Sensitive"`
+}
+
+// withheld returns a nil *string (JSON null) meaning "has value but withheld".
+func withheld() *string { return nil }
+
+// empty returns a *string pointing to "" meaning "genuinely not set".
+func emptyStr() *string { s := ""; return &s }
+
+// sensitiveString returns nil if the value is non-empty (withheld), or &"" if empty.
+func sensitiveString(s string) *string {
+	if s != "" {
+		return withheld()
+	}
+	return emptyStr()
+}
+
+func recordToView(rec pwsafe.Record) recordView {
+	mt := ""
+	if !rec.ModTime.IsZero() {
+		mt = rec.ModTime.Format("2006-01-02")
+	}
+
+	cfViews := make([]customFieldView, len(rec.CustomFields))
+	for i, cf := range rec.CustomFields {
+		var val *string
+		if cf.Sensitive {
+			val = sensitiveString(cf.Value)
+		} else {
+			val = &cf.Value
+		}
+		cfViews[i] = customFieldView{Name: cf.Name, Value: val, Sensitive: cf.Sensitive}
+	}
+
+	var tfk json.RawMessage
+	if len(rec.TwoFactorKey) > 0 {
+		tfk = json.RawMessage("null")
+	}
+
+	return recordView{
+		UUID:            fmt.Sprintf("%x", rec.UUID),
+		Title:           rec.Title,
+		Group:           rec.Group,
+		Username:        rec.Username,
+		URL:             rec.URL,
+		Email:           rec.Email,
+		ModTime:         mt,
+		Password:        sensitiveString(rec.Password),
+		Notes:           sensitiveString(rec.Notes),
+		PasswordHistory: sensitiveString(rec.PasswordHistory),
+		TwoFactorKey:    tfk,
+		CustomFields:    cfViews,
+	}
+}
+
 func getRecord(this js.Value, args []js.Value) interface{} {
 	db, _, ok := getDB(args)
 	if !ok {
@@ -129,7 +208,7 @@ func getRecord(this js.Value, args []js.Value) interface{} {
 		return "record not found"
 	}
 
-	jsonData, err := json.Marshal(rec)
+	jsonData, err := json.Marshal(recordToView(rec))
 	if err != nil {
 		return fmt.Sprintf("json marshal error: %s", err)
 	}
@@ -257,12 +336,33 @@ func updateRecordFields(this js.Value, args []js.Value) interface{} {
 			if value == "" {
 				rec.CustomFields = nil
 			} else {
-				var cfs []pwsafe.CustomField
-				if err := json.Unmarshal([]byte(value), &cfs); err != nil {
+				// Use *string for Value so JSON null (withheld) can be distinguished from "" (clear).
+				type cfInput struct {
+					Name      string  `json:"Name"`
+					Value     *string `json:"Value"`
+					Sensitive bool    `json:"Sensitive"`
+				}
+				var inputs []cfInput
+				if err := json.Unmarshal([]byte(value), &inputs); err != nil {
 					return fmt.Sprintf("invalid CustomFields JSON: %s", err)
 				}
-				if len(cfs) > 9 {
-					cfs = cfs[:9]
+				if len(inputs) > 9 {
+					inputs = inputs[:9]
+				}
+				cfs := make([]pwsafe.CustomField, len(inputs))
+				for i, inp := range inputs {
+					cfs[i] = pwsafe.CustomField{Name: inp.Name, Sensitive: inp.Sensitive}
+					if inp.Value != nil {
+						cfs[i].Value = *inp.Value
+					} else {
+						// null = preserve existing value for this field name
+						for _, ex := range rec.CustomFields {
+							if ex.Name == inp.Name {
+								cfs[i].Value = ex.Value
+								break
+							}
+						}
+					}
 				}
 				rec.CustomFields = cfs
 			}
@@ -407,8 +507,8 @@ func getTOTP(this js.Value, args []js.Value) interface{} {
 	if !ok {
 		return "vault not open"
 	}
-	if len(args) != 2 {
-		return "invalid arguments: expected (vaultUuid, recordUuid)"
+	if len(args) < 2 {
+		return "invalid arguments: expected (vaultUuid, recordUuid[, returnCode])"
 	}
 	rec, ok := db.Records[args[1].String()]
 	if !ok {
@@ -418,6 +518,8 @@ func getTOTP(this js.Value, args []js.Value) interface{} {
 		return "no TOTP configured"
 	}
 
+	returnCode := len(args) >= 3 && args[2].Bool()
+
 	var t0 int64
 	if !rec.TOTPStartTime.IsZero() {
 		t0 = rec.TOTPStartTime.Unix()
@@ -425,19 +527,178 @@ func getTOTP(this js.Value, args []js.Value) interface{} {
 	code, remaining := pwsafe.ComputeTOTP(rec.TwoFactorKey, time.Now().Unix(), t0, rec.TOTPTimeStep, rec.TOTPLength)
 
 	type Result struct {
-		Code    string `json:"code"`
-		Seconds int64  `json:"seconds"`
-		Period  int    `json:"period"`
+		Code    interface{} `json:"code"`
+		Seconds int64       `json:"seconds"`
+		Period  int         `json:"period"`
 	}
 	period := int(rec.TOTPTimeStep)
 	if period == 0 {
 		period = 30
 	}
-	data, err := json.Marshal(Result{code, remaining, period})
+	var codeVal interface{}
+	if returnCode {
+		codeVal = code
+	}
+	data, err := json.Marshal(Result{codeVal, remaining, period})
 	if err != nil {
 		return fmt.Sprintf("error: %s", err)
 	}
 	return string(data)
+}
+
+// standardFieldValue returns the string value of a named standard field.
+func standardFieldValue(rec pwsafe.Record, fieldname string) (string, error) {
+	switch fieldname {
+	case "Password":
+		return rec.Password, nil
+	case "Notes":
+		return rec.Notes, nil
+	case "Username":
+		return rec.Username, nil
+	case "URL":
+		return rec.URL, nil
+	case "Email":
+		return rec.Email, nil
+	case "Title":
+		return rec.Title, nil
+	case "Group":
+		return rec.Group, nil
+	case "PasswordHistory":
+		return rec.PasswordHistory, nil
+	case "TwoFactorKey":
+		return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(rec.TwoFactorKey), nil
+	default:
+		return "", fmt.Errorf("unknown field: %s", fieldname)
+	}
+}
+
+// writeToClipboard writes value to the clipboard via the browser API.
+// Returns "{}" or a JSON hash object depending on returnHash.
+func writeToClipboard(value string, returnHash bool) string {
+	js.Global().Get("navigator").Get("clipboard").Call("writeText", value)
+	if !returnHash {
+		return `{}`
+	}
+	h := sha256.Sum256([]byte(value))
+	type Result struct {
+		Hash string `json:"hash"`
+	}
+	data, _ := json.Marshal(Result{Hash: hex.EncodeToString(h[:])})
+	return string(data)
+}
+
+func copyFieldToClipboard(this js.Value, args []js.Value) interface{} {
+	db, _, ok := getDB(args)
+	if !ok {
+		return `{"error":"vault not open"}`
+	}
+	if len(args) < 3 {
+		return `{"error":"expected (vaultUuid, recordUuid, fieldname[, returnHash])"}`
+	}
+	rec, ok := db.Records[args[1].String()]
+	if !ok {
+		return `{"error":"record not found"}`
+	}
+	value, err := standardFieldValue(rec, args[2].String())
+	if err != nil {
+		return fmt.Sprintf(`{"error":%q}`, err.Error())
+	}
+	returnHash := len(args) >= 4 && args[3].Bool()
+	return writeToClipboard(value, returnHash)
+}
+
+func copyCustomFieldToClipboard(this js.Value, args []js.Value) interface{} {
+	db, _, ok := getDB(args)
+	if !ok {
+		return `{"error":"vault not open"}`
+	}
+	if len(args) < 3 {
+		return `{"error":"expected (vaultUuid, recordUuid, customFieldName[, returnHash])"}`
+	}
+	rec, ok := db.Records[args[1].String()]
+	if !ok {
+		return `{"error":"record not found"}`
+	}
+	name := args[2].String()
+	for _, cf := range rec.CustomFields {
+		if cf.Name == name {
+			returnHash := len(args) >= 4 && args[3].Bool()
+			return writeToClipboard(cf.Value, returnHash)
+		}
+	}
+	return `{"error":"custom field not found"}`
+}
+
+func copyTOTP(this js.Value, args []js.Value) interface{} {
+	db, _, ok := getDB(args)
+	if !ok {
+		return `{"error":"vault not open"}`
+	}
+	if len(args) < 2 {
+		return `{"error":"expected (vaultUuid, recordUuid)"}`
+	}
+	rec, ok := db.Records[args[1].String()]
+	if !ok {
+		return `{"error":"record not found"}`
+	}
+	if len(rec.TwoFactorKey) == 0 {
+		return `{"error":"no TOTP configured"}`
+	}
+	var t0 int64
+	if !rec.TOTPStartTime.IsZero() {
+		t0 = rec.TOTPStartTime.Unix()
+	}
+	code, _ := pwsafe.ComputeTOTP(rec.TwoFactorKey, time.Now().Unix(), t0, rec.TOTPTimeStep, rec.TOTPLength)
+	js.Global().Get("navigator").Get("clipboard").Call("writeText", code)
+	return `{}`
+}
+
+func getFieldValueFn(this js.Value, args []js.Value) interface{} {
+	db, _, ok := getDB(args)
+	if !ok {
+		return `{"error":"vault not open"}`
+	}
+	if len(args) < 3 {
+		return `{"error":"expected (vaultUuid, recordUuid, fieldname)"}`
+	}
+	rec, ok := db.Records[args[1].String()]
+	if !ok {
+		return `{"error":"record not found"}`
+	}
+	value, err := standardFieldValue(rec, args[2].String())
+	if err != nil {
+		return fmt.Sprintf(`{"error":%q}`, err.Error())
+	}
+	type Result struct {
+		Value string `json:"value"`
+	}
+	data, _ := json.Marshal(Result{Value: value})
+	return string(data)
+}
+
+func getCustomFieldValueFn(this js.Value, args []js.Value) interface{} {
+	db, _, ok := getDB(args)
+	if !ok {
+		return `{"error":"vault not open"}`
+	}
+	if len(args) < 3 {
+		return `{"error":"expected (vaultUuid, recordUuid, customFieldName)"}`
+	}
+	rec, ok := db.Records[args[1].String()]
+	if !ok {
+		return `{"error":"record not found"}`
+	}
+	name := args[2].String()
+	for _, cf := range rec.CustomFields {
+		if cf.Name == name {
+			type Result struct {
+				Value string `json:"value"`
+			}
+			data, _ := json.Marshal(Result{Value: cf.Value})
+			return string(data)
+		}
+	}
+	return `{"error":"custom field not found"}`
 }
 
 // deriveSecondaryKey derives a 32-byte AES key from the vault's stretched key.
@@ -595,6 +856,11 @@ func main() {
 	js.Global().Set("searchRecords", js.FuncOf(searchRecords))
 	js.Global().Set("getSuggestion", js.FuncOf(getSuggestion))
 	js.Global().Set("getTOTP", js.FuncOf(getTOTP))
+	js.Global().Set("copyFieldToClipboard", js.FuncOf(copyFieldToClipboard))
+	js.Global().Set("copyCustomFieldToClipboard", js.FuncOf(copyCustomFieldToClipboard))
+	js.Global().Set("copyTOTP", js.FuncOf(copyTOTP))
+	js.Global().Set("GetFieldValue", js.FuncOf(getFieldValueFn))
+	js.Global().Set("GetCustomFieldValue", js.FuncOf(getCustomFieldValueFn))
 
 	fmt.Println("WASM initialized")
 	<-c

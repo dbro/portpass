@@ -2,25 +2,42 @@
   import { onMount, tick } from 'svelte'
   import { get } from 'svelte/store'
   import { clipboardSession, clipboardContext } from '../store.js'
-  import { getTOTP } from '../wasm.js'
+  import { getTOTP, getFieldValue, getCustomFieldValue } from '../wasm.js'
   import Icon from './Icon.svelte'
 
-  let { record, uuid, isDesktop, vaultUuid, onback, onedit, oncopy, oncopytotp } = $props()
+  let { record, uuid, isDesktop, vaultUuid, onback, onedit, oncopy, oncopytotp,
+        onwasmcopyfield, onwasmcopycustomfield } = $props()
 
-  let revealed      = $state(false)
-  let showHistory   = $state(false)
-  let notesRevealed = $state(false)
-  let totpData       = $state(null)   // { code, seconds, period } | null
-  let totpRevealed   = $state(false)
-  let totpBarInstant = $state(false)
-  let totpPrevSeconds = -1
+  let revealed        = $state(false)
+  let revealedPassword = $state(null)   // null = masked, string = revealed
+  let showHistory     = $state(false)
+  let revealedHistory  = $state(null)   // null = not loaded, array = loaded entries
+  let notesRevealed   = $state(false)
+  let revealedNotes    = $state(null)   // null = masked, string = revealed
+  let totpData         = $state(null)   // { code, seconds, period } | null
+  let totpRevealed     = $state(false)
+  let totpBarInstant   = $state(false)
+  let totpPrevSeconds  = -1
 
+  // Clear revealed values when record changes
   $effect(() => {
-    if (!record.TwoFactorKey) return
+    uuid  // track
+    revealedPassword = null
+    revealedNotes = null
+    revealedHistory = null
+    revealedCustomValues = Array(9).fill(null)
+    customRevealed = Array(9).fill(false)
+    revealed = false
+    notesRevealed = false
+    showHistory = false
+  })
+
+  // TwoFactorKey: undefined = not configured, null = configured (withheld)
+  $effect(() => {
+    if (record.TwoFactorKey === undefined) return
     function refresh() {
       try {
         const data = getTOTP(vaultUuid, uuid)
-        // Detect period rollover — snap the bar instantly instead of animating
         if (totpPrevSeconds > 0 && data.seconds > totpPrevSeconds + 5) {
           totpBarInstant = true
           setTimeout(() => totpBarInstant = false, 50)
@@ -33,10 +50,12 @@
     const id = setInterval(refresh, 1000)
     return () => clearInterval(id)
   })
-  let copiedField    = $state(null)
-  let copiedToken    = null
-  let animVariant    = $state(0)  // alternates 0/1 on each copy to force animation restart
-  let customRevealed = $state(Array(9).fill(false))
+
+  let copiedField         = $state(null)
+  let copiedToken         = null
+  let animVariant         = $state(0)
+  let customRevealed      = $state(Array(9).fill(false))
+  let revealedCustomValues = $state(Array(9).fill(null))  // null = masked, string = revealed
 
   async function sha256(text) {
     const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
@@ -57,30 +76,45 @@
     }
   })
 
-  // Reactively restore (or update) the drain whenever the clipboard context changes.
+  // Reactively restore drain animation when clipboard context changes.
+  // For sensitive fields (null value in record), skip hash verification — trust the token.
   $effect(() => {
     const s = $clipboardSession
     const ctx = $clipboardContext
-    if (!s || !ctx || ctx.token !== s.token || ctx.uuid !== uuid || !ctx.field || !ctx.hash) return
-    if (copiedToken === ctx.token) return  // already showing the right drain
+    if (!s || !ctx || ctx.token !== s.token || ctx.uuid !== uuid || !ctx.field) return
+    if (!ctx.hash && ctx.field !== 'otp') return  // otp has no hash — others require it
+    if (copiedToken === ctx.token) return
     ;(async () => {
-      const history = parseHistory(record.PasswordHistory)
       let value
+      const isSensitiveField = ctx.field === 'Password' || ctx.field === 'Notes'
+        || ctx.field === 'otp'
+        || ctx.field.startsWith('history-')
+        || (ctx.field.startsWith('custom-') && record.CustomFields?.[parseInt(ctx.field.slice(7))]?.Value === null)
+
+      if (isSensitiveField) {
+        // Can't verify hash — restore drain based on token match alone
+        if (get(clipboardSession)?.token !== ctx.token) return
+        copiedToken = ctx.token
+        copiedField = null
+        await tick()
+        if (get(clipboardSession)?.token !== ctx.token) return
+        animVariant ^= 1
+        copiedField = ctx.field
+        return
+      }
+
       if (ctx.field === 'otp') {
         value = totpData?.code
-      } else if (ctx.field.startsWith('history-')) {
-        const ts = parseInt(ctx.field.slice(8))
-        value = history.find(e => e.ts === ts)?.password
       } else if (ctx.field.startsWith('custom-')) {
         const idx = parseInt(ctx.field.slice(7))
         value = record.CustomFields?.[idx]?.Value
       } else {
-        value = { Username: record.Username, Password: record.Password, URL: record.URL, Email: record.Email }[ctx.field]
+        value = { Username: record.Username, URL: record.URL, Email: record.Email }[ctx.field]
       }
       if (!value) return
       if (hashesEqual(await sha256(value), new Uint8Array(ctx.hash))
           && get(clipboardSession)?.token === ctx.token) {
-        copiedToken = ctx.token  // claim before yielding
+        copiedToken = ctx.token
         copiedField = null
         await tick()
         if (get(clipboardSession)?.token !== ctx.token) return
@@ -100,12 +134,61 @@
     if (token !== null) {
       const hash = Array.from(await sha256(value))
       clipboardContext.set({ token, field, uuid, hash })
-      copiedToken = token  // claim before yielding — restore effect guard bails
+      copiedToken = token
       copiedField = null
       await tick()
       animVariant ^= 1
       copiedField = field
     }
+  }
+
+  // Copy a sensitive standard field via WASM (value never enters JS)
+  async function handleWasmCopy(fieldname) {
+    const { token, hashBytes } = await onwasmcopyfield(vaultUuid, uuid, fieldname)
+    if (token !== null) {
+      clipboardContext.set({ token, field: fieldname, uuid, hash: Array.from(hashBytes) })
+      copiedToken = token
+      copiedField = null
+      await tick()
+      animVariant ^= 1
+      copiedField = fieldname
+    }
+  }
+
+  // Copy a sensitive custom field via WASM
+  async function handleWasmCustomCopy(fieldname, displayField) {
+    const { token, hashBytes } = await onwasmcopycustomfield(vaultUuid, uuid, fieldname)
+    if (token !== null) {
+      clipboardContext.set({ token, field: displayField, uuid, hash: Array.from(hashBytes) })
+      copiedToken = token
+      copiedField = null
+      await tick()
+      animVariant ^= 1
+      copiedField = displayField
+    }
+  }
+
+  async function toggleRevealPassword() {
+    if (revealedPassword !== null) {
+      revealedPassword = null; revealed = false
+      showHistory = false; revealedHistory = null
+      return
+    }
+    revealedPassword = getFieldValue(vaultUuid, uuid, 'Password')
+    revealed = true
+  }
+
+  async function toggleRevealNotes() {
+    if (revealedNotes !== null) { revealedNotes = null; notesRevealed = false; return }
+    revealedNotes = getFieldValue(vaultUuid, uuid, 'Notes')
+    notesRevealed = true
+  }
+
+  async function loadHistory() {
+    if (revealedHistory !== null) { revealedHistory = null; showHistory = false; return }
+    const raw = getFieldValue(vaultUuid, uuid, 'PasswordHistory')
+    revealedHistory = parseHistory(raw)
+    showHistory = true
   }
 
   function drainStyle() {
@@ -148,7 +231,7 @@
     return entries.reverse() // most recent first
   }
 
-  let history = $derived(parseHistory(record.PasswordHistory))
+  // history is loaded lazily via loadHistory() — revealedHistory holds parsed entries
 </script>
 
 <!-- Mobile bar (hidden on desktop via CSS) -->
@@ -197,25 +280,25 @@
       </div>
     {/if}
 
-    {#if record.Password}
+    {#if record.Password !== ''}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
           <!-- svelte-ignore a11y_click_events_have_key_events -->
       <div class="copy-row" class:clipboard-active={copiedField === 'Password'} style={copiedField === 'Password' ? drainStyle() : ''}
         role="button" tabindex="0"
-        onclick={() => handleCopy(record.Password, 'Password')}
-        onkeydown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCopy(record.Password, 'Password') } }}>
+        onclick={() => handleWasmCopy('Password')}
+        onkeydown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleWasmCopy('Password') } }}>
         <div class="copy-row-label muted">Password</div>
         <div class="copy-row-main">
           <div class="copy-row-value">
-            <span class="mono">{revealed ? record.Password : '•'.repeat(Math.min(record.Password.length, 12))}</span>
+            <span class="mono">{revealed && revealedPassword !== null ? revealedPassword : '••••••••••••'}</span>
           </div>
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <!-- svelte-ignore a11y_click_events_have_key_events -->
           <div class="copy-row-actions" onclick={e => e.stopPropagation()}>
-            <button class="icon-btn-flat" onclick={() => { revealed = !revealed; if (!revealed) showHistory = false }} aria-label="Reveal password">
+            <button class="icon-btn-flat" onclick={toggleRevealPassword} aria-label="Reveal password">
               <Icon name={revealed ? 'eye-off' : 'eye'} size={18}/>
             </button>
-            <button class="icon-btn-flat copy-btn" onclick={() => handleCopy(record.Password, 'Password')} aria-label="Copy password">
+            <button class="icon-btn-flat copy-btn" onclick={() => handleWasmCopy('Password')} aria-label="Copy password">
               <Icon name="copy" size={18}/>
             </button>
           </div>
@@ -223,14 +306,14 @@
         <!-- svelte-ignore a11y_no_static_element_interactions -->
           <!-- svelte-ignore a11y_click_events_have_key_events -->
         <div onclick={e => e.stopPropagation()}>
-          {#if revealed && history.length > 0}
-            <button class="history-toggle" onclick={() => showHistory = !showHistory}>
-              {showHistory ? 'Hide' : 'History'} · {history.length} previous
+          {#if revealed && record.PasswordHistory !== ''}
+            <button class="history-toggle" onclick={loadHistory}>
+              {showHistory ? 'Hide' : 'History'}{revealedHistory ? ` · ${revealedHistory.length} previous` : ''}
             </button>
           {/if}
-          {#if showHistory}
+          {#if showHistory && revealedHistory}
             <div class="history-list">
-              {#each history as entry}
+              {#each revealedHistory as entry}
                 <div class="history-entry" class:clipboard-active={copiedField === `history-${entry.ts}`} style={copiedField === `history-${entry.ts}` ? drainStyle() : ''}>
                   <span class="history-time muted">{relTimeUnix(entry.ts)}</span>
                   <span class="history-pw mono">{entry.password}</span>
@@ -245,7 +328,7 @@
       </div>
     {/if}
 
-  {#if record.TwoFactorKey}
+  {#if record.TwoFactorKey !== undefined}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
           <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div class="copy-row" class:clipboard-active={copiedField === 'otp'}
@@ -336,24 +419,35 @@
           <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div class="copy-row" class:clipboard-active={copiedField === `custom-${i}`} style={copiedField === `custom-${i}` ? drainStyle() : ''}
       role="button" tabindex="0"
-      onclick={() => handleCopy(cf.Value, `custom-${i}`)}
-      onkeydown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCopy(cf.Value, `custom-${i}`) } }}>
+      onclick={() => cf.Value === null ? handleWasmCustomCopy(cf.Name, `custom-${i}`) : handleCopy(cf.Value, `custom-${i}`)}
+      onkeydown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cf.Value === null ? handleWasmCustomCopy(cf.Name, `custom-${i}`) : handleCopy(cf.Value, `custom-${i}`) } }}>
       <div class="copy-row-label muted">{cf.Name}</div>
       <div class="copy-row-main">
         <div class="copy-row-value">
           <span class:mono={cf.Sensitive}>
-            {cf.Sensitive && !customRevealed[i] ? '•'.repeat(Math.min(cf.Value.length, 12)) : cf.Value}
+            {#if cf.Value === null}
+              {customRevealed[i] && revealedCustomValues[i] !== null ? revealedCustomValues[i] : '••••••••••••'}
+            {:else}
+              {cf.Sensitive && !customRevealed[i] ? '••••••••••••' : cf.Value}
+            {/if}
           </span>
         </div>
         <!-- svelte-ignore a11y_no_static_element_interactions -->
           <!-- svelte-ignore a11y_click_events_have_key_events -->
         <div class="copy-row-actions" onclick={e => e.stopPropagation()}>
           {#if cf.Sensitive}
-            <button class="icon-btn-flat" onclick={() => { customRevealed[i] = !customRevealed[i] }} aria-label={customRevealed[i] ? 'Hide value' : 'Reveal value'}>
+            <button class="icon-btn-flat" onclick={() => {
+              if (cf.Value === null) {
+                if (customRevealed[i]) { customRevealed[i] = false; revealedCustomValues[i] = null }
+                else { revealedCustomValues[i] = getCustomFieldValue(vaultUuid, uuid, cf.Name); customRevealed[i] = true }
+              } else {
+                customRevealed[i] = !customRevealed[i]
+              }
+            }} aria-label={customRevealed[i] ? 'Hide value' : 'Reveal value'}>
               <Icon name={customRevealed[i] ? 'eye-off' : 'eye'} size={18}/>
             </button>
           {/if}
-          <button class="icon-btn-flat copy-btn" onclick={() => handleCopy(cf.Value, `custom-${i}`)} aria-label="Copy {cf.Name}">
+          <button class="icon-btn-flat copy-btn" onclick={() => cf.Value === null ? handleWasmCustomCopy(cf.Name, `custom-${i}`) : handleCopy(cf.Value, `custom-${i}`)} aria-label="Copy {cf.Name}">
             <Icon name="copy" size={18}/>
           </button>
         </div>
@@ -362,15 +456,15 @@
   {/each}
   </div>
 
-  {#if record.Notes}
+  {#if record.Notes !== ''}
     <div class="record-notes">
       <div class="notes-label-row">
         <span class="copy-row-label muted">Notes</span>
-        <button class="icon-btn-flat" onclick={() => notesRevealed = !notesRevealed} aria-label={notesRevealed ? 'Hide notes' : 'Reveal notes'}>
+        <button class="icon-btn-flat" onclick={toggleRevealNotes} aria-label={notesRevealed ? 'Hide notes' : 'Reveal notes'}>
           <Icon name={notesRevealed ? 'eye-off' : 'eye'} size={16}/>
         </button>
       </div>
-      <div class="notes-text mono">{notesRevealed ? record.Notes : record.Notes.replace(/[^\n]/g, '•')}</div>
+      <div class="notes-text mono">{notesRevealed && revealedNotes !== null ? revealedNotes : '••••••••••••••••'}</div>
     </div>
   {/if}
 

@@ -16,6 +16,8 @@ test.describe('Keyboard shortcuts', () => {
   test.beforeEach(async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write'])
     await openVault(page)
+    // Ensure search input is focused (not just visible) before any keypress
+    await expect(page.getByPlaceholder('Search vault')).toBeFocused()
   })
 
   // ── Lock ────────────────────────────────────────────────────────────────────
@@ -74,7 +76,9 @@ test.describe('Keyboard shortcuts', () => {
   test('Enter opens URL in new tab for records with a URL', async ({ page, context }) => {
     // Select "three entry 1" which has url="http://group1.com"
     await page.keyboard.press('ArrowDown') // three entry 3 (group 3)
+    await expect(page.locator('.record-title')).toHaveText('three entry 3')
     await page.keyboard.press('ArrowDown') // three entry 1 (group1) — has URL
+    await expect(page.locator('.record-title')).toHaveText('three entry 1')
 
     const [newPage] = await Promise.all([
       context.waitForEvent('page'),

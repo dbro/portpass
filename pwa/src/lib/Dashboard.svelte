@@ -5,7 +5,8 @@
   import {
     getRecordData, getDatabaseData, saveDatabase, getDatabaseInfo,
     updateRecordFields, updateDBFields, deleteRecord as wasmDeleteRecord,
-    searchRecords, getTOTP, closeDatabase, loadVaultFile,
+    searchRecords, closeDatabase, loadVaultFile,
+    copyFieldToClipboard, copyCustomFieldToClipboard, copyTOTP as wasmCopyTOTP,
   } from '../wasm.js'
   import { addSecondaryCredential, removeSecondaryCredential } from './secondaryVaults.js'
   import { isBiometricEnrolledForFile, unlockWithBiometric } from './biometric.js'
@@ -290,6 +291,12 @@
     return new Uint8Array(buf)
   }
 
+  function hexToBytes(hex) {
+    const bytes = new Uint8Array(hex.length / 2)
+    for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16)
+    return bytes
+  }
+
   function hashesEqual(a, b) {
     if (!a || !b || a.length !== b.length) return false
     let diff = 0
@@ -367,17 +374,56 @@
     }
   }
 
+  async function copyFieldViaWasm(recordVaultUuid, recordUuid, fieldname) {
+    try {
+      const { hash } = copyFieldToClipboard(recordVaultUuid, recordUuid, fieldname, true)
+      const hashBytes = hexToBytes(hash)
+      clipHash = hashBytes
+      const token = ++sessionSerial
+      clipboardSession.set({ token, expiresAt: Date.now() + 30000 })
+      if (clearTimer) clearTimeout(clearTimer)
+      clearTimer = setTimeout(() => { clearTimer = null; tryClearClipboard() }, 30000)
+      return { token, hashBytes }
+    } catch {
+      showToast('Copy failed')
+      return { token: null, hashBytes: null }
+    }
+  }
+
+  async function copyCustomFieldViaWasm(recordVaultUuid, recordUuid, fieldname) {
+    try {
+      const { hash } = copyCustomFieldToClipboard(recordVaultUuid, recordUuid, fieldname, true)
+      const hashBytes = hexToBytes(hash)
+      clipHash = hashBytes
+      const token = ++sessionSerial
+      clipboardSession.set({ token, expiresAt: Date.now() + 30000 })
+      if (clearTimer) clearTimeout(clearTimer)
+      clearTimer = setTimeout(() => { clearTimer = null; tryClearClipboard() }, 30000)
+      return { token, hashBytes }
+    } catch {
+      showToast('Copy failed')
+      return { token: null, hashBytes: null }
+    }
+  }
+
+  function vaultUuidForRecord(uuid) {
+    if (get(dbItems).find(i => i.uuid === uuid)) return dbKey
+    for (const sv of get(secondaryVaults)) {
+      if (sv.items?.find(i => i.uuid === uuid)) return sv.uuid
+    }
+    return selectedVaultUuid || dbKey
+  }
+
   async function copyTOTPForUUID(uuid) {
     try {
-      const totp = getTOTP(dbKey, uuid)
-      await navigator.clipboard.writeText(totp.code)
+      const vaultUuid = vaultUuidForRecord(uuid)
+      wasmCopyTOTP(vaultUuid, uuid)
       if (clearTimer) { clearTimeout(clearTimer); clearTimer = null }
       clipHash = null
       const token = ++sessionSerial
-      const h = Array.from(await sha256(totp.code))
-      // Short session drives the visual flash only — no autoclear timer
+      // Short session drives the visual flash only — no autoclear timer for TOTP
       clipboardSession.set({ token, expiresAt: Date.now() + 500 })
-      clipboardContext.set({ token, field: 'otp', uuid, hash: h })
+      clipboardContext.set({ token, field: 'otp', uuid, hash: null })
       setTimeout(() => {
         if (get(clipboardSession)?.token === token) {
           clipboardSession.set(null)
@@ -390,7 +436,8 @@
   }
 
   async function copyTOTP() {
-    if (!record?.TwoFactorKey) return
+    // TwoFactorKey is null (withheld = configured) or undefined (not configured)
+    if (record?.TwoFactorKey === undefined) return
     await copyTOTPForUUID(selectedUUID)
   }
 
@@ -550,6 +597,12 @@
 
   async function copyRecordField(field) {
     const value = record?.[field]
+    if (value === null) {  // null = withheld sensitive value — use WASM copy
+      const vaultUuid = selectedVaultUuid || dbKey
+      const { token, hashBytes } = await copyFieldViaWasm(vaultUuid, selectedUUID, field)
+      if (token !== null) clipboardContext.set({ token, field, uuid: selectedUUID, hash: Array.from(hashBytes) })
+      return
+    }
     if (!value) return
     const token = await copyToClipboard(value)
     if (token !== null) {
@@ -560,7 +613,14 @@
 
   async function copyCustomField(index) {
     const cf = record?.CustomFields?.[index]
-    if (!cf?.Value) return
+    if (!cf) return
+    if (cf.Value === null) {  // null = withheld sensitive custom field — use WASM copy
+      const vaultUuid = selectedVaultUuid || dbKey
+      const { token, hashBytes } = await copyCustomFieldViaWasm(vaultUuid, selectedUUID, cf.Name)
+      if (token !== null) clipboardContext.set({ token, field: `custom-${index}`, uuid: selectedUUID, hash: Array.from(hashBytes) })
+      return
+    }
+    if (!cf.Value) return
     const token = await copyToClipboard(cf.Value)
     if (token !== null) {
       const hash = Array.from(await sha256(cf.Value))
@@ -726,7 +786,7 @@
     {/if}
   </div>
 
-  <RecordList {query} {selectedUUID} {collapseSeq} excludeUUID={pendingDeleteUUID} storageKey={dbKey} primaryVaultName={vaultName} ontap={selectRecord} oncopy={copyToClipboard} oncopytotp={copyTOTPForUUID}/>
+  <RecordList {query} {selectedUUID} {collapseSeq} excludeUUID={pendingDeleteUUID} storageKey={dbKey} primaryVaultName={vaultName} ontap={selectRecord} oncopy={copyToClipboard} oncopytotp={copyTOTPForUUID} onwasmcopyfield={copyFieldViaWasm} onwasmcopycustomfield={copyCustomFieldViaWasm}/>
 
   <!-- FAB (mobile) — hidden when all open vaults are read-only -->
   {#if !allVaultsReadonly}
@@ -822,6 +882,8 @@
         onedit={($secondaryVaults.find(v => v.uuid === selectedVaultUuid)?.readonly ?? $selectedFile?.readonly) ? null : startEdit}
         oncopy={copyToClipboard}
         oncopytotp={copyTOTPForUUID}
+        onwasmcopyfield={copyFieldViaWasm}
+        onwasmcopycustomfield={copyCustomFieldViaWasm}
       />
     {/key}
   {:else if isDesktop}

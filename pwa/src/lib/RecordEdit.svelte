@@ -3,7 +3,7 @@
   import Icon from './Icon.svelte'
   import PasswordGenerator from './PasswordGenerator.svelte'
   import { generatePassword, loadOpts } from './passwordgen.js'
-  import { getAutocompleteSuggestion } from '../wasm.js'
+  import { getAutocompleteSuggestion, getFieldValue, getCustomFieldValue } from '../wasm.js'
 
   // --- TOTP helpers ---
   const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
@@ -55,8 +55,16 @@
     if (condition) setTimeout(() => node.focus(), 0)
   }
 
-  // Destructure once to capture initial prop values — draft is an independent editable copy
-  const { Title = '', Group = '', Username = '', Password = '', URL = '', Email = '', Notes = '' } = untrack(() => record ?? {})
+  // Track which sensitive fields were withheld in the original record (null = withheld, '' = empty)
+  const passwordWasWithheld = untrack(() => record?.Password === null)
+  const notesWasWithheld    = untrack(() => record?.Notes    === null)
+  const totpWasConfigured   = untrack(() => record?.TwoFactorKey === null)
+
+  // Destructure once — null sensitive values start as '' in the edit form
+  const initRec = untrack(() => record ?? {})
+  const { Title = '', Group = '', Username = '', URL = '', Email = '' } = initRec
+  const Password = initRec.Password ?? ''
+  const Notes    = initRec.Notes    ?? ''
   let draft = $state({ Title, Group, Username, Password, URL, Email, Notes })
 
   // TOTP state — kept separate from draft; merged into save call
@@ -69,10 +77,15 @@
   let totpGearOpen = $state(false)
   let totpRevealed = $state(false)
   let totpError    = $state('')
+  // When TOTP was configured (withheld), track if user has focused the field
+  // (indicating intent to interact with it — used to detect intentional clearing)
+  let totpFieldTouched  = $state(false)
+  let totpLoadedSecret  = $state('')  // base32 secret loaded via GetFieldValue; used as baseline
 
   function onTOTPInput(e) {
     const val = e.target.value.trim()
     totpSecret = val
+    totpFieldTouched = true
     totpError = ''
     if (!val) return
     if (val.toLowerCase().startsWith('otpauth://')) {
@@ -85,7 +98,19 @@
       e.target.value = parsed.secret
     }
   }
-  let showPw      = $state(false)
+  let showPw    = $state(false)
+  let pwLoading = $state(false)
+
+  async function revealOrTogglePassword() {
+    if (passwordWasWithheld && !draft.Password) {
+      // Load the withheld password into the draft on first reveal
+      pwLoading = true
+      const val = getFieldValue(vaultUuid, record?.UUID, 'Password')
+      set('Password', val ?? '')
+      pwLoading = false
+    }
+    showPw = !showPw
+  }
   let genOpen     = $state(false)
   let showHistory = $state(false)
 
@@ -115,13 +140,25 @@
     return d.toLocaleDateString()
   }
 
-  let history = $derived(parseHistory(record?.PasswordHistory))
+  // PasswordHistory is null (withheld) — load lazily on first access
+  let loadedHistory = $state(null)
+  $effect(() => {
+    if (record?.PasswordHistory === null && loadedHistory === null) {
+      const raw = getFieldValue(vaultUuid, record?.UUID, 'PasswordHistory')
+      loadedHistory = parseHistory(raw ?? '')
+    }
+  })
+  let history = $derived(
+    typeof record?.PasswordHistory === 'string' ? parseHistory(record.PasswordHistory) :
+    loadedHistory ?? []
+  )
 
   let groupGhost    = $state('')
   let usernameGhost = $state('')
 
   let totpChanged = $derived(
-    totpSecret !== base64ToBase32(record?.TwoFactorKey ?? '') ||
+    (totpWasConfigured && totpFieldTouched && !totpSecret) ||  // user focused and cleared
+    totpSecret !== (totpLoadedSecret || base64ToBase32(record?.TwoFactorKey ?? '')) ||
     (totpDigits !== (record?.TOTPLength || 6)) ||
     (totpPeriod !== (record?.TOTPTimeStep || 30))
   )
@@ -133,14 +170,21 @@
     )
   })
   let dirty   = $derived(!record || Object.keys(draft).some(k => (record[k] ?? '') !== draft[k]) || totpChanged || customFieldsDirty)
-  let customFieldsValid = $derived(customFields.every(cf => cf.Name.trim() !== '' && cf.Value !== ''))
-  let canSave = $derived(dirty && !!draft.Title && !!draft.Password && !totpError && customFieldsValid)
+  // null Value = withheld sensitive field (counts as valid — keep existing)
+  let customFieldsValid = $derived(customFields.every(cf => cf.Name.trim() !== '' && (cf.Value !== '' || cf.Value === null)))
+  let canSave = $derived(dirty && !!draft.Title && (!!draft.Password || passwordWasWithheld) && !totpError && customFieldsValid)
 
   function buildSaveDraft() {
     const d = { ...draft }
-    d.TwoFactorKey = totpSecret
-    d.TOTPLength   = String(totpDigits)
-    d.TOTPTimeStep = String(totpPeriod)
+    // Omit withheld sensitive fields that the user didn't change — keep existing vault values
+    if (passwordWasWithheld && !draft.Password) delete d.Password
+    if (notesWasWithheld    && !draft.Notes)    delete d.Notes
+    // Only update TOTP if the user changed it or is setting it for the first time
+    if (!totpWasConfigured || totpChanged) {
+      d.TwoFactorKey = totpSecret
+      d.TOTPLength   = String(totpDigits)
+      d.TOTPTimeStep = String(totpPeriod)
+    }
     d.CustomFields = customFields.slice()
     return d
   }
@@ -297,17 +341,18 @@
 
     <div class="field">
       <span class="field-label muted">Password</span>
-      <div class="input-wrap" class:warn={dirty && !draft.Password}>
+      <div class="input-wrap" class:warn={dirty && !draft.Password && !passwordWasWithheld}>
         <input
           class="input mono"
           type={showPw ? 'text' : 'password'}
           value={draft.Password}
+          placeholder={passwordWasWithheld && !draft.Password ? '••••••••••••' : ''}
           oninput={e => set('Password', e.target.value)}
         />
         <button class="icon-btn-flat" onclick={() => genOpen = true} aria-label="Open password generator">
           <Icon name="refresh" size={18}/>
         </button>
-        <button class="icon-btn-flat" onclick={() => showPw = !showPw} aria-label="Toggle visibility">
+        <button class="icon-btn-flat" onclick={revealOrTogglePassword} disabled={pwLoading} aria-label="Toggle visibility">
           <Icon name={showPw ? 'eye-off' : 'eye'} size={18}/>
         </button>
       </div>
@@ -342,7 +387,8 @@
           type={totpRevealed ? 'text' : 'password'}
           value={totpSecret}
           oninput={onTOTPInput}
-          placeholder="Base32 secret or otpauth:// URI"
+          onfocus={() => { totpFieldTouched = true }}
+          placeholder={totpWasConfigured && !totpSecret ? '••••••••••••' : 'Base32 secret or otpauth:// URI'}
           autocomplete="off"
           spellcheck="false"
         />
@@ -350,7 +396,14 @@
           aria-label="TOTP settings" class:active={totpGearOpen}>
           <Icon name="settings" size={18}/>
         </button>
-        <button class="icon-btn-flat" type="button" onclick={() => totpRevealed = !totpRevealed}
+        <button class="icon-btn-flat" type="button" onclick={() => {
+          if (totpWasConfigured && !totpLoadedSecret && !totpRevealed) {
+            // Load withheld TOTP secret on first reveal (returned as base32)
+            const val = getFieldValue(vaultUuid, record?.UUID, 'TwoFactorKey')
+            if (val) { totpSecret = val; totpLoadedSecret = val; totpFieldTouched = false }
+          }
+          totpRevealed = !totpRevealed
+        }}
           aria-label={totpRevealed ? 'Hide secret' : 'Reveal secret'}>
           <Icon name={totpRevealed ? 'eye-off' : 'eye'} size={18}/>
         </button>
@@ -397,17 +450,26 @@
           value={cf.Name}
           oninput={e => { customFields = customFields.map((f, j) => j === i ? { ...f, Name: e.target.value } : f) }}
         />
-        <div class="input-wrap custom-field-value" class:warn={!cf.Value.trim()}>
+        <div class="input-wrap custom-field-value" class:warn={cf.Value !== null && !cf.Value.trim()}>
           <input class="input"
             type={cf.Sensitive ? 'password' : 'text'}
-            placeholder="Value"
-            value={cf.Value}
+            placeholder={cf.Value === null && cf.Sensitive ? '••••••••••••' : 'Value'}
+            value={cf.Value ?? ''}
             oninput={e => { customFields = customFields.map((f, j) => j === i ? { ...f, Value: e.target.value } : f) }}
           />
           <button class="icon-btn-flat" type="button"
-            onclick={() => { customFields = customFields.map((f, j) => j === i ? { ...f, Sensitive: !f.Sensitive } : f) }}
+            onclick={() => {
+              if (cf.Sensitive && cf.Value === null) {
+                // Withheld sensitive → load value then mark not-sensitive
+                const val = getCustomFieldValue(vaultUuid, record?.UUID, cf.Name)
+                customFields = customFields.map((f, j) => j === i ? { ...f, Sensitive: false, Value: val ?? '' } : f)
+              } else {
+                // Toggle sensitive flag
+                customFields = customFields.map((f, j) => j === i ? { ...f, Sensitive: !f.Sensitive } : f)
+              }
+            }}
             aria-label={cf.Sensitive ? 'Show value' : 'Hide value'}>
-            <Icon name={cf.Sensitive ? 'eye-off' : 'eye'} size={18}/>
+            <Icon name={cf.Sensitive ? 'eye' : 'eye-off'} size={18}/>
           </button>
         </div>
         <button class="icon-btn-flat danger" type="button"
