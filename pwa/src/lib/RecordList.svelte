@@ -192,8 +192,9 @@
         openGroups = next
         saveGroupState(next)
       } else {
-        openGroups = {}
-        saveGroupState({})
+        const next = Object.fromEntries(allGroupNames.map(g => [g, true]))
+        openGroups = next
+        saveGroupState(next)
       }
     })
   })
