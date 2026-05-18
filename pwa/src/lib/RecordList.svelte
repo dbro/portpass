@@ -53,7 +53,8 @@
   $effect(() => {
     const s = $clipboardSession
     const ctx = $clipboardContext
-    if (!s || !ctx || ctx.token !== s.token || !ctx.uuid || !ctx.field || !ctx.hash) return
+    if (!s || !ctx || ctx.token !== s.token || !ctx.uuid || !ctx.field) return
+    if (!ctx.hash && ctx.field !== 'otp') return  // otp has no hash — others require it
     if (flashedToken === ctx.token) return
     ;(async () => {
       try {
@@ -61,6 +62,7 @@
         const rec = ctx.field === 'otp' ? null : getRecordData(ctxVaultUuid, ctx.uuid)
 
         const isSensitive = ctx.field === 'Password'
+          || ctx.field === 'otp'
           || (ctx.field.startsWith('custom-') && rec?.CustomFields?.[parseInt(ctx.field.slice(7))]?.Value === null)
 
         if (isSensitive) {
@@ -426,7 +428,7 @@
       : ''}
     onclick={() => handleClick(r.uuid, r.vaultUuid)}
     ondblclick={() => handleDblClick(r.uuid, r.vaultUuid)}
-    oncontextmenu={e => r.vaultUuid ? null : handleContextMenu(e, r.uuid)}
+    oncontextmenu={e => handleContextMenu(e, r.uuid)}
   >
     <div class="record-row-main">
       <span class="record-row-title">

@@ -81,11 +81,13 @@
   $effect(() => {
     const s = $clipboardSession
     const ctx = $clipboardContext
-    if (!s || !ctx || ctx.token !== s.token || ctx.uuid !== uuid || !ctx.field || !ctx.hash) return
+    if (!s || !ctx || ctx.token !== s.token || ctx.uuid !== uuid || !ctx.field) return
+    if (!ctx.hash && ctx.field !== 'otp') return  // otp has no hash — others require it
     if (copiedToken === ctx.token) return
     ;(async () => {
       let value
       const isSensitiveField = ctx.field === 'Password' || ctx.field === 'Notes'
+        || ctx.field === 'otp'
         || ctx.field.startsWith('history-')
         || (ctx.field.startsWith('custom-') && record.CustomFields?.[parseInt(ctx.field.slice(7))]?.Value === null)
 

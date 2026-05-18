@@ -406,17 +406,24 @@
     }
   }
 
+  function vaultUuidForRecord(uuid) {
+    if (get(dbItems).find(i => i.uuid === uuid)) return dbKey
+    for (const sv of get(secondaryVaults)) {
+      if (sv.items?.find(i => i.uuid === uuid)) return sv.uuid
+    }
+    return selectedVaultUuid || dbKey
+  }
+
   async function copyTOTPForUUID(uuid) {
     try {
-      const totp = getTOTP(dbKey, uuid)
-      await navigator.clipboard.writeText(totp.code)
+      const vaultUuid = vaultUuidForRecord(uuid)
+      wasmCopyTOTP(vaultUuid, uuid)
       if (clearTimer) { clearTimeout(clearTimer); clearTimer = null }
       clipHash = null
       const token = ++sessionSerial
-      const h = Array.from(await sha256(totp.code))
-      // Short session drives the visual flash only — no autoclear timer
+      // Short session drives the visual flash only — no autoclear timer for TOTP
       clipboardSession.set({ token, expiresAt: Date.now() + 500 })
-      clipboardContext.set({ token, field: 'otp', uuid, hash: h })
+      clipboardContext.set({ token, field: 'otp', uuid, hash: null })
       setTimeout(() => {
         if (get(clipboardSession)?.token === token) {
           clipboardSession.set(null)
@@ -429,7 +436,8 @@
   }
 
   async function copyTOTP() {
-    if (!record?.TwoFactorKey) return
+    // TwoFactorKey is null (withheld = configured) or undefined (not configured)
+    if (record?.TwoFactorKey === undefined) return
     await copyTOTPForUUID(selectedUUID)
   }
 
