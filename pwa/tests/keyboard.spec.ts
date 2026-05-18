@@ -28,15 +28,9 @@ test.describe('Keyboard shortcuts', () => {
 
   // ── New record ──────────────────────────────────────────────────────────────
 
-  test('Ctrl+= opens new record form', async ({ page }) => {
+  test('Ctrl+Space opens new record form', async ({ page }) => {
     await page.keyboard.press('ArrowDown') // move focus off search
-    await page.keyboard.press('Control+=')
-    await expect(page.getByPlaceholder('e.g. Bank of America')).toBeVisible()
-  })
-
-  test('Ctrl++ opens new record form', async ({ page }) => {
-    await page.keyboard.press('ArrowDown') // move focus off search
-    await page.keyboard.press('Control++')
+    await page.keyboard.press('Control+ ')
     await expect(page.getByPlaceholder('e.g. Bank of America')).toBeVisible()
   })
 
@@ -124,6 +118,12 @@ test.describe('Keyboard shortcuts', () => {
     await expect(page.getByPlaceholder('Search vault')).toHaveValue('')
   })
 
+  test('Escape blurs search when focused and empty', async ({ page }) => {
+    await expect(page.getByPlaceholder('Search vault')).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(page.getByPlaceholder('Search vault')).not.toBeFocused()
+  })
+
   test('Escape deselects selected record', async ({ page }) => {
     await page.locator('.record-row').first().click()
     await expect(page.locator('.record-title')).toBeVisible()
@@ -135,6 +135,7 @@ test.describe('Keyboard shortcuts', () => {
 
   test('? opens help modal', async ({ page }) => {
     await page.keyboard.press('ArrowDown') // move focus off search
+    await expect(page.locator('.record-title')).toBeVisible() // wait for selection to settle
     await page.keyboard.press('?')
     await expect(page.locator('.help-modal')).toBeVisible()
     await expect(page.locator('.help-modal')).toContainText('Keyboard shortcuts')
@@ -150,20 +151,18 @@ test.describe('Keyboard shortcuts', () => {
 
   // ── Collapse / expand groups ─────────────────────────────────────────────────
 
-  test('Ctrl+- collapses all groups', async ({ page }) => {
+  test('Ctrl+Up collapses all groups', async ({ page }) => {
     await page.keyboard.press('ArrowDown') // move focus off search
-    await page.keyboard.press('Control+-')
-    // All coll-group sections should now be closed (not have .is-open)
-    const openCount = await page.locator('.coll-group.is-open').count()
-    expect(openCount).toBe(0)
+    await page.keyboard.press('Control+ArrowUp')
+    await expect(page.locator('.coll-group.is-open')).toHaveCount(0)
   })
 
-  test('Ctrl+- expands all groups when all are collapsed', async ({ page }) => {
+  test('Ctrl+Down expands all groups', async ({ page }) => {
     await page.keyboard.press('ArrowDown')
-    await page.keyboard.press('Control+-') // collapse all
-    await page.keyboard.press('Control+-') // expand all (all were collapsed)
-    const openCount = await page.locator('.coll-group.is-open').count()
-    expect(openCount).toBeGreaterThan(0)
+    await page.keyboard.press('Control+ArrowUp') // collapse all first
+    await expect(page.locator('.coll-group.is-open')).toHaveCount(0)
+    await page.keyboard.press('Control+ArrowDown') // expand all
+    await expect(page.locator('.coll-group.is-open')).toHaveCount(3)
   })
 
   // ── Ctrl+E ───────────────────────────────────────────────────────────────────

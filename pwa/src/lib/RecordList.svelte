@@ -5,7 +5,7 @@
   import { searchRecords, getRecordData, getTOTP } from '../wasm.js'
   import Icon from './Icon.svelte'
 
-  let { selectedUUID = null, excludeUUID = null, query = '', primaryVaultName = '', collapseSeq = 0, ontap, oncopy, oncopytotp, storageKey = null } = $props()
+  let { selectedUUID = null, excludeUUID = null, query = '', primaryVaultName = '', collapseSeq = '', ontap, oncopy, oncopytotp, storageKey = null } = $props()
 
   function loadGroupState() {
     if (!storageKey) return {}
@@ -158,21 +158,41 @@
     ]
   })
 
+  // Auto-expand the group containing the newly-selected record (e.g. via arrow key navigation)
+  $effect(() => {
+    const uuid = selectedUUID
+    if (!uuid) return
+    const allItems = [
+      ...get(dbItems),
+      ...get(secondaryVaults).flatMap(sv => sv.items ?? [])
+    ]
+    const item = allItems.find(i => i.uuid === uuid)
+    if (!item) return
+    const group = item.group || 'Ungrouped'
+    untrack(() => {
+      if (openGroups[group] === false) {
+        const next = { ...openGroups, [group]: true }
+        openGroups = next
+        saveGroupState(next)
+      }
+    })
+  })
+
   let openVaults = $state({})
 
   $effect(() => {
-    if (collapseSeq === 0) return
+    if (!collapseSeq) return
     untrack(() => {
       const allGroupNames = [
         ...groups.map(g => g.group),
         ...(allVaultGroups?.flatMap(v => v.groups.map(g => g.group)) ?? [])
       ]
-      const allCollapsed = allGroupNames.length > 0 && allGroupNames.every(g => openGroups[g] === false)
-      if (allCollapsed) {
-        openGroups = {}
-        saveGroupState({})
-      } else {
+      if (collapseSeq === 'collapse') {
         const next = Object.fromEntries(allGroupNames.map(g => [g, false]))
+        openGroups = next
+        saveGroupState(next)
+      } else {
+        const next = Object.fromEntries(allGroupNames.map(g => [g, true]))
         openGroups = next
         saveGroupState(next)
       }

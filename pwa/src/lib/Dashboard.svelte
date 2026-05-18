@@ -522,21 +522,30 @@
 
   let searchInput = $state(null)
   let showHelp      = $state(false)
-  let collapseSeq   = $state(0)
+  let collapseSeq   = $state('')
 
-  // Flat ordered UUID list matching RecordList's sort, used for arrow navigation.
+  // Flat ordered {uuid, vaultUuid} list spanning all open vaults, matching RecordList's sort.
+  // vaultUuid is null for primary vault records (selectRecord defaults to dbKey).
   let flatList = $derived.by(() => {
-    let list = $dbItems
-    if (pendingDeleteUUID) list = list.filter(i => i.uuid !== pendingDeleteUUID)
-    if (query.trim()) {
-      const matched = new Set(searchRecords(dbKey, query, false))
-      list = list.filter(i => matched.has(i.uuid))
+    function sortedEntries(items, vaultUuid) {
+      let list = items
+      if (pendingDeleteUUID) list = list.filter(i => i.uuid !== pendingDeleteUUID)
+      if (query.trim()) {
+        try {
+          const matched = new Set(searchRecords(vaultUuid ?? dbKey, query, false))
+          list = list.filter(i => matched.has(i.uuid))
+        } catch {}
+      }
+      return [...list].sort((a, b) => {
+        const ga = a.group || 'Ungrouped', gb = b.group || 'Ungrouped'
+        const gc = ga.localeCompare(gb)
+        return gc !== 0 ? gc : a.title.localeCompare(b.title)
+      }).map(i => ({ uuid: i.uuid, vaultUuid }))
     }
-    return [...list].sort((a, b) => {
-      const ga = a.group || 'Ungrouped', gb = b.group || 'Ungrouped'
-      const gc = ga.localeCompare(gb)
-      return gc !== 0 ? gc : a.title.localeCompare(b.title)
-    }).map(i => i.uuid)
+    return [
+      ...sortedEntries($dbItems, null),
+      ...$secondaryVaults.flatMap(sv => sortedEntries(sv.items ?? [], sv.uuid)),
+    ]
   })
 
   async function copyRecordField(field) {
@@ -566,6 +575,7 @@
     if (e.key === 'Escape') {
       if (showHelp) { showHelp = false; return }
       if (inSearch && query) { query = ''; return }
+      if (inSearch) { searchInput?.blur(); return }
       if (sheetOpen) { sheetOpen = false; return }
       if (isEditing) { cancelEdit(); return }
       if (record) { record = null; selectedUUID = null; return }
@@ -584,34 +594,34 @@
     if (isEditing || sheetOpen) return
     if (inInput && !inSearch) return  // block shortcuts in edit form, but allow from search
 
-    if (e.key === 'ArrowDown') {
+    if (e.key === 'ArrowDown' && !e.ctrlKey) {
       e.preventDefault()
       if (inSearch) {
         const next = flatList[0]
-        if (next) { selectRecord(next); searchInput?.blur() }
+        if (next) { selectRecord(next.uuid, next.vaultUuid); searchInput?.blur() }
       } else {
-        const idx = flatList.indexOf(selectedUUID)
+        const idx = flatList.findIndex(i => i.uuid === selectedUUID)
         if (idx === flatList.length - 1) {
           record = null; selectedUUID = null; searchInput?.focus()
         } else {
           const next = idx === -1 ? flatList[0] : flatList[idx + 1]
-          if (next) selectRecord(next)
+          if (next) selectRecord(next.uuid, next.vaultUuid)
         }
       }
       return
     }
-    if (e.key === 'ArrowUp') {
+    if (e.key === 'ArrowUp' && !e.ctrlKey) {
       e.preventDefault()
       if (inSearch) {
         const prev = flatList[flatList.length - 1]
-        if (prev) { selectRecord(prev); searchInput?.blur() }
+        if (prev) { selectRecord(prev.uuid, prev.vaultUuid); searchInput?.blur() }
       } else {
-        const idx = flatList.indexOf(selectedUUID)
+        const idx = flatList.findIndex(i => i.uuid === selectedUUID)
         if (idx === 0) {
           record = null; selectedUUID = null; searchInput?.focus()
         } else {
           const prev = idx <= 0 ? flatList[flatList.length - 1] : flatList[idx - 1]
-          if (prev) selectRecord(prev)
+          if (prev) selectRecord(prev.uuid, prev.vaultUuid)
         }
       }
       return
@@ -620,8 +630,9 @@
     if (inSearch) return  // no other shortcuts while typing in search
 
     if (e.ctrlKey && e.key === 'l') { e.preventDefault(); lockAllVaults(); return }
-    if (e.ctrlKey && e.key === '-') { e.preventDefault(); collapseSeq++; return }
-    if (e.ctrlKey && (e.key === '+' || e.key === '=')) { e.preventDefault(); startNew(); return }
+    if (e.ctrlKey && e.key === 'ArrowUp') { e.preventDefault(); collapseSeq = 'collapse'; return }
+    if (e.ctrlKey && e.key === 'ArrowDown') { e.preventDefault(); collapseSeq = 'expand'; return }
+    if (e.ctrlKey && e.key === ' ') { e.preventDefault(); startNew(); return }
 
     if (!record) return
 
@@ -761,8 +772,9 @@
         <div class="help-row"><span>Copy email</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>E</kbd></div></div>
         <div class="help-row"><span>Copy custom field 1–9</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>1–9</kbd></div></div>
         <div class="help-row"><span>Edit entry</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>↵</kbd></div></div>
-        <div class="help-row"><span>New entry</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>+</kbd></div></div>
-        <div class="help-row"><span>Collapse / expand groups</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>−</kbd></div></div>
+        <div class="help-row"><span>New entry</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>Space</kbd></div></div>
+        <div class="help-row"><span>Collapse groups</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>↑</kbd></div></div>
+        <div class="help-row"><span>Expand groups</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>↓</kbd></div></div>
         <div class="help-row"><span>Lock all vaults</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>L</kbd></div></div>
       </div>
     </div>
