@@ -118,9 +118,6 @@ export function getTOTP(vaultUuid, recordUuid) {
     return parseOrThrow(window.getTOTP(vaultUuid, recordUuid, true))
 }
 
-export function getTOTPTiming(vaultUuid, recordUuid) {
-    return parseOrThrow(window.getTOTP(vaultUuid, recordUuid, false))
-}
 
 // Copies a standard field value directly to clipboard from WASM.
 // returnHash=true causes a SHA-256 hash of the value to be returned (for clipboard drain).

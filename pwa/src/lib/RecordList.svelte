@@ -2,7 +2,7 @@
   import { get } from 'svelte/store'
   import { tick, untrack } from 'svelte'
   import { selectedFile, dbItems, secondaryVaults, clipboardSession, clipboardContext } from '../store.js'
-  import { searchRecords, getRecordData, getTOTP } from '../wasm.js'
+  import { searchRecords, getRecordData } from '../wasm.js'
   import Icon from './Icon.svelte'
 
   let { selectedUUID = null, excludeUUID = null, query = '', primaryVaultName = '', collapseSeq = '', ontap, oncopy, oncopytotp, onwasmcopyfield = null, onwasmcopycustomfield = null, storageKey = null } = $props()
@@ -79,9 +79,7 @@
         }
 
         let value
-        if (ctx.field === 'otp') {
-          value = getTOTP(ctxVaultUuid, ctx.uuid)?.code
-        } else if (ctx.field.startsWith('custom-')) {
+        if (ctx.field.startsWith('custom-')) {
           const idx = parseInt(ctx.field.slice(7))
           value = rec.CustomFields?.[idx]?.Value
         } else {
