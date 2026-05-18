@@ -3,7 +3,7 @@
   import Icon from './Icon.svelte'
   import PasswordGenerator from './PasswordGenerator.svelte'
   import { generatePassword, loadOpts } from './passwordgen.js'
-  import { getAutocompleteSuggestion, getFieldValue } from '../wasm.js'
+  import { getAutocompleteSuggestion, getFieldValue, getCustomFieldValue } from '../wasm.js'
 
   // --- TOTP helpers ---
   const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
@@ -97,8 +97,8 @@
       e.target.value = parsed.secret
     }
   }
-  let showPw      = $state(false)
-  let pwLoading   = $state(false)
+  let showPw    = $state(false)
+  let pwLoading = $state(false)
 
   async function revealOrTogglePassword() {
     if (passwordWasWithheld && !draft.Password) {
@@ -445,14 +445,23 @@
         <div class="input-wrap custom-field-value" class:warn={cf.Value !== null && !cf.Value.trim()}>
           <input class="input"
             type={cf.Sensitive ? 'password' : 'text'}
-            placeholder={cf.Value === null ? '••••••••••••' : 'Value'}
+            placeholder={cf.Value === null && cf.Sensitive ? '••••••••••••' : 'Value'}
             value={cf.Value ?? ''}
             oninput={e => { customFields = customFields.map((f, j) => j === i ? { ...f, Value: e.target.value } : f) }}
           />
           <button class="icon-btn-flat" type="button"
-            onclick={() => { customFields = customFields.map((f, j) => j === i ? { ...f, Sensitive: !f.Sensitive } : f) }}
+            onclick={() => {
+              if (cf.Sensitive && cf.Value === null) {
+                // Withheld sensitive → load value then mark not-sensitive
+                const val = getCustomFieldValue(vaultUuid, record?.UUID, cf.Name)
+                customFields = customFields.map((f, j) => j === i ? { ...f, Sensitive: false, Value: val ?? '' } : f)
+              } else {
+                // Toggle sensitive flag
+                customFields = customFields.map((f, j) => j === i ? { ...f, Sensitive: !f.Sensitive } : f)
+              }
+            }}
             aria-label={cf.Sensitive ? 'Show value' : 'Hide value'}>
-            <Icon name={cf.Sensitive ? 'eye-off' : 'eye'} size={18}/>
+            <Icon name={cf.Sensitive ? 'eye' : 'eye-off'} size={18}/>
           </button>
         </div>
         <button class="icon-btn-flat danger" type="button"
