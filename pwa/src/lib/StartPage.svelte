@@ -11,7 +11,7 @@
   import { getRecentHandles, pushRecentHandle } from './recentHandles.js'
   import Icon from './Icon.svelte'
 
-  let { onopened, autoBiometric = true } = $props()
+  let { onopened, autoBiometric = true, isPopup = false } = $props()
 
   function focusOnMount(node, condition = true) {
     if (condition) setTimeout(() => node.focus(), 0)
@@ -263,7 +263,7 @@
       </div>
       <div class="unlock-vault">{fileHandle?.name ?? 'Vault'}</div>
       <div class="unlock-sub" class:muted={!busy} class:unlock-busy={busy}>
-        {busy ? 'Unlocking…' : 'Vault is locked'}
+        {busy ? 'Unlocking…' : isPopup ? 'Unlock to use Autofill' : 'Vault is locked'}
       </div>
 
       {#if busy}

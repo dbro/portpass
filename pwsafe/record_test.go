@@ -2,6 +2,7 @@ package pwsafe
 
 import (
 	"encoding/binary"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -118,9 +119,54 @@ func TestRecord_OwnSymbolsForPassword(t *testing.T) {
 	t.Run("UTF-8 Symbols", func(t *testing.T) {
 		r := &Record{}
 		symbols := "§±¿×÷"
-		
+
 		err := r.setField(recordOwnSymbolsForPassword, []byte(symbols))
 		assert.NoError(t, err)
 		assert.Equal(t, symbols, r.OwnSymbolsForPassword)
+	})
+}
+
+func TestRecord_Autotype(t *testing.T) {
+	t.Run("setField stores autotype string", func(t *testing.T) {
+		r := &Record{}
+		err := r.setField(recordAutotype, []byte(`\u\t\p\n`))
+		assert.NoError(t, err)
+		assert.Equal(t, `\u\t\p\n`, r.Autotype)
+	})
+
+	t.Run("empty autotype marshals without error", func(t *testing.T) {
+		r := Record{Title: "Test", Password: "pass", Autotype: ""}
+		_, _, err := r.marshal()
+		assert.NoError(t, err)
+	})
+
+	t.Run("autotype survives vault file write-read cycle", func(t *testing.T) {
+		db := NewV3("test", "password")
+		rec := Record{Title: "Site", Password: "pass", Autotype: `\u\t\p\n`}
+		uuid := db.SetRecord(rec)
+
+		savePath := "./test_dbs/autotype_test.dat"
+		err := WritePWSafeFile(db, savePath)
+		defer os.Remove(savePath)
+		assert.NoError(t, err)
+
+		loaded, err := OpenPWSafeFile(savePath, "password")
+		assert.NoError(t, err)
+		assert.Equal(t, `\u\t\p\n`, loaded.Records[uuid].Autotype)
+	})
+
+	t.Run("record equality checks autotype field", func(t *testing.T) {
+		r1 := Record{Title: "Test", Autotype: `\u\t\p\n`}
+		r2 := Record{Title: "Test", Autotype: `\u\t\p\n`}
+		r3 := Record{Title: "Test", Autotype: `\u\p`}
+
+		equal, err := recordEqual(r1, r2)
+		assert.NoError(t, err)
+		assert.True(t, equal)
+
+		equal, err = recordEqual(r1, r3)
+		assert.False(t, equal)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "Autotype")
 	})
 }

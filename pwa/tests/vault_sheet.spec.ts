@@ -105,6 +105,69 @@ test.describe('VaultSheet per-vault editing', () => {
 
 })
 
+test.describe('VaultSheet autofill installation UI', () => {
+
+  test('AUTOFILL section is visible on main settings page', async ({ page }) => {
+    await openVault(page)
+    await page.locator('.vault-pill').click()
+    await expect(page.locator('.vault-section-title', { hasText: 'AUTOFILL' })).toBeVisible()
+  })
+
+  test('bookmarklet chip has a javascript: href', async ({ page }) => {
+    await openVault(page)
+    await page.locator('.vault-pill').click()
+    const chip = page.locator('.vs-bookmarklet-chip')
+    await expect(chip).toBeVisible()
+    const href = await chip.getAttribute('href')
+    expect(href).toMatch(/^javascript:/)
+  })
+
+  test('bookmarklet href contains the Portpass origin', async ({ page }) => {
+    await openVault(page)
+    await page.locator('.vault-pill').click()
+    const href = await page.locator('.vs-bookmarklet-chip').getAttribute('href')
+    // The URL is encodeURIComponent'd inside the javascript: href; decode before asserting.
+    expect(decodeURIComponent(href ?? '')).toContain('localhost:5173')
+  })
+
+  test('clicking the chip does not navigate away', async ({ page }) => {
+    await openVault(page)
+    await page.locator('.vault-pill').click()
+    await page.locator('.vs-bookmarklet-chip').click()
+    // Still on the vault sheet — settings section still visible
+    await expect(page.locator('.vault-section-title', { hasText: 'AUTOFILL' })).toBeVisible()
+  })
+
+  test('Copy link button copies the javascript: URL to clipboard', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    await openVault(page)
+    await page.locator('.vault-pill').click()
+    await page.locator('.vs-copy-btn').click()
+    // Button shows "Copied!" feedback
+    await expect(page.locator('.vs-copy-btn')).toHaveText('Copied!')
+    // Clipboard contains a javascript: URL
+    const text = await page.evaluate(() => navigator.clipboard.readText())
+    expect(text).toMatch(/^javascript:/)
+  })
+
+  test('Copy link button reverts to "Copy link" after 2 seconds', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    await openVault(page)
+    await page.locator('.vault-pill').click()
+    await page.locator('.vs-copy-btn').click()
+    await expect(page.locator('.vs-copy-btn')).toHaveText('Copied!')
+    await expect(page.locator('.vs-copy-btn')).toHaveText('Copy link', { timeout: 3000 })
+  })
+
+  test('bookmarklet is not visible on per-vault detail page', async ({ page }) => {
+    await openVault(page)
+    await page.locator('.vault-pill').click()
+    await page.locator('.vault-card').first().click()
+    await expect(page.locator('.vs-bookmarklet-chip')).not.toBeVisible()
+  })
+
+})
+
 test.describe('VaultSheet read-only vault', () => {
 
   test('read-only notice shown in per-vault detail for read-only secondary', async ({ page }) => {

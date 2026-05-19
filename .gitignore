@@ -8,6 +8,9 @@ test-results/
 design-wip/
 CLAUDE.md
 AUTOFILL.md
+AUTOFILL-RESEARCH.md
+AUTOCOPY.md
 LAZYSENSITIVE.md
 SUGGESTIONS.md
 .claude/
+/wasm

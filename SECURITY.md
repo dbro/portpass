@@ -56,6 +56,8 @@ Extensions are installed per-profile. A profile with no extensions has no extens
 
 **Workflow:** Alt-tab to the Portpass window when you need a password, copy it, and paste it in your main browser. The 30-second clipboard autoclear limits the window during which a compromised extension could read it.
 
+**Autofill and the dedicated profile.** The Autofill bookmarklet feature requires Portpass to run in the same browser profile as the pages you are filling — making the dedicated clean-profile approach above incompatible with Autofill. This is a deliberate opt-in tradeoff: you gain the convenience of autofill at the cost of exposing Portpass to any extensions installed in your main profile. Users who want the strongest extension isolation should continue using Portpass in a clean profile with manual copy and paste.
+
 ---
 
 ## Vault file security
@@ -89,11 +91,23 @@ When secondary vaults are linked to a primary vault, their master passwords are 
 
 Portpass automatically clears the clipboard 30 seconds after you copy a password, reducing the window during which it can be read by another app.
 
+### Clipboard sniffing is a universal risk for password managers
+
+Any password manager that uses the clipboard to transfer passwords — including native apps such as 1Password and Bitwarden — shares this exposure. A browser extension with `clipboardRead` permission can call `navigator.clipboard.readText()` at any time and capture whatever is currently in the clipboard, regardless of which app placed it there. This applies equally to passwords copied from Portpass, from a native password manager, or typed by hand and then cut.
+
+Portpass's 30-second autoclear and the Autocopy bookmarklet's immediate post-paste clear both reduce the exposure window, but neither can prevent an actively polling adversary from reading the clipboard before the clear fires.
+
+**Checking which extensions have clipboard access.** In Chrome, open `chrome://extensions/` → Details → Permissions for each extension individually. In Firefox, go to `about:addons` → click the extension → Permissions tab. Neither browser provides a consolidated view; you must check each extension one by one. Any extension you do not recognise and trust that lists clipboard read access should be treated as a risk.
+
 ### Platform differences
 
 Clipboard access is restricted at the OS level on **iOS, Android, and Linux (Wayland)**. On these platforms, only the foreground app can read the clipboard, so copied passwords are well-protected from background processes.
 
 **macOS** restricts clipboard access for non-browser apps, but browser extensions running in the same profile can still read it. Use a dedicated browser profile with no extensions (see above).
+
+### The better answer: passkeys
+
+Passkeys (WebAuthn) eliminate the clipboard and extension risks entirely — there is no password to copy, intercept, or sniff. Authentication is a cryptographic challenge/response that never leaves your device. If a site you use offers passkey login, using it is the strongest choice available. Portpass is for sites that still require a password; for everything else, prefer your platform's passkey manager (iCloud Keychain, Google Password Manager, Windows Hello, etc.).
 
 **Windows and Linux (X11)** have no OS-level clipboard isolation which means any running process can read the clipboard at any time. Users on these platforms should be especially careful to use the dedicated browser profile mitigation, and be aware that other apps may be able to read a copied password before the clipboard gets cleared.
 

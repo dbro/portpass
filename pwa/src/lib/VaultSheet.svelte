@@ -4,6 +4,7 @@
   import { getDatabaseInfo, openDatabase, updateDBFields } from '../wasm.js'
   import { selectedFile, dbItems, secondaryVaults } from '../store.js'
   import { isBiometricSupported, isBiometricEnrolled, enrollBiometric, clearBiometric } from './biometric.js'
+  import { makeBookmarkletUrl } from './bookmarklet.js'
   import Icon from './Icon.svelte'
 
   let { isDesktop, onback, onlock, onlockall, onlocksecondary, onunlockadditional, ondbsave, ondirtychange, theme, accent, ontheme, onaccent } = $props()
@@ -147,6 +148,19 @@
     selectedDetailVault = null
   }
 
+  // ── Autofill bookmarklet ────────────────────────────────────────────────────
+  const bookmarkletUrl = makeBookmarkletUrl(window.location.origin + import.meta.env.BASE_URL)
+  let copied = $state(false)
+  let copyTimer = null
+
+  function copyBookmarklet() {
+    navigator.clipboard.writeText(bookmarkletUrl).then(() => {
+      copied = true
+      clearTimeout(copyTimer)
+      copyTimer = setTimeout(() => { copied = false }, 2000)
+    })
+  }
+
   // ── Helpers ────────────────────────────────────────────────────────────────
   const appVersion = (__APP_VERSION__.match(/^v?\d+\.\d+\.\d+/) ?? [__APP_VERSION__])[0]
 
@@ -278,6 +292,34 @@
         <Icon name="lock" size={16}/> {secondaryCount > 0 ? 'Lock all vaults' : 'Lock vault'}
       </button>
     </div>
+  </div>
+
+  <!-- Autofill -->
+  <div class="vault-section">
+    <div class="vault-section-title">AUTOFILL</div>
+    <p class="vs-autofill-help muted">
+      Open a password, switch to the login page, then click the bookmark.
+    </p>
+    <div class="vs-bookmarklet-row">
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <a
+        class="vs-bookmarklet-chip"
+        href={bookmarkletUrl}
+        draggable="true"
+        onclick={e => e.preventDefault()}
+        title="Drag to your bookmarks bar"
+        aria-label="Portpass Autofill bookmarklet — drag to your bookmarks bar"
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
+          <path d="M5 4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v18l-7-3-7 3V4z"/>
+        </svg>
+        Portpass Autofill
+      </a>
+      <button class="vs-copy-btn" onclick={copyBookmarklet}>
+        {copied ? 'Copied!' : 'Copy link'}
+      </button>
+    </div>
+    <p class="vs-bookmarklet-hint muted">Drag to bookmarks bar · Copy if bar is hidden</p>
   </div>
 
   <!-- Appearance -->
@@ -876,4 +918,60 @@
   }
 
   .about-url:hover { color: var(--accent); }
+
+  /* ── Autofill bookmarklet ────────────────────────────────────────────────── */
+  .vs-autofill-help {
+    font-size: 14px;
+    margin: 0 0 14px;
+    line-height: 1.5;
+  }
+
+  .vs-bookmarklet-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .vs-bookmarklet-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    background: var(--surface-2);
+    border: 1.5px dashed var(--border-strong);
+    border-radius: var(--r-pill);
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text);
+    text-decoration: none;
+    cursor: grab;
+    user-select: none;
+    transition: border-color 0.15s, background 0.15s;
+  }
+
+  .vs-bookmarklet-chip:hover {
+    border-color: var(--accent);
+    background: var(--surface);
+    color: var(--accent);
+  }
+
+  .vs-bookmarklet-chip:active { cursor: grabbing; }
+
+  .vs-copy-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--accent);
+    padding: 4px 2px;
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+  .vs-copy-btn:hover { text-decoration: underline; }
+
+  .vs-bookmarklet-hint {
+    font-size: 12px;
+    margin: 8px 0 0;
+  }
 </style>

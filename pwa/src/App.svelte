@@ -10,6 +10,7 @@
   let view = $state('start') // 'start' | 'dashboard'
   let hasBeenUnlocked = $state(false)
   let multipleInstances = $state(false)
+  let isPopup = $state(false)
 
   let theme  = $state(localStorage.getItem('theme')  || 'dark')
   let accent = $state(localStorage.getItem('accent') || 'amber')
@@ -17,6 +18,23 @@
 
   $effect(() => { localStorage.setItem('theme',  theme)  })
   $effect(() => { localStorage.setItem('accent', accent) })
+
+  // Respond to autofill queries when vault is locked (Dashboard handles unlocked case).
+  $effect(() => {
+    if (!isPopup) return
+    function handleLockedQuery(event) {
+      if (view !== 'start') return
+      const t = event.data?.type
+      if (t !== 'query' && t !== 'hello') return
+      if (!event.source) return
+      event.source.postMessage(
+        { type: 'error', message: 'Vault is locked — unlock Portpass first' },
+        event.origin
+      )
+    }
+    window.addEventListener('message', handleLockedQuery)
+    return () => window.removeEventListener('message', handleLockedQuery)
+  })
 
   const THEME_COLORS = {
     light: { bg: '#f6f3ee', text: '#1c1f24' },
@@ -49,6 +67,11 @@
   })
 
   onMount(async () => {
+    isPopup = window.opener !== null
+    // Give this window a stable name so the bookmarklet's window.open() can find and
+    // focus the existing tab instead of always opening a new one.
+    if (!isPopup) window.name = 'portpass_autofill'
+
     const mq = window.matchMedia('(min-width: 768px)')
     isDesktop = mq.matches
     mq.addEventListener('change', e => { isDesktop = e.matches })
@@ -86,9 +109,10 @@
       Loading…
     </div>
   {:else if view === 'start'}
-    <StartPage autoBiometric={!hasBeenUnlocked} onopened={() => { hasBeenUnlocked = true; view = 'dashboard' }} />
+    <StartPage {isPopup} autoBiometric={!hasBeenUnlocked} onopened={() => { hasBeenUnlocked = true; view = 'dashboard' }} />
   {:else}
     <Dashboard
+      {isPopup}
       onclosed={() => view = 'start'}
       {theme}
       {accent}
@@ -97,7 +121,7 @@
       onaccent={a => accent = a}
     />
   {/if}
-  {#if multipleInstances}
+  {#if multipleInstances && !isPopup}
     <div class="multi-instance-warning">
       Portpass is already open in another tab — saving from both may cause conflicts.
     </div>

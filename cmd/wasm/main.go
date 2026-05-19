@@ -128,6 +128,7 @@ type recordView struct {
 	Username        string            `json:"Username"`
 	URL             string            `json:"URL"`
 	Email           string            `json:"Email"`
+	Autotype        string            `json:"Autotype"`
 	ModTime         string            `json:"ModTime"`
 	Password        *string           `json:"Password"`
 	Notes           *string           `json:"Notes"`
@@ -185,6 +186,7 @@ func recordToView(rec pwsafe.Record) recordView {
 		Username:        rec.Username,
 		URL:             rec.URL,
 		Email:           rec.Email,
+		Autotype:        rec.Autotype,
 		ModTime:         mt,
 		Password:        sensitiveString(rec.Password),
 		Notes:           sensitiveString(rec.Notes),
@@ -306,6 +308,8 @@ func updateRecordFields(this js.Value, args []js.Value) interface{} {
 			rec.Email = value
 		case "Notes":
 			rec.Notes = value
+		case "Autotype":
+			rec.Autotype = value
 		case "TwoFactorKey":
 			if value == "" {
 				rec.TwoFactorKey = nil

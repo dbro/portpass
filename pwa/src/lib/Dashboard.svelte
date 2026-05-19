@@ -7,6 +7,7 @@
     updateRecordFields, updateDBFields, deleteRecord as wasmDeleteRecord,
     searchRecords, closeDatabase, loadVaultFile,
     copyFieldToClipboard, copyCustomFieldToClipboard, copyTOTP as wasmCopyTOTP,
+    getFieldValue,
   } from '../wasm.js'
   import { addSecondaryCredential, removeSecondaryCredential } from './secondaryVaults.js'
   import { isBiometricEnrolledForFile, unlockWithBiometric } from './biometric.js'
@@ -16,7 +17,7 @@
   import RecordEdit from './RecordEdit.svelte'
   import VaultSheet from './VaultSheet.svelte'
 
-  let { onclosed, theme, accent, isDesktop, ontheme, onaccent } = $props()
+  let { onclosed, isPopup = false, theme, accent, isDesktop, ontheme, onaccent } = $props()
 
   function focusOnMount(node) {
     setTimeout(() => node.focus(), 0)
@@ -85,6 +86,113 @@
   function showToast(message, action, duration = 4000) {
     toast.set({ message, action, duration })
   }
+
+  // Autofill postMessage handler — ECDH key exchange then encrypted query response.
+  function autofillValidateSequence(seq) {
+    if (!seq) return ''
+    let i = 0
+    while (i < seq.length) {
+      if (seq[i] !== '\\') return `Unexpected character at position ${i + 1}`
+      if (i + 1 >= seq.length) return 'Sequence ends with \\'
+      const code = seq[i + 1]
+      if (!['u', 'p', 't', 'n'].includes(code)) return `Unknown code: \\${code}`
+      i += 2
+    }
+    return ''
+  }
+
+  $effect(() => {
+    if (!isPopup) return
+
+    let sessionKey = null  // AES-256-GCM key derived from ECDH; null until hello exchange
+    let helloInProgress = false  // guard against duplicate hellos overwriting the session key
+
+    async function handleMessage(event) {
+      if (!event.source) return
+      const msg = event.data
+      if (!msg?.type) return
+
+      if (msg.type === 'hello') {
+        // Ignore a second hello while we're still processing the first one.
+        // Without this guard, a retry from the bookmarklet could overwrite sessionKey
+        // after the bookmarklet has already derived its key from the first response.
+        if (helloInProgress) return
+        helloInProgress = true
+        try {
+          const openerPub = await crypto.subtle.importKey(
+            'jwk', msg.pubkey,
+            { name: 'ECDH', namedCurve: 'P-256' }, false, []
+          )
+          const pair = await crypto.subtle.generateKey(
+            { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey']
+          )
+          sessionKey = await crypto.subtle.deriveKey(
+            { name: 'ECDH', public: openerPub },
+            pair.privateKey,
+            { name: 'AES-GCM', length: 256 }, false, ['encrypt']
+          )
+          const pubJwk = await crypto.subtle.exportKey('jwk', pair.publicKey)
+          event.source.postMessage({ type: 'hello', pubkey: pubJwk }, event.origin)
+        } catch {
+          sessionKey = null
+          event.source.postMessage({ type: 'error', message: 'Key exchange failed' }, event.origin)
+        } finally {
+          helloInProgress = false
+        }
+        return
+      }
+
+      if (msg.type === 'query') {
+        if (!sessionKey) {
+          event.source.postMessage(
+            { type: 'error', message: 'No secure session — click the bookmarklet again' },
+            event.origin
+          )
+          return
+        }
+
+        if (!selectedUUID) {
+          event.source.postMessage(
+            { type: 'error', message: 'Open a record in Portpass first' },
+            event.origin
+          )
+          return
+        }
+
+        // Fall back to the standard sequence when the record has no custom autotype.
+        const autotype = record?.Autotype || '\\u\\t\\p\\n'
+
+        const parseErr = autofillValidateSequence(autotype)
+        if (parseErr) {
+          event.source.postMessage(
+            { type: 'error', message: `Could not parse autofill sequence: ${autotype}` },
+            event.origin
+          )
+          return
+        }
+
+        const vaultUuid = selectedVaultUuid || dbKey
+        const fields = {}
+        if (autotype.includes('\\u')) fields.u = record.Username ?? ''
+        if (autotype.includes('\\p')) fields.p = getFieldValue(vaultUuid, selectedUUID, 'Password') ?? ''
+
+        const iv = crypto.getRandomValues(new Uint8Array(12))
+        const plaintext = new TextEncoder().encode(JSON.stringify(fields))
+        const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, sessionKey, plaintext)
+
+        event.source.postMessage({
+          type: 'record',
+          title: record.Title,
+          autotype,
+          iv: btoa(String.fromCharCode(...iv)),
+          ciphertext: btoa(String.fromCharCode(...new Uint8Array(ciphertext))),
+        }, event.origin)
+      }
+    }
+
+    window.addEventListener('message', handleMessage)
+    return () => { window.removeEventListener('message', handleMessage); sessionKey = null }
+  })
 
   // Load a record by UUID. vaultUuid is null for primary vault records.
   function selectRecord(uuid, vaultUuid = null) {

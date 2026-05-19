@@ -142,7 +142,7 @@
     }
   }
 
-  // Copy a sensitive standard field via WASM (value never enters JS)
+  // Copy a sensitive standard field: WASM reads from vault and writes directly to clipboard
   async function handleWasmCopy(fieldname) {
     const { token, hashBytes } = await onwasmcopyfield(vaultUuid, uuid, fieldname)
     if (token !== null) {
@@ -468,6 +468,13 @@
     </div>
   {/if}
 
+  {#if record.Autotype}
+    <div class="record-autotype">
+      <div class="copy-row-label muted">Autofill sequence</div>
+      <div class="autotype-value mono">{record.Autotype}</div>
+    </div>
+  {/if}
+
   {#if record.ModTime && new Date(record.ModTime).getTime() > 0}
     <div class="record-meta muted">Modified {relTime(record.ModTime)}</div>
   {/if}
@@ -539,5 +546,15 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .record-autotype {
+    padding: 12px 0 4px;
+  }
+
+  .autotype-value {
+    font-size: 14px;
+    color: var(--text-soft);
+    padding: 2px 0;
   }
 </style>

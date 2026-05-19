@@ -62,10 +62,10 @@
 
   // Destructure once — null sensitive values start as '' in the edit form
   const initRec = untrack(() => record ?? {})
-  const { Title = '', Group = '', Username = '', URL = '', Email = '' } = initRec
+  const { Title = '', Group = '', Username = '', URL = '', Email = '', Autotype = '' } = initRec
   const Password = initRec.Password ?? ''
   const Notes    = initRec.Notes    ?? ''
-  let draft = $state({ Title, Group, Username, Password, URL, Email, Notes })
+  let draft = $state({ Title, Group, Username, Password, URL, Email, Notes, Autotype })
 
   // TOTP state — kept separate from draft; merged into save call
   let totpSecret   = $state(untrack(() => base64ToBase32(record?.TwoFactorKey ?? '')))
@@ -172,7 +172,7 @@
   let dirty   = $derived(!record || Object.keys(draft).some(k => (record[k] ?? '') !== draft[k]) || totpChanged || customFieldsDirty)
   // null Value = withheld sensitive field (counts as valid — keep existing)
   let customFieldsValid = $derived(customFields.every(cf => cf.Name.trim() !== '' && (cf.Value !== '' || cf.Value === null)))
-  let canSave = $derived(dirty && !!draft.Title && (!!draft.Password || passwordWasWithheld) && !totpError && customFieldsValid)
+  let canSave = $derived(dirty && !!draft.Title && (!!draft.Password || passwordWasWithheld) && !totpError && customFieldsValid && !autotypeError)
 
   function buildSaveDraft() {
     const d = { ...draft }
@@ -250,6 +250,21 @@
     set('Password', pw)
     genOpen = false
   }
+
+  function validateAutotype(seq) {
+    if (!seq) return ''
+    let i = 0
+    while (i < seq.length) {
+      if (seq[i] !== '\\') return `Unexpected character at position ${i + 1}`
+      if (i + 1 >= seq.length) return 'Sequence ends with \\'
+      const code = seq[i + 1]
+      if (!['u', 'p', 't', 'n'].includes(code)) return `Unknown code: \\${code}`
+      i += 2
+    }
+    return ''
+  }
+
+  let autotypeError = $derived(validateAutotype(draft.Autotype))
 </script>
 
 {#if genOpen}
@@ -493,6 +508,21 @@
         oninput={e => set('Notes', e.target.value)}></textarea>
     </label>
 
+    <div class="field">
+      <span class="field-label muted">Autofill sequence</span>
+      <input class="input mono autotype-input" value={draft.Autotype}
+        placeholder="\u\t\p\n"
+        oninput={e => set('Autotype', e.target.value)}
+        autocomplete="off" spellcheck="false"/>
+      {#if autotypeError}
+        <div class="autotype-error">{autotypeError}</div>
+      {:else if draft.Autotype}
+        <div class="autotype-hint muted">\u = username · \p = password · \t = Tab · \n = Enter</div>
+      {:else}
+        <div class="autotype-hint muted">Leave blank to use default: \u\t\p\n</div>
+      {/if}
+    </div>
+
     {#if !isNew && ondelete}
       <div class="delete-row">
         <button class="btn-delete" onclick={ondelete}>
@@ -688,4 +718,17 @@
     opacity: 0.75;
   }
   .btn-delete:hover { opacity: 1; }
+
+  .autotype-error {
+    font-size: 12px;
+    color: var(--danger);
+    margin-top: 4px;
+    padding: 0 2px;
+  }
+
+  .autotype-hint {
+    font-size: 12px;
+    margin-top: 4px;
+    padding: 0 2px;
+  }
 </style>
