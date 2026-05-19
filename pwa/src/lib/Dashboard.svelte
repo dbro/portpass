@@ -194,6 +194,93 @@
     return () => { window.removeEventListener('message', handleMessage); sessionKey = null }
   })
 
+  // BroadcastChannel relay — lets a relay popup (opened by the bookmarklet) reach this
+  // unlocked tab across browsing-context-group boundaries. Only the main (non-popup) tab
+  // acts as relay source so the popup's own dashboard (when unlocked directly) is unaffected.
+  $effect(() => {
+    if (isPopup) return
+
+    const ch = new BroadcastChannel('portpass-autofill')
+    let relaySessionKey = null
+    let relayHelloInProgress = false
+
+    ch.onmessage = async event => {
+      const msg = event.data
+      if (!msg?.type) return
+
+      if (msg.type === 'relay-ping') {
+        ch.postMessage({ type: 'relay-pong', nonce: msg.nonce })
+        return
+      }
+
+      if (msg.type === 'relay-hello') {
+        if (relayHelloInProgress) return
+        relayHelloInProgress = true
+        try {
+          const openerPub = await crypto.subtle.importKey(
+            'jwk', msg.pubkey, { name: 'ECDH', namedCurve: 'P-256' }, false, []
+          )
+          const pair = await crypto.subtle.generateKey(
+            { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey']
+          )
+          relaySessionKey = await crypto.subtle.deriveKey(
+            { name: 'ECDH', public: openerPub }, pair.privateKey,
+            { name: 'AES-GCM', length: 256 }, false, ['encrypt']
+          )
+          const pubJwk = await crypto.subtle.exportKey('jwk', pair.publicKey)
+          ch.postMessage({ type: 'relay-hello-response', pubkey: pubJwk, nonce: msg.nonce })
+        } catch {
+          relaySessionKey = null
+          ch.postMessage({ type: 'relay-error', message: 'Key exchange failed', nonce: msg.nonce })
+        } finally {
+          relayHelloInProgress = false
+        }
+        return
+      }
+
+      if (msg.type === 'relay-query') {
+        if (!relaySessionKey) {
+          ch.postMessage({ type: 'relay-error', message: 'No secure session — click the bookmarklet again', nonce: msg.nonce })
+          return
+        }
+        if (!selectedUUID) {
+          ch.postMessage({ type: 'relay-error', message: 'Open a record in Portpass first', nonce: msg.nonce })
+          return
+        }
+
+        const autotype = record?.Autotype || '\\u\\t\\p\\n'
+        const parseErr = autofillValidateSequence(autotype)
+        if (parseErr) {
+          ch.postMessage({ type: 'relay-error', message: `Could not parse autofill sequence: ${autotype}`, nonce: msg.nonce })
+          return
+        }
+
+        const vaultUuid = selectedVaultUuid || dbKey
+        const fields = {}
+        if (autotype.includes('\\u')) fields.u = record.Username ?? ''
+        if (autotype.includes('\\p')) fields.p = getFieldValue(vaultUuid, selectedUUID, 'Password') ?? ''
+
+        try {
+          const iv = crypto.getRandomValues(new Uint8Array(12))
+          const plaintext = new TextEncoder().encode(JSON.stringify(fields))
+          const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, relaySessionKey, plaintext)
+          ch.postMessage({
+            type: 'relay-record',
+            title: record.Title,
+            autotype,
+            iv: btoa(String.fromCharCode(...iv)),
+            ciphertext: btoa(String.fromCharCode(...new Uint8Array(ciphertext))),
+            nonce: msg.nonce,
+          })
+        } catch {
+          ch.postMessage({ type: 'relay-error', message: 'Encryption failed', nonce: msg.nonce })
+        }
+      }
+    }
+
+    return () => ch.close()
+  })
+
   // Load a record by UUID. vaultUuid is null for primary vault records.
   function selectRecord(uuid, vaultUuid = null) {
     if (isEditing && editDirty) {

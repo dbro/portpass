@@ -11,6 +11,7 @@
   let hasBeenUnlocked = $state(false)
   let multipleInstances = $state(false)
   let isPopup = $state(false)
+  let relayMode = $state(false)
 
   let theme  = $state(localStorage.getItem('theme')  || 'dark')
   let accent = $state(localStorage.getItem('accent') || 'amber')
@@ -20,8 +21,9 @@
   $effect(() => { localStorage.setItem('accent', accent) })
 
   // Respond to autofill queries when vault is locked (Dashboard handles unlocked case).
+  // Suppressed in relay mode — the relay bridge handles all messaging instead.
   $effect(() => {
-    if (!isPopup) return
+    if (!isPopup || relayMode) return
     function handleLockedQuery(event) {
       if (view !== 'start') return
       const t = event.data?.type
@@ -66,6 +68,63 @@
       .catch(() => {})
   })
 
+  // Ping an already-open unlocked Portpass tab via BroadcastChannel.
+  // Returns true and sets up a relay bridge if found; false otherwise.
+  async function tryRelay() {
+    const nonce = crypto.randomUUID()
+    const ch = new BroadcastChannel('portpass-autofill')
+
+    const found = await new Promise(resolve => {
+      const t = setTimeout(() => { ch.close(); resolve(false) }, 300)
+      ch.onmessage = e => {
+        if (e.data?.type === 'relay-pong' && e.data?.nonce === nonce) {
+          clearTimeout(t)
+          resolve(true)
+        }
+      }
+      ch.postMessage({ type: 'relay-ping', nonce })
+    })
+
+    if (!found) return false
+
+    let bookmarkletSource = null
+    let bookmarkletOrigin = null
+    let relayNonce = null
+
+    window.addEventListener('message', event => {
+      if (!event.source) return
+      const msg = event.data
+      if (!msg?.type) return
+      if (msg.type === 'hello') {
+        bookmarkletSource = event.source
+        bookmarkletOrigin = event.origin
+        relayNonce = crypto.randomUUID()
+        ch.postMessage({ type: 'relay-hello', pubkey: msg.pubkey, nonce: relayNonce })
+      } else if (msg.type === 'query' && relayNonce) {
+        ch.postMessage({ type: 'relay-query', nonce: relayNonce })
+      }
+    })
+
+    ch.onmessage = e => {
+      const msg = e.data
+      if (!bookmarkletSource || msg?.nonce !== relayNonce) return
+      if (msg.type === 'relay-hello-response') {
+        bookmarkletSource.postMessage({ type: 'hello', pubkey: msg.pubkey }, bookmarkletOrigin)
+      } else if (msg.type === 'relay-record') {
+        bookmarkletSource.postMessage({
+          type: 'record', title: msg.title, autotype: msg.autotype,
+          iv: msg.iv, ciphertext: msg.ciphertext,
+        }, bookmarkletOrigin)
+        setTimeout(() => window.close(), 100)
+      } else if (msg.type === 'relay-error') {
+        bookmarkletSource.postMessage({ type: 'error', message: msg.message }, bookmarkletOrigin)
+        setTimeout(() => window.close(), 100)
+      }
+    }
+
+    return true
+  }
+
   onMount(async () => {
     isPopup = window.opener !== null
     // Give this window a stable name so the bookmarklet's window.open() can find and
@@ -75,6 +134,13 @@
     const mq = window.matchMedia('(min-width: 768px)')
     isDesktop = mq.matches
     mq.addEventListener('change', e => { isDesktop = e.matches })
+
+    // In popup mode, try to relay through an already-open unlocked Portpass tab.
+    // If relay succeeds, skip WASM loading — the popup is just a bridge.
+    if (isPopup) {
+      const relayed = await tryRelay()
+      if (relayed) { relayMode = true; return }
+    }
 
     if (navigator.locks) {
       const held = await new Promise(resolve => {
@@ -100,7 +166,9 @@
   class="vault-app theme-{theme} accent-{accent}"
   class:is-desktop={isDesktop && view === 'dashboard'}
 >
-  {#if wasmError}
+  {#if relayMode}
+    <!-- Relay bridge: this popup forwards credentials to the bookmarklet and auto-closes. -->
+  {:else if wasmError}
     <div style="height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;padding:24px;text-align:center;">
       <span style="font-size:14px;color:var(--danger)">Failed to load engine: {wasmError}</span>
     </div>
