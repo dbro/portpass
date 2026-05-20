@@ -279,11 +279,11 @@
 
   async function processAutofillIntent({ url, nonce, ecdhSpkiB64 }) {
     const DROP_URL = `http://localhost:7677/drop/${nonce}`
-    const postError = msg => {
-      return fetch(DROP_URL, {
+    const postError = msg =>
+      fetch(DROP_URL, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ error: msg }),
-    }
+      }).catch(() => {})
 
     const records = autofillFindRecords(url)
     if (!records.length) { await postError('No matching passwords found'); return }
@@ -364,6 +364,7 @@
         const req = await resp.json()
 
         const age = Date.now() - req.ts
+        if (age > 60000 || age < -5000) continue
 
         const spkiBytes = Uint8Array.from(atob(req.pub), c => c.charCodeAt(0))
         const sigBytes  = Uint8Array.from(atob(req.sig), c => c.charCodeAt(0))
