@@ -12,6 +12,7 @@ Portpass is different: your passwords live in a file on your device, or in a clo
 
 ## What Portpass does
 
+* fills login forms automatically via a bookmarklet — no browser extension, no clipboard
 * streamlines login to apps and websites
 * works fully offline, no internet connection required
 * encrypts your vault using an established open source format (pwsafe v3)
@@ -79,7 +80,7 @@ Portpass reads and writes the [Password Safe v3](https://github.com/pwsafe/pwsaf
 
 **Features in Password Safe not currently supported by Portpass:**
 
-- Autofill passwords into other apps (requires a browser extension or native helper app)
+- Autofill into native desktop apps (Portpass fills web login forms only)
 - Automatic vault lock after an idle timeout
 - Password strength indicator and breach alerts
 - Password entry aliases (re-using a password across multiple sites)
@@ -93,6 +94,7 @@ Portpass reads and writes the [Password Safe v3](https://github.com/pwsafe/pwsaf
 
 **What Portpass offers that Password Safe does not:**
 
+- Autofill web login forms via a bookmarklet — no browser extension required; works cross-browser-profile
 - Runs in any modern browser — no installation required
 - Works on mobile (iOS, Android) with a touch-friendly interface
 - Biometric/PIN unlock via fingerprint, face recognition, PIN, or hardware security key (WebAuthn PRF — YubiKey series 5+ may work but is untested)
@@ -107,6 +109,55 @@ There is no server, no account, and nothing to trust except the open source code
 **Biometric/PIN unlock** can be enabled to use your device's built-in authentication (fingerprint, face recognition, or PIN) so you don't have to type your master password on repeat visits. Your master password is encrypted with a key only your device can produce and stored locally, it is never transmitted anywhere.
 
 On Android, Chrome routes biometric/PIN unlock setup through [Google Password Manager](https://passwords.google.com/), which requires a recovery PIN to have been set up previously. Google Password Manager stores a synced copy of the passkey in Google's cloud (but not your vault's master password, which always stays on your device). To set up or reset a Google Password Manager recovery PIN, visit [passwords.google.com/passkeys/reset/intro](https://passwords.google.com/passkeys/reset/intro).
+
+## Autofill
+
+Portpass can fill login forms automatically — username, password, one-time code, and any other fields in the right order — without a browser extension and without copying anything to the clipboard.
+
+### How it works
+
+A `javascript:` bookmarklet in your browser's bookmarks bar opens a small picker popup when you click it on a login page. The popup shows credentials that match the current page's URL. Click a record and Portpass fills the fields directly, following the record's **Autotype** sequence (default: fill username → Tab → fill password → Submit).
+
+The bookmarklet communicates with your open Portpass vault over an encrypted channel. No credentials pass through the clipboard at any point — this matters on Windows and Linux, where clipboard contents can be read by any running process, and in browsers where extensions with clipboard permission could read a copied password before it is pasted.
+
+### Same-profile and cross-profile autofill
+
+**Same-profile**: Portpass and the pages you fill are in the same browser profile. The bookmarklet opens a relay popup that talks to Portpass directly via a browser-internal channel. No extra software needed.
+
+**Cross-profile**: Portpass runs in a dedicated clean profile (no extensions), and the bookmarklet runs in your regular browsing profile. This is the most secure setup — your vault is completely isolated from extensions in your main profile. A small local background service, **portpass-relay**, bridges the two profiles over `localhost`. No data leaves your machine.
+
+### Setting up autofill
+
+1. Open Portpass and unlock your vault.
+2. Open vault settings (tap the vault name in the top bar).
+3. Under **Autofill**, click **+ New bookmarklet**. Give it a name (e.g. "Chrome — main profile") and click **Create**.
+4. Drag the chip to your browser's bookmarks bar. If the bar is hidden, click **Copy link** and add the bookmark manually.
+
+For cross-profile setup, start portpass-relay as a background service on your machine before using the bookmarklet.
+
+### Autotype sequences
+
+Each record has an **Autotype** field controlling what gets filled and in what order. The default `\u\t\p\n` covers most sites: fill username, tab to the next field, fill password, submit. You can customise this for unusual login flows (e.g. single-field pages, sites that require an email, sites with two-factor code fields).
+
+| Code | Action |
+|---|---|
+| `\u` | Username |
+| `\p` | Password |
+| `\m` | Email |
+| `\2` | One-time code (TOTP) |
+| `\t` | Tab to next field |
+| `\s` | Shift-Tab (previous field) |
+| `\n` | Submit form |
+| `\wNNN` | Wait NNN milliseconds |
+
+### Best practices
+
+- **Use a dedicated browser profile for Portpass.** Install Portpass in a separate browser profile with no extensions. Drag bookmarklets from that clean profile to your main browsing profile. This keeps your vault isolated from any extension installed in your day-to-day browser, including the one the bookmarklet runs in. See [SECURITY.md](SECURITY.md) for setup instructions.
+- **One bookmarklet per browser or profile.** Each bookmarklet holds a unique private key. Create a separate bookmarklet for each browser and profile where you want autofill, and give each a descriptive name so you can revoke individual ones if needed.
+- **Revoke bookmarklets you no longer use.** Open vault settings → Autofill, and click **Revoke** next to any entry you want to invalidate. The corresponding bookmarklet will be rejected immediately, even if it is still in someone's bookmarks bar.
+- **Prefer autofill over copy-paste on Windows and Linux.** On these platforms, any running process can read the clipboard at any time. Autofill writes directly to the form field without ever putting the credential in the clipboard, eliminating that exposure window entirely.
+
+See [SECURITY.md](SECURITY.md) for a full description of how the delegate model guards against malicious extensions, clipboard eavesdropping, and other threats.
 
 ## Security
 
