@@ -325,14 +325,15 @@
       )
       const ephPubJwk = await crypto.subtle.exportKey('jwk', ephPair.publicKey)
 
-      console.log('[portpass] posting credential blob for', recordsWithFields.length, 'records')
+      const bodyStr = JSON.stringify({
+        ephPub: btoa(JSON.stringify(ephPubJwk)),
+        iv: btoa(String.fromCharCode(...iv)),
+        ciphertext: btoa(String.fromCharCode(...new Uint8Array(ct))),
+      })
+      console.log('[portpass] posting credential blob for', recordsWithFields.length, 'records; DROP_URL='+DROP_URL+' bodyLength='+bodyStr.length)
       const postResp = await fetch(DROP_URL, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ephPub: btoa(JSON.stringify(ephPubJwk)),
-          iv: btoa(String.fromCharCode(...iv)),
-          ciphertext: btoa(String.fromCharCode(...new Uint8Array(ct))),
-        }),
+        body: bodyStr,
       })
       console.log('[portpass] drop response status:', postResp.status)
     } catch (e) {
@@ -347,16 +348,20 @@
     processAutofillIntent(intent)
   })
 
-  // On window focus, check portpass-relay for any pending cross-profile autofill requests.
+  // Poll portpass-relay for pending cross-profile autofill requests while vault is unlocked.
   // relay.html POSTs the signed request to /drop/{delegateId}; we pick it up here.
   $effect(() => {
     if (isPopup) return
-    function onFocus() { checkPendingAutofillRequests() }
-    window.addEventListener('focus', onFocus)
-    return () => window.removeEventListener('focus', onFocus)
+    const id = setInterval(checkPendingAutofillRequests, 2000)
+    return () => clearInterval(id)
   })
 
+  let _checkInProgress = false
+
   async function checkPendingAutofillRequests() {
+    if (_checkInProgress) return
+    _checkInProgress = true
+    try {
     const delegates = await getDelegates(dbKey)
     if (!delegates.length) return
     console.log('[portpass] checking relay server for pending requests; delegates='+delegates.length)
@@ -383,6 +388,7 @@
         // TypeError = relay server not running — silent
       }
     }
+    } finally { _checkInProgress = false }
   }
 
   // Autofill postMessage handler — ECDH key exchange then encrypted query response.
