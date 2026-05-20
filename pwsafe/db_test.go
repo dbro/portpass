@@ -42,6 +42,56 @@ func TestInvalidFile(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
+func TestCanonicalURL(t *testing.T) {
+	cases := [][2]string{
+		{"https://www.example.com/login/", "example.com/login"},
+		{"http://www.example.com/login/", "example.com/login"},
+		{"https://example.com/login", "example.com/login"},
+		{"https://www.Example.COM/Login/?ref=1#top", "example.com/login"},
+		{"example.com", "example.com"},
+		{"example.com/path", "example.com/path"},
+		{"https://sub.example.com/a/b/", "sub.example.com/a/b"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		assert.Equal(t, c[1], CanonicalURL(c[0]), "input: %q", c[0])
+	}
+}
+
+func TestSearchModeURL(t *testing.T) {
+	db := NewV3("test", "pw")
+	db.SetRecord(Record{Title: "Bank", URL: "https://www.bank.com/login/"})
+	db.SetRecord(Record{Title: "Other", URL: "https://other.com"})
+
+	hits := db.Search("bank.com/login", 2)
+	assert.Len(t, hits, 1)
+
+	hits = db.Search("bank.com", 2)
+	assert.Len(t, hits, 0, "path mismatch should not match")
+
+	hits = db.Search("https://www.bank.com/login/", 2)
+	assert.Len(t, hits, 1, "full URL query should match")
+}
+
+func TestSearchModeAllIncludesCustomFields(t *testing.T) {
+	db := NewV3("test", "pw")
+	db.SetRecord(Record{
+		Title: "Site",
+		CustomFields: []CustomField{
+			{Name: "accountId", Value: "12345", Sensitive: false},
+			{Name: "secret", Value: "hidden", Sensitive: true},
+		},
+	})
+	hits := db.Search("accountId", 0)
+	assert.Len(t, hits, 1, "non-sensitive custom field name should be searched")
+
+	hits = db.Search("12345", 0)
+	assert.Len(t, hits, 1, "non-sensitive custom field value should be searched")
+
+	hits = db.Search("hidden", 0)
+	assert.Len(t, hits, 0, "sensitive custom field value must not be searched")
+}
+
 func TestSetRecordTimes(t *testing.T) {
 	db := NewV3("test", "password")
 	record := Record{Title: "Test Record", Password: "password"}

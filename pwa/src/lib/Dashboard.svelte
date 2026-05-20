@@ -87,6 +87,126 @@
     toast.set({ message, action, duration })
   }
 
+  // ---------------------------------------------------------------------------
+  // Autofill utilities
+  // ---------------------------------------------------------------------------
+
+  // Mirror of Go's CanonicalURL: strip scheme, www., query, fragment, trailing slash.
+  function canonicalURL(href) {
+    let s = href || ''
+    for (const p of ['https://', 'http://']) {
+      if (s.toLowerCase().startsWith(p)) { s = s.slice(p.length); break }
+    }
+    const hash = s.indexOf('#'); if (hash >= 0) s = s.slice(0, hash)
+    const qs   = s.indexOf('?'); if (qs >= 0)   s = s.slice(0, qs)
+    s = s.toLowerCase()
+    const slash = s.indexOf('/')
+    if (slash >= 0) s = s.slice(0, slash).replace(/^www\./, '') + s.slice(slash)
+    else s = s.replace(/^www\./, '')
+    return s.replace(/\/+$/, '')
+  }
+
+  function levenshtein(a, b) {
+    const m = a.length, n = b.length
+    const dp = Array.from({length: m + 1}, (_, i) =>
+      Array.from({length: n + 1}, (_, j) => i ? (j ? 0 : i) : j))
+    for (let i = 1; i <= m; i++)
+      for (let j = 1; j <= n; j++)
+        dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1]
+          : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1])
+    return dp[m][n]
+  }
+
+  // Search all open vaults for URL-matching records. Returns a list suitable for
+  // the bookmarklet picker: exact URL matches first, then Levenshtein suggestions
+  // (≤5 distance, up to 5 results). Each entry: { uuid, vaultUuid, title, existingUrl, isCurrent }.
+  function autofillFindRecords(queryUrl) {
+    const canonical = canonicalURL(queryUrl)
+    const allVaults = [
+      { uuid: dbKey, items: get(dbItems) },
+      ...get(secondaryVaults).map(v => ({ uuid: v.uuid, items: v.items || [] })),
+    ]
+
+    // Exact URL match (mode 2)
+    const exact = []
+    for (const { uuid: vaultUuid } of allVaults) {
+      try {
+        for (const uuid of searchRecords(vaultUuid, canonical, 2)) {
+          const rec = getRecordData(vaultUuid, uuid)
+          exact.push({ uuid, vaultUuid: vaultUuid === dbKey ? null : vaultUuid,
+            title: rec.Title, existingUrl: rec.URL, isCurrent: uuid === selectedUUID })
+        }
+      } catch {}
+    }
+    if (exact.length) return exact
+
+    // Fuzzy fallback: Levenshtein on hostname, up to 5 suggestions ≤ distance 5
+    const queryHost = canonical.split('/')[0]
+    const candidates = []
+
+    if (selectedUUID && record) {
+      candidates.push({ uuid: selectedUUID, vaultUuid: selectedVaultUuid,
+        title: record.Title, existingUrl: record.URL, isCurrent: true, _d: -1 })
+    }
+
+    for (const { uuid: vaultUuid, items } of allVaults) {
+      for (const item of items) {
+        if (item.uuid === selectedUUID) continue
+        const itemHost = canonicalURL(item.url || '').split('/')[0]
+        if (!itemHost) continue
+        const d = levenshtein(queryHost, itemHost)
+        if (d <= 5)
+          candidates.push({ uuid: item.uuid, vaultUuid: vaultUuid === dbKey ? null : vaultUuid,
+            title: item.title, existingUrl: item.url, isCurrent: false, _d: d })
+      }
+    }
+
+    return candidates.sort((a, b) => a._d - b._d).slice(0, 5)
+      .map(({ _d, ...rest }) => rest)
+  }
+
+  // Encrypt credentials for a specific record using the given AES-GCM session key.
+  async function autofillEncryptRecord(sessionKey, uuid, vaultUuid) {
+    const v = vaultUuid || dbKey
+    const rec = getRecordData(v, uuid)
+    const autotype = rec.Autotype || '\\u\\t\\p\\n'
+    const parseErr = autofillValidateSequence(autotype)
+    if (parseErr) throw new Error(`Could not parse autofill sequence: ${autotype}`)
+
+    const fields = {}
+    if (autotype.includes('\\u')) fields.u = rec.Username ?? ''
+    if (autotype.includes('\\p')) fields.p = getFieldValue(v, uuid, 'Password') ?? ''
+
+    const iv = crypto.getRandomValues(new Uint8Array(12))
+    const pt = new TextEncoder().encode(JSON.stringify(fields))
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, sessionKey, pt)
+    return {
+      title: rec.Title, autotype,
+      iv: btoa(String.fromCharCode(...iv)),
+      ciphertext: btoa(String.fromCharCode(...new Uint8Array(ct))),
+    }
+  }
+
+  // Update a record's URL field and save the vault to disk.
+  async function autofillSaveURL(uuid, vaultUuid, newUrl) {
+    const v = vaultUuid || dbKey
+    updateRecordFields(v, uuid, { URL: newUrl })
+    if (!vaultUuid) {
+      dbItems.set(getDatabaseData(dbKey))
+      isDirty = true
+      await saveFile(true)
+    } else {
+      const sv = get(secondaryVaults).find(s => s.uuid === vaultUuid)
+      if (!sv) throw new Error('Vault not found')
+      const items = getDatabaseData(v)
+      secondaryVaults.update(vs => vs.map(s => s.uuid === vaultUuid
+        ? { ...s, items: items.map(i => ({ ...i, vaultUuid })) } : s))
+      const data = saveDatabase(v)
+      const w = await sv.handle.createWritable()
+      await w.write(data); await w.close()
+    }
+  }
+
   // Autofill postMessage handler — ECDH key exchange then encrypted query response.
   function autofillValidateSequence(seq) {
     if (!seq) return ''
@@ -151,42 +271,39 @@
           return
         }
 
-        if (!selectedUUID) {
-          event.source.postMessage(
-            { type: 'error', message: 'Open a record in Portpass first' },
-            event.origin
-          )
+        // URL search: return list of candidate records for the bookmarklet picker.
+        if (msg.url !== undefined) {
+          event.source.postMessage({ type: 'records', records: autofillFindRecords(msg.url) }, event.origin)
           return
         }
 
-        // Fall back to the standard sequence when the record has no custom autotype.
-        const autotype = record?.Autotype || '\\u\\t\\p\\n'
-
-        const parseErr = autofillValidateSequence(autotype)
-        if (parseErr) {
-          event.source.postMessage(
-            { type: 'error', message: `Could not parse autofill sequence: ${autotype}` },
-            event.origin
-          )
+        // Targeted fetch: return encrypted credentials for the specified (or selected) record.
+        const uuid = msg.uuid || selectedUUID
+        const vaultUuid = msg.uuid ? (msg.vaultUuid || null) : selectedVaultUuid
+        if (!uuid) {
+          event.source.postMessage({ type: 'error', message: 'Open a record in Portpass first' }, event.origin)
           return
         }
+        try {
+          const result = await autofillEncryptRecord(sessionKey, uuid, vaultUuid)
+          event.source.postMessage({ type: 'record', ...result }, event.origin)
+        } catch (e) {
+          event.source.postMessage({ type: 'error', message: e.message }, event.origin)
+        }
+        return
+      }
 
-        const vaultUuid = selectedVaultUuid || dbKey
-        const fields = {}
-        if (autotype.includes('\\u')) fields.u = record.Username ?? ''
-        if (autotype.includes('\\p')) fields.p = getFieldValue(vaultUuid, selectedUUID, 'Password') ?? ''
-
-        const iv = crypto.getRandomValues(new Uint8Array(12))
-        const plaintext = new TextEncoder().encode(JSON.stringify(fields))
-        const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, sessionKey, plaintext)
-
-        event.source.postMessage({
-          type: 'record',
-          title: record.Title,
-          autotype,
-          iv: btoa(String.fromCharCode(...iv)),
-          ciphertext: btoa(String.fromCharCode(...new Uint8Array(ciphertext))),
-        }, event.origin)
+      if (msg.type === 'save-url') {
+        if (!sessionKey) {
+          event.source.postMessage({ type: 'error', message: 'No secure session' }, event.origin)
+          return
+        }
+        try {
+          await autofillSaveURL(msg.uuid, msg.vaultUuid || null, msg.url)
+          event.source.postMessage({ type: 'url-saved' }, event.origin)
+        } catch (e) {
+          event.source.postMessage({ type: 'error', message: e.message }, event.origin)
+        }
       }
     }
 
@@ -243,37 +360,39 @@
           ch.postMessage({ type: 'relay-error', message: 'No secure session — click the bookmarklet again', nonce: msg.nonce })
           return
         }
-        if (!selectedUUID) {
+
+        // URL search
+        if (msg.url !== undefined) {
+          ch.postMessage({ type: 'relay-records', records: autofillFindRecords(msg.url), nonce: msg.nonce })
+          return
+        }
+
+        // Targeted credential fetch
+        const uuid = msg.uuid || selectedUUID
+        const vaultUuid = msg.uuid ? (msg.vaultUuid || null) : selectedVaultUuid
+        if (!uuid) {
           ch.postMessage({ type: 'relay-error', message: 'Open a record in Portpass first', nonce: msg.nonce })
           return
         }
+        try {
+          const result = await autofillEncryptRecord(relaySessionKey, uuid, vaultUuid)
+          ch.postMessage({ type: 'relay-record', ...result, nonce: msg.nonce })
+        } catch (e) {
+          ch.postMessage({ type: 'relay-error', message: e.message, nonce: msg.nonce })
+        }
+        return
+      }
 
-        const autotype = record?.Autotype || '\\u\\t\\p\\n'
-        const parseErr = autofillValidateSequence(autotype)
-        if (parseErr) {
-          ch.postMessage({ type: 'relay-error', message: `Could not parse autofill sequence: ${autotype}`, nonce: msg.nonce })
+      if (msg.type === 'relay-save-url') {
+        if (!relaySessionKey) {
+          ch.postMessage({ type: 'relay-error', message: 'No secure session', nonce: msg.nonce })
           return
         }
-
-        const vaultUuid = selectedVaultUuid || dbKey
-        const fields = {}
-        if (autotype.includes('\\u')) fields.u = record.Username ?? ''
-        if (autotype.includes('\\p')) fields.p = getFieldValue(vaultUuid, selectedUUID, 'Password') ?? ''
-
         try {
-          const iv = crypto.getRandomValues(new Uint8Array(12))
-          const plaintext = new TextEncoder().encode(JSON.stringify(fields))
-          const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, relaySessionKey, plaintext)
-          ch.postMessage({
-            type: 'relay-record',
-            title: record.Title,
-            autotype,
-            iv: btoa(String.fromCharCode(...iv)),
-            ciphertext: btoa(String.fromCharCode(...new Uint8Array(ciphertext))),
-            nonce: msg.nonce,
-          })
-        } catch {
-          ch.postMessage({ type: 'relay-error', message: 'Encryption failed', nonce: msg.nonce })
+          await autofillSaveURL(msg.uuid, msg.vaultUuid || null, msg.url)
+          ch.postMessage({ type: 'relay-url-saved', nonce: msg.nonce })
+        } catch (e) {
+          ch.postMessage({ type: 'relay-error', message: e.message, nonce: msg.nonce })
         }
       }
     }
@@ -774,7 +893,7 @@
       if (pendingDeleteUUID) list = list.filter(i => i.uuid !== pendingDeleteUUID)
       if (query.trim()) {
         try {
-          const matched = new Set(searchRecords(vaultUuid ?? dbKey, query, false))
+          const matched = new Set(searchRecords(vaultUuid ?? dbKey, query, 0))
           list = list.filter(i => matched.has(i.uuid))
         } catch {}
       }

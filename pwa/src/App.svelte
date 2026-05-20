@@ -95,13 +95,22 @@
       if (!event.source) return
       const msg = event.data
       if (!msg?.type) return
+
       if (msg.type === 'hello') {
         bookmarkletSource = event.source
         bookmarkletOrigin = event.origin
         relayNonce = crypto.randomUUID()
         ch.postMessage({ type: 'relay-hello', pubkey: msg.pubkey, nonce: relayNonce })
       } else if (msg.type === 'query' && relayNonce) {
-        ch.postMessage({ type: 'relay-query', nonce: relayNonce })
+        // Cross-validate the sent URL's hostname against the browser-provided event.origin.
+        if (msg.url !== undefined) {
+          const sentHost = msg.url.split('/')[0]
+          const evHost = new URL(event.origin).host.replace(/^www\./, '').toLowerCase()
+          if (sentHost !== evHost) return
+        }
+        ch.postMessage({ type: 'relay-query', url: msg.url, uuid: msg.uuid, vaultUuid: msg.vaultUuid, nonce: relayNonce })
+      } else if (msg.type === 'save-url' && relayNonce) {
+        ch.postMessage({ type: 'relay-save-url', uuid: msg.uuid, vaultUuid: msg.vaultUuid, url: msg.url, nonce: relayNonce })
       }
     })
 
@@ -110,12 +119,16 @@
       if (!bookmarkletSource || msg?.nonce !== relayNonce) return
       if (msg.type === 'relay-hello-response') {
         bookmarkletSource.postMessage({ type: 'hello', pubkey: msg.pubkey }, bookmarkletOrigin)
+      } else if (msg.type === 'relay-records') {
+        bookmarkletSource.postMessage({ type: 'records', records: msg.records }, bookmarkletOrigin)
       } else if (msg.type === 'relay-record') {
         bookmarkletSource.postMessage({
           type: 'record', title: msg.title, autotype: msg.autotype,
           iv: msg.iv, ciphertext: msg.ciphertext,
         }, bookmarkletOrigin)
         setTimeout(() => window.close(), 100)
+      } else if (msg.type === 'relay-url-saved') {
+        bookmarkletSource.postMessage({ type: 'url-saved' }, bookmarkletOrigin)
       } else if (msg.type === 'relay-error') {
         bookmarkletSource.postMessage({ type: 'error', message: msg.message }, bookmarkletOrigin)
         setTimeout(() => window.close(), 100)
@@ -127,9 +140,6 @@
 
   onMount(async () => {
     isPopup = window.opener !== null
-    // Give this window a stable name so the bookmarklet's window.open() can find and
-    // focus the existing tab instead of always opening a new one.
-    if (!isPopup) window.name = 'portpass_autofill'
 
     const mq = window.matchMedia('(min-width: 768px)')
     isDesktop = mq.matches
@@ -167,7 +177,9 @@
   class:is-desktop={isDesktop && view === 'dashboard'}
 >
   {#if relayMode}
-    <!-- Relay bridge: this popup forwards credentials to the bookmarklet and auto-closes. -->
+    <div style="height:100%;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;opacity:0.5;font-size:14px;line-height:1.6">
+      Portpass autofill in progress<br>This tab will close automatically
+    </div>
   {:else if wasmError}
     <div style="height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;padding:24px;text-align:center;">
       <span style="font-size:14px;color:var(--danger)">Failed to load engine: {wasmError}</span>

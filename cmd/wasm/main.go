@@ -95,6 +95,7 @@ func getDBData(this js.Value, args []js.Value) interface{} {
 		UUID    string `json:"uuid"`
 		Title   string `json:"title"`
 		Group   string `json:"group"`
+		URL     string `json:"url"`
 		HasTOTP bool   `json:"hasTOTP"`
 	}
 
@@ -104,6 +105,7 @@ func getDBData(this js.Value, args []js.Value) interface{} {
 			UUID:    uuidHex,
 			Title:   rec.Title,
 			Group:   rec.Group,
+			URL:     rec.URL,
 			HasTOTP: len(rec.TwoFactorKey) > 0,
 		})
 	}
@@ -443,11 +445,11 @@ func searchRecords(this js.Value, args []js.Value) interface{} {
 		return "database not open"
 	}
 	if len(args) != 3 {
-		return "invalid arguments: expected (vaultUuid, query, namesOnly)"
+		return "invalid arguments: expected (vaultUuid, query, mode)"
 	}
 	query := args[1].String()
-	namesOnly := args[2].Bool()
-	uuids := db.Search(query, namesOnly)
+	mode := args[2].Int() // 0=all fields, 1=names only, 2=URL exact match
+	uuids := db.Search(query, mode)
 	jsonData, err := json.Marshal(uuids)
 	if err != nil {
 		return fmt.Sprintf("json marshal error: %s", err)

@@ -169,7 +169,7 @@
     if (excludeUUID) list = list.filter(i => i.uuid !== excludeUUID)
     if (q.trim() && vaultUuid) {
       try {
-        const matched = new Set(searchRecords(vaultUuid, q, false))
+        const matched = new Set(searchRecords(vaultUuid, q, 0))
         list = list.filter(i => matched.has(i.uuid))
       } catch { /* vault temporarily unavailable — show unfiltered */ }
     }

@@ -15,8 +15,8 @@ const LOGIN_FORM_HTML = `<!doctype html><html><body>
 <script>document.getElementById('f').onsubmit=e=>e.preventDefault()</script>
 </body></html>`
 
-// Stand up the login page and a Portpass popup from it so window.opener is set.
-// Returns { loginPage, portpassPopup }.
+// Opens a main (non-popup) Portpass tab with an unlocked vault, then a separate login
+// page. The bookmarklet will open a relay popup that bridges to the main Portpass tab.
 async function setupAutofillTest(context: BrowserContext): Promise<{ login: Page, portpass: Page }> {
   await context.addInitScript(() => {
     if ((window as any).PublicKeyCredential) {
@@ -28,26 +28,20 @@ async function setupAutofillTest(context: BrowserContext): Promise<{ login: Page
     })
   })
 
-  // Serve the login form at LOGIN_PATH.
+  // Main Portpass tab (non-popup) — the relay popup will bridge to this.
+  const portpass = await context.newPage()
+  await portpass.goto(PORTPASS_URL)
+  await portpass.getByRole('button', { name: 'Create one' }).click()
+  await portpass.getByPlaceholder('Master password').fill('testpassword')
+  await portpass.getByRole('button', { name: 'Create vault' }).click()
+  await expect(portpass.getByPlaceholder('Search vault')).toBeVisible({ timeout: 10000 })
+
+  // Login form page — the bookmarklet runs here.
   const login = await context.newPage()
   await login.route(LOGIN_PATH, route =>
     route.fulfill({ contentType: 'text/html', body: LOGIN_FORM_HTML })
   )
   await login.goto(LOGIN_URL)
-
-  // Open Portpass from the login page so window.opener is established.
-  const [portpass] = await Promise.all([
-    context.waitForEvent('page'),
-    login.evaluate((url) => {
-      ;(window as any).portpassWin = window.open(url, 'portpass_autofill')
-    }, PORTPASS_URL),
-  ])
-
-  // Create a vault in the popup.
-  await portpass.getByRole('button', { name: 'Create one' }).click()
-  await portpass.getByPlaceholder('Master password').fill('testpassword')
-  await portpass.getByRole('button', { name: 'Create vault' }).click()
-  await expect(portpass.getByPlaceholder('Search vault')).toBeVisible({ timeout: 10000 })
 
   return { login, portpass }
 }
@@ -67,14 +61,36 @@ async function createRecord(portpass: Page, opts: {
   await portpass.locator('.record-row', { hasText: opts.title }).click()
 }
 
-// Run the bookmarklet on the login page and wait for the overlay to appear.
+// Run the bookmarklet on the login page. Opens the relay popup, drives the picker
+// (selecting the first record and clicking Autofill), and waits for the popup to close.
+// For error cases the popup closes automatically; the caller then checks login page state.
 async function activateBookmarklet(login: Page) {
+  const context = login.context()
+  const popupPromise = context.waitForEvent('page')
+
   const code = makeBookmarkletUrl(PORTPASS_URL)
     .replace('javascript:', '')  // strip the scheme — evaluate runs the code directly
   await login.evaluate(new Function(decodeURIComponent(code)) as any)
-  await expect(login.locator('#__pp')).toBeVisible({ timeout: 12000 })
-  // Give the browser one animation frame so the click listener registered inside showOverlay()
-  // is guaranteed to be active before the test clicks a field.
+
+  const relay = await popupPromise
+  await relay.waitForLoadState('domcontentloaded')
+
+  // Wait for either the picker (radio buttons) or the popup closing (error case).
+  const radios = relay.locator('input[type="radio"]')
+  const which = await Promise.race([
+    radios.first().waitFor({ timeout: 10000 }).then(() => 'picker').catch(() => 'timeout'),
+    relay.waitForEvent('close', { timeout: 10000 }).then(() => 'closed').catch(() => 'timeout'),
+  ])
+
+  if (which === 'picker') {
+    await radios.first().click()
+    await relay.locator('#autofill-btn').click()
+    // Wait for relay to close after delivering the fill command.
+    await relay.waitForEvent('close', { timeout: 8000 }).catch(() => {})
+  }
+
+  // Give the browser one animation frame so any fill overlay or error overlay on the
+  // login page is guaranteed to be mounted before the test makes assertions.
   await login.evaluate(() => new Promise(r => requestAnimationFrame(r)))
 }
 

@@ -1,0 +1,336 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Portpass autofill</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0 }
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  background: #1a1d21;
+  color: #f1ede4;
+  height: 100dvh;
+}
+#app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+  gap: 8px;
+}
+#header { font-weight: 600; padding-bottom: 2px }
+#status { font-size: 13px; color: #888 }
+#records {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rec-row { padding: 8px 10px; border-radius: 6px; background: #252830 }
+label.rec-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  cursor: pointer;
+}
+.rec-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rec-badge { font-size: 11px; color: #8db8ff; flex-shrink: 0 }
+label.rec-replace {
+  display: none;
+  align-items: baseline;
+  gap: 6px;
+  cursor: pointer;
+  margin: 4px 0 0 20px;
+}
+label.rec-replace.visible { display: flex }
+label.rec-replace span { font-size: 11px; color: #aaa }
+#footer { padding-top: 4px }
+#autofill-btn {
+  width: 100%;
+  padding: 8px 14px;
+  background: #c79a3b;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}
+#autofill-btn:disabled { opacity: 0.4; cursor: default }
+.err { color: #e06c75; font-size: 13px }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="header" style="display:none">Select a record to autofill</div>
+  <div id="status">Connecting to Portpass…</div>
+  <div id="records" style="display:none"></div>
+  <div id="footer" style="display:none">
+    <button id="autofill-btn" disabled>Autofill</button>
+  </div>
+</div>
+<script>
+;(function() {
+  'use strict'
+
+  var nonce = crypto.randomUUID()
+  var relayNonce = null
+  var ch = new BroadcastChannel('portpass-autofill')
+  var sessionKey = null
+  var keyPair = null
+  var bookmarkletOrigin = null
+  var isSecure = false
+  var currentUrl = ''
+  var selectedUuid = null
+  var selectedVaultUuid = null
+
+  var $header  = document.getElementById('header')
+  var $status  = document.getElementById('status')
+  var $records = document.getElementById('records')
+  var $footer  = document.getElementById('footer')
+  var $btn     = document.getElementById('autofill-btn')
+
+  // 1. Ping Dashboard via BroadcastChannel to confirm it is open and unlocked.
+  var pingTimer = setTimeout(function() {
+    ch.close()
+    sendError('Portpass is not open — open and unlock Portpass first')
+  }, 5000)
+
+  ch.onmessage = function(e) {
+    if (e.data && e.data.type === 'relay-pong' && e.data.nonce === nonce) {
+      clearTimeout(pingTimer)
+      doHello()
+    }
+  }
+  ch.postMessage({ type: 'relay-ping', nonce: nonce })
+
+  // 2. ECDH key exchange with Dashboard.
+  async function doHello() {
+    try {
+      keyPair = await crypto.subtle.generateKey(
+        { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey']
+      )
+      var pubJwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey)
+      relayNonce = crypto.randomUUID()
+
+      ch.onmessage = function(e) {
+        var msg = e.data
+        if (!msg || msg.nonce !== relayNonce) return
+        if (msg.type === 'relay-hello-response') onHelloResponse(msg)
+        else if (msg.type === 'relay-error') sendError(msg.message)
+      }
+      ch.postMessage({ type: 'relay-hello', pubkey: pubJwk, nonce: relayNonce })
+    } catch(_) {
+      sendError('Key exchange failed')
+    }
+  }
+
+  async function onHelloResponse(msg) {
+    try {
+      var ppPub = await crypto.subtle.importKey(
+        'jwk', msg.pubkey, { name: 'ECDH', namedCurve: 'P-256' }, false, []
+      )
+      sessionKey = await crypto.subtle.deriveKey(
+        { name: 'ECDH', public: ppPub }, keyPair.privateKey,
+        { name: 'AES-GCM', length: 256 }, false, ['decrypt']
+      )
+    } catch(_) {
+      sendError('Key exchange failed')
+      return
+    }
+
+    ch.onmessage = onBCMessage
+
+    // Signal bookmarklet that relay is ready.
+    if (window.opener) window.opener.postMessage({ type: 'ready' }, '*')
+
+    // 3. Wait for init message from bookmarklet with the current page URL.
+    window.addEventListener('message', onOpenerMessage)
+  }
+
+  function onOpenerMessage(event) {
+    var msg = event.data
+    if (!msg || msg.type !== 'init') return
+    window.removeEventListener('message', onOpenerMessage)
+
+    bookmarkletOrigin = event.origin
+    currentUrl = msg.url || ''
+    isSecure = /^https:/i.test(event.origin) || /^http:\/\/localhost/i.test(event.origin)
+
+    // Validate: canonical URL hostname must match the browser-provided event.origin.
+    if (currentUrl) {
+      try {
+        var sentHost = currentUrl.split('/')[0]
+        var evHost = new URL(event.origin).host.replace(/^www\./, '').toLowerCase()
+        if (evHost && sentHost !== evHost) {
+          sendError('URL mismatch — security check failed')
+          return
+        }
+      } catch(_) {}
+    }
+
+    // 4. Ask Dashboard for URL-matching records.
+    $status.textContent = 'Searching for matches…'
+    ch.postMessage({ type: 'relay-query', url: currentUrl, nonce: relayNonce })
+  }
+
+  function onBCMessage(e) {
+    var msg = e.data
+    if (!msg || msg.nonce !== relayNonce) return
+    if (msg.type === 'relay-records')  showPicker(msg.records)
+    else if (msg.type === 'relay-record')    deliverFill(msg)
+    else if (msg.type === 'relay-url-saved') fetchCredentials()
+    else if (msg.type === 'relay-error')     sendError(msg.message)
+  }
+
+  // 5. Render the record picker UI.
+  function showPicker(records) {
+    if (!records || !records.length) {
+      sendError('Open a record in Portpass first')
+      return
+    }
+
+    $status.style.display = 'none'
+    $header.style.display = ''
+    $records.style.display = ''
+    $footer.style.display = ''
+
+    records.forEach(function(rec) {
+      var row = document.createElement('div')
+      row.className = 'rec-row'
+
+      var mainLabel = document.createElement('label')
+      mainLabel.className = 'rec-main'
+
+      var radio = document.createElement('input')
+      radio.type = 'radio'; radio.name = '__pp'
+      radio.style.cssText = 'flex-shrink:0;margin-top:2px'
+
+      var titleEl = document.createElement('span')
+      titleEl.className = 'rec-title'
+      titleEl.textContent = rec.title
+
+      mainLabel.appendChild(radio)
+      mainLabel.appendChild(titleEl)
+
+      if (rec.isCurrent) {
+        var badge = document.createElement('span')
+        badge.className = 'rec-badge'
+        badge.textContent = 'open'
+        mainLabel.appendChild(badge)
+      }
+      row.appendChild(mainLabel)
+
+      var replaceLabel = null
+      if (rec.existingUrl && canonicalURL(rec.existingUrl) !== currentUrl) {
+        replaceLabel = document.createElement('label')
+        replaceLabel.className = 'rec-replace'
+        var replaceCheck = document.createElement('input')
+        replaceCheck.type = 'checkbox'
+        var replaceText = document.createElement('span')
+        replaceText.textContent = 'Replace "' + canonicalURL(rec.existingUrl) + '" → "' + currentUrl + '"'
+        replaceLabel.appendChild(replaceCheck)
+        replaceLabel.appendChild(replaceText)
+        row.appendChild(replaceLabel)
+      }
+
+      radio.onchange = function() {
+        if (!radio.checked) return
+        selectedUuid = rec.uuid
+        selectedVaultUuid = rec.vaultUuid
+        $btn.disabled = false
+        $records.querySelectorAll('label.rec-replace').forEach(function(el) {
+          el.classList.toggle('visible', el === replaceLabel && replaceLabel !== null)
+        })
+      }
+
+      $records.appendChild(row)
+    })
+
+    $btn.onclick = function() {
+      if (!selectedUuid) return
+      $btn.disabled = true
+      $header.style.display = 'none'
+      $records.style.display = 'none'
+      $footer.style.display = 'none'
+      $status.style.display = ''
+      $status.textContent = 'Fetching credentials…'
+
+      var replaceUrl = false
+      $records.querySelectorAll('label.rec-replace input').forEach(function(cb) {
+        if (cb.checked) replaceUrl = true
+      })
+
+      if (replaceUrl) {
+        ch.postMessage({ type: 'relay-save-url', uuid: selectedUuid, vaultUuid: selectedVaultUuid, url: currentUrl, nonce: relayNonce })
+      } else {
+        fetchCredentials()
+      }
+    }
+  }
+
+  function fetchCredentials() {
+    ch.postMessage({ type: 'relay-query', uuid: selectedUuid, vaultUuid: selectedVaultUuid, nonce: relayNonce })
+  }
+
+  // 6. Decrypt credentials and deliver fill command to opener.
+  async function deliverFill(msg) {
+    try {
+      if (!isSecure && msg.autotype && msg.autotype.includes('\\p')) {
+        sendError('Cannot autofill password on a non-HTTPS page')
+        return
+      }
+      var iv = Uint8Array.from(atob(msg.iv), function(c) { return c.charCodeAt(0) })
+      var ct = Uint8Array.from(atob(msg.ciphertext), function(c) { return c.charCodeAt(0) })
+      var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, sessionKey, ct)
+      var fields = JSON.parse(new TextDecoder().decode(pt))
+      if (window.opener) {
+        window.opener.postMessage(
+          { type: 'fill', title: msg.title, autotype: msg.autotype, fields: fields },
+          bookmarkletOrigin || '*'
+        )
+      }
+      setTimeout(function() { window.close() }, 100)
+    } catch(_) {
+      sendError('Failed to decrypt credentials')
+    }
+  }
+
+  function sendError(message) {
+    $header.style.display = 'none'
+    $footer.style.display = 'none'
+    $records.style.display = 'none'
+    $status.textContent = ''
+    var errEl = document.createElement('div')
+    errEl.className = 'err'
+    errEl.textContent = message
+    document.getElementById('app').appendChild(errEl)
+    if (window.opener) window.opener.postMessage({ type: 'error', message: message }, '*')
+    setTimeout(function() { window.close() }, 3000)
+  }
+
+  function canonicalURL(href) {
+    var s = href || ''
+    var pfxs = ['https://', 'http://']
+    for (var i = 0; i < pfxs.length; i++) {
+      if (s.toLowerCase().indexOf(pfxs[i]) === 0) { s = s.slice(pfxs[i].length); break }
+    }
+    var h = s.indexOf('#'); if (h >= 0) s = s.slice(0, h)
+    var q = s.indexOf('?'); if (q >= 0) s = s.slice(0, q)
+    s = s.toLowerCase()
+    var sl = s.indexOf('/')
+    if (sl >= 0) s = s.slice(0, sl).replace(/^www\./, '') + s.slice(sl)
+    else s = s.replace(/^www\./, '')
+    return s.replace(/\/+$/, '')
+  }
+})()
+</script>
+</body>
+</html>
