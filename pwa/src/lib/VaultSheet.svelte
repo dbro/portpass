@@ -310,9 +310,7 @@
         title="Drag to your bookmarks bar"
         aria-label="Portpass Autofill bookmarklet — drag to your bookmarks bar"
       >
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
-          <path d="M5 4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v18l-7-3-7 3V4z"/>
-        </svg>
+        <img src="{import.meta.env.BASE_URL}icon.svg" width="16" height="16" alt="" aria-hidden="true" draggable="false">
         Portpass Autofill
       </a>
       <button class="vs-copy-btn" onclick={copyBookmarklet}>

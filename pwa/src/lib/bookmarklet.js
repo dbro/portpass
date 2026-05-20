@@ -96,6 +96,17 @@ function BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN) {
     removeOverlay()
     var div = mkOverlay()
 
+    var brand = document.createElement('div')
+    brand.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #2e3240'
+    var logo = document.createElement('img')
+    logo.src = PORTPASS_URL + 'icon.svg'
+    logo.style.cssText = 'width:16px;height:16px;flex-shrink:0'
+    var brandName = document.createElement('span')
+    brandName.style.cssText = 'font-size:12px;font-weight:600;letter-spacing:0.01em'
+    brandName.textContent = 'Portpass'
+    brand.appendChild(logo)
+    brand.appendChild(brandName)
+
     var titleEl = document.createElement('div')
     titleEl.style.cssText = 'font-weight:600;padding-right:20px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px'
     titleEl.textContent = title
@@ -104,6 +115,7 @@ function BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN) {
     hint.style.cssText = 'font-size:12px;color:#aaa;margin-top:4px'
     hint.textContent = startEl ? 'Autofilling…' : 'Click the field to start from'
 
+    div.appendChild(brand)
     div.appendChild(titleEl)
     div.appendChild(hint)
     document.body.appendChild(div)

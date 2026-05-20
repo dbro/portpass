@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <title>Portpass autofill</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="icon.svg">
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0 }
 body {
@@ -20,6 +21,17 @@ body {
   padding: 14px;
   gap: 8px;
 }
+#brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #2e3240;
+  margin-bottom: 2px;
+  flex-shrink: 0;
+}
+#brand img { width: 24px; height: 24px }
+#brand span { font-weight: 600; font-size: 15px; letter-spacing: 0.01em }
 #header { font-weight: 600; padding-bottom: 2px }
 #status { font-size: 13px; color: #888 }
 #records {
@@ -61,6 +73,10 @@ label.rec-replace span { font-size: 11px; color: #aaa }
 </head>
 <body>
 <div id="app">
+  <div id="brand">
+    <img src="icon.svg" alt="">
+    <span>Portpass</span>
+  </div>
   <div id="header" style="display:none">Select a record to autofill</div>
   <div id="status">Connecting to Portpass…</div>
   <div id="records" style="display:none"></div>
