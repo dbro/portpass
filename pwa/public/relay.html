@@ -376,7 +376,31 @@ label.rec-replace span { font-size: 11px; color: #aaa }
         { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey']
       )
       var pubJwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey)
+      var ecdhSpki = await crypto.subtle.exportKey('spki', keyPair.publicKey)
+      var ecdhSpkiB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(ecdhSpki)))
       relayNonce = crypto.randomUUID()
+
+      // Sign {relayNonce, ecdhSpki} with the ECDSA private key so Dashboard can
+      // verify this relay-hello came from a registered delegate bookmarklet.
+      var sigB64 = null, pubSpkiB64 = null
+      if (cprivKey) {
+        try {
+          var signingKey = await crypto.subtle.importKey(
+            'jwk', cprivKey, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']
+          )
+          var ecdsaPubKey = await crypto.subtle.importKey(
+            'jwk', { kty: cprivKey.kty, crv: cprivKey.crv, x: cprivKey.x, y: cprivKey.y },
+            { name: 'ECDSA', namedCurve: 'P-256' }, true, ['verify']
+          )
+          var ecdsaSpki = await crypto.subtle.exportKey('spki', ecdsaPubKey)
+          pubSpkiB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(ecdsaSpki)))
+          var sigBytes = await crypto.subtle.sign(
+            { name: 'ECDSA', hash: 'SHA-256' }, signingKey,
+            new TextEncoder().encode(JSON.stringify({ relayNonce: relayNonce, ecdhSpki: ecdhSpkiB64 }))
+          )
+          sigB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(sigBytes)))
+        } catch(_) { /* signing unavailable */ }
+      }
 
       ch.onmessage = function(e) {
         var msg = e.data
@@ -384,7 +408,9 @@ label.rec-replace span { font-size: 11px; color: #aaa }
         if (msg.type === 'relay-hello-response') onHelloResponse(msg)
         else if (msg.type === 'relay-error') sendError(msg.message)
       }
-      ch.postMessage({ type: 'relay-hello', pubkey: pubJwk, nonce: relayNonce })
+      var helloMsg = { type: 'relay-hello', pubkey: pubJwk, ecdhSpki: ecdhSpkiB64, nonce: relayNonce }
+      if (sigB64 && pubSpkiB64) { helloMsg.sig = sigB64; helloMsg.pub = pubSpkiB64 }
+      ch.postMessage(helloMsg)
     } catch(_) {
       sendError('Key exchange failed')
     }

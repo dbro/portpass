@@ -532,6 +532,21 @@
         if (relayHelloInProgress) return
         relayHelloInProgress = true
         try {
+          // Verify ECDSA signature to authenticate the delegate bookmarklet.
+          // Closes the masquerade attack: a content script cannot forge this.
+          if (!msg.sig || !msg.pub || !msg.ecdhSpki) {
+            ch.postMessage({ type: 'relay-error', message: 'Autofill request not authorized — reinstall the bookmarklet', nonce: msg.nonce })
+            return
+          }
+          const spkiBytes = Uint8Array.from(atob(msg.pub), c => c.charCodeAt(0))
+          const sigBytes  = Uint8Array.from(atob(msg.sig),  c => c.charCodeAt(0))
+          const sigMsg    = new TextEncoder().encode(JSON.stringify({ relayNonce: msg.nonce, ecdhSpki: msg.ecdhSpki }))
+          const verified  = await verifyAndUpdate(dbKey, spkiBytes, sigMsg, sigBytes)
+          console.log('[portpass] relay-hello verified='+!!verified)
+          if (!verified) {
+            ch.postMessage({ type: 'relay-error', message: 'Autofill request not authorized', nonce: msg.nonce })
+            return
+          }
           const openerPub = await crypto.subtle.importKey(
             'jwk', msg.pubkey, { name: 'ECDH', namedCurve: 'P-256' }, false, []
           )
