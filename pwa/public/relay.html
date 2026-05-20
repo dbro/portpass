@@ -135,11 +135,12 @@ label.rec-replace span { font-size: 11px; color: #aaa }
   // Mode is finalised in onOpenerMessage once init arrives.
   ch.onmessage = function(e) {
     if (e.data && e.data.type === 'relay-pong' && e.data.nonce === nonce) {
+      console.log('[portpass relay] BC pong received; modeDecided='+modeDecided+' cprivKey='+!!cprivKey)
       bcPongArrived = true
       if (!modeDecided && cprivKey !== null) {
-        // init already arrived; pong confirms same-profile
         modeDecided = true
         clearTimeout(modeTimer)
+        console.log('[portpass relay] mode: same-profile (BC)')
         doHello()
       }
     }
@@ -158,6 +159,8 @@ label.rec-replace span { font-size: 11px; color: #aaa }
     isSecure = !!msg.isSecure
     cprivKey = msg.privKey || null
 
+    console.log('[portpass relay] init received; url='+currentUrl+' hasPrivKey='+!!cprivKey+' bcPongArrived='+bcPongArrived+' isSecure='+isSecure)
+
     // Validate URL hostname against browser-reported origin.
     if (currentUrl) {
       try {
@@ -168,15 +171,15 @@ label.rec-replace span { font-size: 11px; color: #aaa }
     }
 
     if (bcPongArrived) {
-      // BC pong already received: Portpass is in the same profile.
       modeDecided = true
+      console.log('[portpass relay] mode: same-profile (BC pong already here)')
       doHello()
     } else {
-      // Wait briefly for a BC pong. If none arrives, fall back to cross-profile.
       modeTimer = setTimeout(function() {
         if (!modeDecided) {
           modeDecided = true
           if (cprivKey) {
+            console.log('[portpass relay] mode: cross-profile (no BC pong after 200ms)')
             startCrossProfile(cprivKey)
           } else {
             sendError('Portpass is not open — open and unlock Portpass first')
@@ -191,13 +194,9 @@ label.rec-replace span { font-size: 11px; color: #aaa }
   async function startCrossProfile(privKeyJwk) {
     $status.textContent = 'Requesting credentials…'
     try {
-      // Import ECDSA private signing key from the JWK embedded in the bookmarklet.
       var signingKey = await crypto.subtle.importKey(
         'jwk', privKeyJwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']
       )
-
-      // Derive the ECDSA public key SPKI from the JWK (x, y are the public components).
-      // Portpass uses this to identify which registered delegate is making the request.
       var pubJwk = { kty: privKeyJwk.kty, crv: privKeyJwk.crv, x: privKeyJwk.x, y: privKeyJwk.y }
       var pubKey = await crypto.subtle.importKey(
         'jwk', pubJwk, { name: 'ECDSA', namedCurve: 'P-256' }, true, ['verify']
@@ -205,32 +204,36 @@ label.rec-replace span { font-size: 11px; color: #aaa }
       var pubSpki = await crypto.subtle.exportKey('spki', pubKey)
       var pubSpkiB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(pubSpki)))
 
-      // Sign {url, nonce, ecdh, ts}. Portpass verifies this before acting.
       var ts = Date.now()
       var signedPayload = JSON.stringify({ url: currentUrl, nonce: nonce, ecdh: cpEcdhSpkiB64, ts: ts })
+      console.log('[portpass relay] signing payload:', signedPayload)
       var sigBytes = await crypto.subtle.sign(
         { name: 'ECDSA', hash: 'SHA-256' }, signingKey, new TextEncoder().encode(signedPayload)
       )
       var sigB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(sigBytes)))
+      console.log('[portpass relay] pubSpkiB64 length='+pubSpkiB64.length+' sigB64 length='+sigB64.length)
 
-      // Fire web+portpass:// URL via anchor click (doesn't navigate relay.html away).
       var params = new URLSearchParams({
         url: currentUrl, sig: sigB64, pub: pubSpkiB64,
         ecdh: cpEcdhSpkiB64, nonce: nonce, ts: String(ts)
       })
+      var intentUrl = 'web+portpass://autofill?' + params.toString()
+      console.log('[portpass relay] firing intent URL (first 120 chars):', intentUrl.slice(0, 120))
       var a = document.createElement('a')
-      a.href = 'web+portpass://autofill?' + params.toString()
+      a.href = intentUrl
       a.style.display = 'none'
       document.body.appendChild(a)
       a.click()
       a.remove()
 
-      // Poll relay server until Portpass deposits the encrypted blob.
       $status.textContent = 'Waiting for Portpass…'
+      console.log('[portpass relay] polling relay server for nonce', nonce)
       var blob = await pollRelayServer(nonce, 60000)
+      console.log('[portpass relay] blob received, keys:', Object.keys(blob))
       await processRelayBlob(blob)
 
     } catch(e) {
+      console.log('[portpass relay] cross-profile error:', e.message)
       sendError(e.message || 'Autofill failed')
     }
   }

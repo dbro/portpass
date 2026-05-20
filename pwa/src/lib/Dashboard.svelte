@@ -277,13 +277,18 @@
   }
 
   async function processAutofillIntent({ url, nonce, ecdhSpkiB64 }) {
+    console.log('[portpass] processAutofillIntent url='+url+' nonce='+nonce)
     const DROP_URL = `http://127.0.0.1:7677/drop/${nonce}`
-    const postError = msg => fetch(DROP_URL, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ error: msg }),
-    }).catch(() => {})
+    const postError = msg => {
+      console.log('[portpass] posting error blob:', msg)
+      return fetch(DROP_URL, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: msg }),
+      }).catch(e => console.log('[portpass] postError fetch failed:', e.message))
+    }
 
     const records = autofillFindRecords(url)
+    console.log('[portpass] autofillFindRecords returned', records.length, 'records')
     if (!records.length) { await postError('No matching passwords found'); return }
 
     try {
@@ -319,7 +324,8 @@
       )
       const ephPubJwk = await crypto.subtle.exportKey('jwk', ephPair.publicKey)
 
-      await fetch(DROP_URL, {
+      console.log('[portpass] posting credential blob for', recordsWithFields.length, 'records')
+      const postResp = await fetch(DROP_URL, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ephPub: btoa(JSON.stringify(ephPubJwk)),
@@ -327,7 +333,9 @@
           ciphertext: btoa(String.fromCharCode(...new Uint8Array(ct))),
         }),
       })
+      console.log('[portpass] drop response status:', postResp.status)
     } catch (e) {
+      console.log('[portpass] processAutofillIntent error:', e.message)
       await postError(e.message || 'Autofill failed')
     }
   }

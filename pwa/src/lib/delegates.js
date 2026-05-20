@@ -45,10 +45,13 @@ export async function revokeDelegate(vaultUuid, delegateId) {
 export async function verifyAndUpdate(vaultUuid, spkiBytes, message, signatureBytes) {
   const all = await load()
   const list = all[vaultUuid] ?? []
+  console.log('[portpass] verifyAndUpdate: vaultUuid='+vaultUuid+' delegates='+list.length+' spkiBytes.length='+spkiBytes.length)
   for (const d of list) {
     const stored = new Uint8Array(d.publicKey)
-    if (stored.length !== spkiBytes.length) continue
-    if (!stored.every((b, i) => b === spkiBytes[i])) continue
+    const lenMatch = stored.length === spkiBytes.length
+    const bytesMatch = lenMatch && stored.every((b, i) => b === spkiBytes[i])
+    console.log('[portpass] checking delegate "'+d.name+'": stored.length='+stored.length+' lenMatch='+lenMatch+' bytesMatch='+bytesMatch)
+    if (!bytesMatch) continue
     try {
       const key = await crypto.subtle.importKey(
         'spki', spkiBytes, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']
@@ -56,13 +59,15 @@ export async function verifyAndUpdate(vaultUuid, spkiBytes, message, signatureBy
       const valid = await crypto.subtle.verify(
         { name: 'ECDSA', hash: 'SHA-256' }, key, signatureBytes, message
       )
+      console.log('[portpass] signature valid='+valid+' for delegate "'+d.name+'"')
       if (valid) {
         d.useCount++
         d.lastUsed = Date.now()
         await save(all)
         return d
       }
-    } catch { continue }
+    } catch (e) { console.log('[portpass] crypto error for delegate "'+d.name+'":', e.message); continue }
   }
+  console.log('[portpass] no matching delegate found')
   return null
 }
