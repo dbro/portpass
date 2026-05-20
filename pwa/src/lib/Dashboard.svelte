@@ -279,7 +279,7 @@
 
   async function processAutofillIntent({ url, nonce, ecdhSpkiB64 }) {
     console.log('[portpass] processAutofillIntent url='+url+' nonce='+nonce)
-    const DROP_URL = `http://127.0.0.1:7677/drop/${nonce}`
+    const DROP_URL = `http://localhost:7677/drop/${nonce}`
     const postError = msg => {
       console.log('[portpass] posting error blob:', msg)
       return fetch(DROP_URL, {
@@ -367,7 +367,7 @@
     console.log('[portpass] checking relay server for pending requests; delegates='+delegates.length)
     for (const delegate of delegates) {
       try {
-        const resp = await fetch('http://127.0.0.1:7677/pick/' + delegate.id)
+        const resp = await fetch('http://localhost:7677/pick/' + delegate.id)
         if (!resp.ok) continue  // 404 = nothing pending
         const req = await resp.json()
         console.log('[portpass] got pending request for delegate "'+delegate.name+'"; nonce='+req.nonce)
