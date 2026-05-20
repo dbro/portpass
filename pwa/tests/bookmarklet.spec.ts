@@ -75,16 +75,15 @@ async function activateBookmarklet(login: Page) {
   const relay = await popupPromise
   await relay.waitForLoadState('domcontentloaded')
 
-  // Wait for either the picker (radio buttons) or the popup closing (error case).
-  const radios = relay.locator('input[type="radio"]')
+  // Wait for either the picker (record rows) or the popup closing (error case).
   const which = await Promise.race([
-    radios.first().waitFor({ timeout: 10000 }).then(() => 'picker').catch(() => 'timeout'),
+    relay.locator('.rec-row').first().waitFor({ timeout: 10000 }).then(() => 'picker').catch(() => 'timeout'),
     relay.waitForEvent('close', { timeout: 10000 }).then(() => 'closed').catch(() => 'timeout'),
   ])
 
   if (which === 'picker') {
-    await radios.first().click()
-    await relay.locator('#autofill-btn').click()
+    // Click the first record row — single click triggers autofill immediately.
+    await relay.locator('.rec-row').first().click()
     // Wait for relay to close after delivering the fill command.
     await relay.waitForEvent('close', { timeout: 8000 }).catch(() => {})
   }

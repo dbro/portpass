@@ -29,12 +29,17 @@ body {
   flex-direction: column;
   gap: 6px;
 }
-.rec-row { padding: 8px 10px; border-radius: 6px; background: #252830 }
-label.rec-main {
+.rec-row {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #252830;
+  cursor: pointer;
+}
+.rec-row:hover { background: #2e3240 }
+.rec-title-row {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  cursor: pointer;
 }
 .rec-title {
   flex: 1;
@@ -44,26 +49,13 @@ label.rec-main {
 }
 .rec-badge { font-size: 11px; color: #8db8ff; flex-shrink: 0 }
 label.rec-replace {
-  display: none;
+  display: flex;
   align-items: baseline;
   gap: 6px;
   cursor: pointer;
-  margin: 4px 0 0 20px;
+  margin: 6px 0 0 0;
 }
-label.rec-replace.visible { display: flex }
 label.rec-replace span { font-size: 11px; color: #aaa }
-#footer { padding-top: 4px }
-#autofill-btn {
-  width: 100%;
-  padding: 8px 14px;
-  background: #c79a3b;
-  border: none;
-  border-radius: 6px;
-  color: #fff;
-  font-size: 14px;
-  cursor: pointer;
-}
-#autofill-btn:disabled { opacity: 0.4; cursor: default }
 .err { color: #e06c75; font-size: 13px }
 </style>
 </head>
@@ -72,9 +64,6 @@ label.rec-replace span { font-size: 11px; color: #aaa }
   <div id="header" style="display:none">Select a record to autofill</div>
   <div id="status">Connecting to Portpass…</div>
   <div id="records" style="display:none"></div>
-  <div id="footer" style="display:none">
-    <button id="autofill-btn" disabled>Autofill</button>
-  </div>
 </div>
 <script>
 ;(function() {
@@ -94,8 +83,6 @@ label.rec-replace span { font-size: 11px; color: #aaa }
   var $header  = document.getElementById('header')
   var $status  = document.getElementById('status')
   var $records = document.getElementById('records')
-  var $footer  = document.getElementById('footer')
-  var $btn     = document.getElementById('autofill-btn')
 
   // 1. Ping Dashboard via BroadcastChannel to confirm it is open and unlocked.
   var pingTimer = setTimeout(function() {
@@ -190,7 +177,7 @@ label.rec-replace span { font-size: 11px; color: #aaa }
     else if (msg.type === 'relay-error')     sendError(msg.message)
   }
 
-  // 5. Render the record picker UI.
+  // 5. Render the record picker UI. Clicking a row immediately triggers autofill.
   function showPicker(records) {
     if (!records || !records.length) {
       sendError('Open a record in Portpass first')
@@ -200,40 +187,36 @@ label.rec-replace span { font-size: 11px; color: #aaa }
     $status.style.display = 'none'
     $header.style.display = ''
     $records.style.display = ''
-    $footer.style.display = ''
 
     records.forEach(function(rec) {
       var row = document.createElement('div')
       row.className = 'rec-row'
 
-      var mainLabel = document.createElement('label')
-      mainLabel.className = 'rec-main'
-
-      var radio = document.createElement('input')
-      radio.type = 'radio'; radio.name = '__pp'
-      radio.style.cssText = 'flex-shrink:0;margin-top:2px'
+      var titleRow = document.createElement('div')
+      titleRow.className = 'rec-title-row'
 
       var titleEl = document.createElement('span')
       titleEl.className = 'rec-title'
       titleEl.textContent = rec.title
-
-      mainLabel.appendChild(radio)
-      mainLabel.appendChild(titleEl)
+      titleRow.appendChild(titleEl)
 
       if (rec.isCurrent) {
         var badge = document.createElement('span')
         badge.className = 'rec-badge'
         badge.textContent = 'open'
-        mainLabel.appendChild(badge)
+        titleRow.appendChild(badge)
       }
-      row.appendChild(mainLabel)
+      row.appendChild(titleRow)
 
-      var replaceLabel = null
+      // Replace URL checkbox — always visible when record URL differs from current page.
+      // Clicking the checkbox does not trigger autofill (stopPropagation).
+      var replaceCheck = null
       if (rec.existingUrl && canonicalURL(rec.existingUrl) !== currentUrl) {
-        replaceLabel = document.createElement('label')
+        var replaceLabel = document.createElement('label')
         replaceLabel.className = 'rec-replace'
-        var replaceCheck = document.createElement('input')
+        replaceCheck = document.createElement('input')
         replaceCheck.type = 'checkbox'
+        replaceCheck.onclick = function(e) { e.stopPropagation() }
         var replaceText = document.createElement('span')
         replaceText.textContent = 'Replace "' + canonicalURL(rec.existingUrl) + '" → "' + currentUrl + '"'
         replaceLabel.appendChild(replaceCheck)
@@ -241,38 +224,25 @@ label.rec-replace span { font-size: 11px; color: #aaa }
         row.appendChild(replaceLabel)
       }
 
-      radio.onchange = function() {
-        if (!radio.checked) return
-        selectedUuid = rec.uuid
-        selectedVaultUuid = rec.vaultUuid
-        $btn.disabled = false
-        $records.querySelectorAll('label.rec-replace').forEach(function(el) {
-          el.classList.toggle('visible', el === replaceLabel && replaceLabel !== null)
-        })
+      row.onclick = function() {
+        doAutofill(rec.uuid, rec.vaultUuid, replaceCheck ? replaceCheck.checked : false)
       }
 
       $records.appendChild(row)
     })
+  }
 
-    $btn.onclick = function() {
-      if (!selectedUuid) return
-      $btn.disabled = true
-      $header.style.display = 'none'
-      $records.style.display = 'none'
-      $footer.style.display = 'none'
-      $status.style.display = ''
-      $status.textContent = 'Fetching credentials…'
-
-      var replaceUrl = false
-      $records.querySelectorAll('label.rec-replace input').forEach(function(cb) {
-        if (cb.checked) replaceUrl = true
-      })
-
-      if (replaceUrl) {
-        ch.postMessage({ type: 'relay-save-url', uuid: selectedUuid, vaultUuid: selectedVaultUuid, url: currentUrl, nonce: relayNonce })
-      } else {
-        fetchCredentials()
-      }
+  function doAutofill(uuid, vaultUuid, replaceUrl) {
+    selectedUuid = uuid
+    selectedVaultUuid = vaultUuid
+    $header.style.display = 'none'
+    $records.style.display = 'none'
+    $status.style.display = ''
+    $status.textContent = 'Fetching credentials…'
+    if (replaceUrl) {
+      ch.postMessage({ type: 'relay-save-url', uuid: uuid, vaultUuid: vaultUuid, url: currentUrl, nonce: relayNonce })
+    } else {
+      fetchCredentials()
     }
   }
 
@@ -305,7 +275,6 @@ label.rec-replace span { font-size: 11px; color: #aaa }
 
   function sendError(message) {
     $header.style.display = 'none'
-    $footer.style.display = 'none'
     $records.style.display = 'none'
     $status.textContent = ''
     var errEl = document.createElement('div')
