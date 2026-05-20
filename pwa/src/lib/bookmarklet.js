@@ -1,19 +1,18 @@
-// Portpass autofill bookmarklet.
-// makeBookmarkletUrl(portpassUrl) returns the javascript: URL for the bookmarks bar link.
+// Portpass autofill bookmarklet — delegate (cross-profile) variant.
+// makeDelegateBookmarkletUrl(portpassUrl, privKeyJwk) returns the javascript: URL
+// for a named delegate. privKeyJwk is a Web Crypto JWK export of the ECDSA P-256 private key.
 
-export function makeBookmarkletUrl(portpassUrl) {
+export function makeDelegateBookmarkletUrl(portpassUrl, privKeyJwk) {
   const origin = new URL(portpassUrl).origin
-  return 'javascript:' + encodeURIComponent(buildCode(portpassUrl, origin))
+  return 'javascript:' + encodeURIComponent(
+    `(${DELEGATE_BOOKMARKLET_IIFE.toString()})(${JSON.stringify(portpassUrl)},${JSON.stringify(origin)},${JSON.stringify(privKeyJwk)})`
+  )
 }
 
-function buildCode(portpassUrl, portpassOrigin) {
-  return `(${BOOKMARKLET_IIFE.toString()})
-  (${JSON.stringify(portpassUrl)},${JSON.stringify(portpassOrigin)})`
-}
-
-// Self-contained IIFE. Receives (portpassUrl, portpassOrigin) as parameters so
-// makeBookmarkletUrl can embed them at install time via JSON.stringify.
-function BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN) {
+// Self-contained IIFE embedded in the javascript: URL.
+// PORTPASS_URL and PORTPASS_ORIGIN are baked in at install time via JSON.stringify.
+// PRIV_KEY_JWK is the ECDSA P-256 private key; passed to relay.html which signs the request.
+function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, PRIV_KEY_JWK) {
   'use strict'
 
   if (window.__ppRunning) return
@@ -29,25 +28,30 @@ function BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN) {
 
   ;(async function run() {
     try {
-      // Open relay.html as a small popup window. relay.html handles the picker UI,
-      // ECDH key exchange with Dashboard, and sends a fill command back to this page.
       var pp = window.open(RELAY_URL, '_blank', 'popup=yes,width=360,height=480')
       if (!pp) { showError('Portpass could not open — allow popups for this site'); return }
 
-      // Wait for relay to finish connecting to Dashboard and doing key exchange.
+      // Wait for relay.html to signal it is ready to receive the init message.
       var readyMsg
-      try { readyMsg = await recv(pp, ['ready', 'error'], 8000) }
+      try { readyMsg = await recv(pp, ['ready', 'error'], 10000) }
       catch (_) {
         try { pp.close() } catch (_2) {}
-        showError('Portpass did not respond — make sure it is open and unlocked')
+        showError('Portpass autofill did not start — make sure portpass-relay is running')
         return
       }
       if (readyMsg.type === 'error') { showError(readyMsg.message); return }
 
-      // Send the current page URL so relay can search for matching records.
-      pp.postMessage({ type: 'init', url: currentCanonical, saveUrl: saveUrl, isSecure: isSecure }, PORTPASS_ORIGIN)
+      // Send URL + private signing key to relay.html with strict targetOrigin.
+      // relay.html signs the request, fires web+portpass://, and polls the relay server.
+      pp.postMessage({
+        type: 'init',
+        url: currentCanonical,
+        saveUrl: saveUrl,
+        isSecure: isSecure,
+        privKey: PRIV_KEY_JWK,
+      }, PORTPASS_ORIGIN)
 
-      // Wait for fill command or error. Also watch for the user closing the popup.
+      // Wait for fill command (relay decrypted and forwarded credentials) or error.
       var result
       try {
         result = await Promise.race([
@@ -61,7 +65,6 @@ function BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN) {
       } catch (_) { return }
       if (result.type === 'error') { showError(result.message); return }
 
-      // Execute the autofill sequence on the login page.
       var startEl = isUsableInput(activeEl) ? activeEl : null
       showFillOverlay(result.title, result.autotype, result.fields, startEl)
 
@@ -200,8 +203,6 @@ function BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN) {
       var code = seq[i + 1]
       if (!code) break
       if (code === '\\') {
-        // Literal backslash — accumulate into lit without flushing, so adjacent
-        // literals stay in one token and don't overwrite each other in fillField.
         lit += '\\'; i += 2
       } else if (code === 'f') {
         if (lit) { tokens.push({ type: 'lit', text: lit }); lit = '' }
@@ -218,7 +219,7 @@ function BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN) {
         if (lit) { tokens.push({ type: 'lit', text: lit }); lit = '' }
         tokens.push({ type: 'code', code: code }); i += 2
       } else {
-        i += 2  // unknown code — skip without flushing lit so surrounding literals merge
+        i += 2
       }
     }
     if (lit) tokens.push({ type: 'lit', text: lit })

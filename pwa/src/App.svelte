@@ -20,6 +20,12 @@
   $effect(() => { localStorage.setItem('theme',  theme)  })
   $effect(() => { localStorage.setItem('accent', accent) })
 
+  function handleIntent(intentUrl) {
+    // TODO: parse intentUrl (web+portpass://autofill?url=...&pubkey=...&nonce=...)
+    // and POST encrypted credential to http://127.0.0.1:7677/drop/{nonce}
+    console.log('[intent]', intentUrl)
+  }
+
   // Respond to autofill queries when vault is locked (Dashboard handles unlocked case).
   // Suppressed in relay mode — the relay bridge handles all messaging instead.
   $effect(() => {
@@ -139,6 +145,15 @@
   }
 
   onMount(async () => {
+    if ('launchQueue' in window) {
+      window.launchQueue.setConsumer((launchParams) => {
+        if (launchParams.targetURL) {
+          const intent = new URL(launchParams.targetURL).searchParams.get('intent')
+          if (intent) handleIntent(intent)
+        }
+      })
+    }
+
     isPopup = window.opener !== null
 
     const mq = window.matchMedia('(min-width: 768px)')

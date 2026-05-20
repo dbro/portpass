@@ -4,7 +4,8 @@
   import { getDatabaseInfo, openDatabase, updateDBFields } from '../wasm.js'
   import { selectedFile, dbItems, secondaryVaults } from '../store.js'
   import { isBiometricSupported, isBiometricEnrolled, enrollBiometric, clearBiometric } from './biometric.js'
-  import { makeBookmarkletUrl } from './bookmarklet.js'
+  import { makeDelegateBookmarkletUrl } from './bookmarklet.js'
+  import { getDelegates, addDelegate, revokeDelegate } from './delegates.js'
   import Icon from './Icon.svelte'
 
   let { isDesktop, onback, onlock, onlockall, onlocksecondary, onunlockadditional, ondbsave, ondirtychange, theme, accent, ontheme, onaccent } = $props()
@@ -21,6 +22,7 @@
   onMount(async () => {
     biometricAvailable = await isBiometricSupported()
     biometricEnrolled  = await isBiometricEnrolled(info?.uuid)
+    delegates = await getDelegates(_vaultUuid)
   })
 
   async function disableBiometric() {
@@ -148,17 +150,81 @@
     selectedDetailVault = null
   }
 
-  // ── Autofill bookmarklet ────────────────────────────────────────────────────
-  const bookmarkletUrl = makeBookmarkletUrl(window.location.origin + import.meta.env.BASE_URL)
-  let copied = $state(false)
-  let copyTimer = null
+  // ── Autofill delegates ─────────────────────────────────────────────────────
+  let delegates = $state([])
+  let newDelegateStep = $state(null) // null | 'form' | 'install'
+  let newDelegateName = $state('')
+  let newDelegateUrl  = $state('')
+  let newDelegateError = $state('')
+  let newDelegateBusy  = $state(false)
+  let chipCopied = $state(false)
+  let chipCopyTimer = null
 
-  function copyBookmarklet() {
-    navigator.clipboard.writeText(bookmarkletUrl).then(() => {
-      copied = true
-      clearTimeout(copyTimer)
-      copyTimer = setTimeout(() => { copied = false }, 2000)
+  function openNewDelegate() {
+    newDelegateStep  = 'form'
+    newDelegateName  = ''
+    newDelegateUrl   = ''
+    newDelegateError = ''
+    chipCopied = false
+  }
+
+  function closeNewDelegate() {
+    newDelegateStep  = null
+    newDelegateName  = ''
+    newDelegateUrl   = ''
+    newDelegateError = ''
+    chipCopied = false
+    clearTimeout(chipCopyTimer)
+  }
+
+  async function createDelegate() {
+    if (!newDelegateName.trim() || !_vaultUuid) return
+    newDelegateBusy  = true
+    newDelegateError = ''
+    try {
+      const keyPair = await crypto.subtle.generateKey(
+        { name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']
+      )
+      const privKeyJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey)
+      const pubKeySpki = await crypto.subtle.exportKey('spki', keyPair.publicKey)
+      const delegate   = await addDelegate(_vaultUuid, newDelegateName.trim(), pubKeySpki)
+      delegates = [delegate, ...delegates]
+      newDelegateUrl  = makeDelegateBookmarkletUrl(
+        window.location.origin + import.meta.env.BASE_URL, privKeyJwk
+      )
+      newDelegateStep = 'install'
+    } catch (e) {
+      newDelegateError = e.message || 'Failed to create delegate'
+    } finally {
+      newDelegateBusy = false
+    }
+  }
+
+  async function revokeOne(delegateId) {
+    await revokeDelegate(_vaultUuid, delegateId)
+    delegates = delegates.filter(d => d.id !== delegateId)
+  }
+
+  function copyChip() {
+    navigator.clipboard.writeText(newDelegateUrl).then(() => {
+      chipCopied = true
+      clearTimeout(chipCopyTimer)
+      chipCopyTimer = setTimeout(() => { chipCopied = false }, 2000)
     })
+  }
+
+  function fmtDate(ts) {
+    if (!ts) return '—'
+    return new Date(ts).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+  }
+
+  function fmtRelative(ts) {
+    if (!ts) return 'never'
+    const days = Math.floor((Date.now() - ts) / 86400000)
+    if (days === 0) return 'today'
+    if (days === 1) return 'yesterday'
+    if (days < 7) return `${days} days ago`
+    return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -294,30 +360,26 @@
     </div>
   </div>
 
-  <!-- Autofill -->
+  <!-- Autofill delegates -->
   <div class="vault-section">
     <div class="vault-section-title">AUTOFILL</div>
-    <p class="vs-autofill-help muted">
-      Open a password, switch to the login page, then click the bookmark.
+    <p class="muted" style="font-size:14px;margin:0 0 14px;line-height:1.5">
+      Create a uniquely keyed bookmarklet for each browser profile where you will run Autofill. If you will run Autofill from a different browser or browser profile, make sure portpass-relay is always running.
     </p>
-    <div class="vs-bookmarklet-row">
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <a
-        class="vs-bookmarklet-chip"
-        href={bookmarkletUrl}
-        draggable="true"
-        onclick={e => e.preventDefault()}
-        title="Drag to your bookmarks bar"
-        aria-label="Portpass Autofill bookmarklet — drag to your bookmarks bar"
-      >
-        <img src="{import.meta.env.BASE_URL}icon.svg" width="16" height="16" alt="" aria-hidden="true" draggable="false">
-        Portpass Autofill
-      </a>
-      <button class="vs-copy-btn" onclick={copyBookmarklet}>
-        {copied ? 'Copied!' : 'Copy link'}
-      </button>
-    </div>
-    <p class="vs-bookmarklet-hint muted">Drag to bookmarks bar · Copy if bar is hidden</p>
+    {#if delegates.length > 0}
+      <div class="delegate-list">
+        {#each delegates as d}
+          <div class="delegate-row">
+            <div class="delegate-info">
+              <span class="delegate-name">{d.name}</span>
+              <span class="delegate-meta muted">Created {fmtDate(d.created)} · {d.useCount} {d.useCount === 1 ? 'use' : 'uses'} · Last used {fmtRelative(d.lastUsed)}</span>
+            </div>
+            <button class="delegate-revoke" onclick={() => revokeOne(d.id)}>Revoke</button>
+          </div>
+        {/each}
+      </div>
+    {/if}
+    <button class="vault-unlock-more" onclick={openNewDelegate}>+ New bookmarklet</button>
   </div>
 
   <!-- Appearance -->
@@ -498,6 +560,59 @@
   </div>
 
 </div>
+{/if}
+
+<!-- ── New delegate modal ─────────────────────────────────────────────────── -->
+{#if newDelegateStep}
+  <div class="modal-overlay" role="presentation"
+    onclick={e => { e.stopPropagation(); if (!newDelegateBusy) closeNewDelegate() }}
+    onkeydown={e => { if (e.key === 'Escape' && !newDelegateBusy) closeNewDelegate() }}>
+    <div class="modal" role="dialog" aria-modal="true" tabindex="-1" onclick={e => e.stopPropagation()} onkeydown={e => e.stopPropagation()}>
+      {#if newDelegateStep === 'form'}
+        <div class="modal-title">New autofill bookmarklet</div>
+        <p class="modal-desc muted">Name this bookmarklet to identify which browser or profile it belongs to.</p>
+        <label class="vault-field" style="margin-bottom:12px">
+          <span class="vault-label muted">Name</span>
+          <input
+            class="input"
+            bind:value={newDelegateName}
+            placeholder="e.g. Chrome — work profile"
+            onkeydown={e => { if (e.key === 'Enter' && newDelegateName.trim() && !newDelegateBusy) createDelegate() }}
+            use:focusOnMount
+          />
+        </label>
+        {#if newDelegateError}<div class="unlock-error" style="font-size:13px">{newDelegateError}</div>{/if}
+        <div class="modal-actions">
+          <button class="btn btn-ghost" onclick={closeNewDelegate}>Cancel</button>
+          <button class="btn btn-primary" disabled={!newDelegateName.trim() || newDelegateBusy} onclick={createDelegate}>
+            {newDelegateBusy ? 'Creating…' : 'Create'}
+          </button>
+        </div>
+      {:else}
+        <div class="modal-title">Install autofill bookmarklet</div>
+        <p class="modal-desc muted">Drag to your bookmarks bar. The private key is in this link and won't be shown again.</p>
+        <div class="vs-bookmarklet-row" style="margin-bottom:8px">
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <a
+            class="vs-bookmarklet-chip"
+            href={newDelegateUrl}
+            draggable="true"
+            onclick={e => e.preventDefault()}
+            title="Drag to your bookmarks bar"
+            aria-label="Portpass autofill bookmarklet — drag to your bookmarks bar"
+          >
+            <img src="{import.meta.env.BASE_URL}icon.svg" width="16" height="16" alt="" aria-hidden="true" draggable="false">
+            {newDelegateName}
+          </a>
+          <button class="vs-copy-btn" onclick={copyChip}>{chipCopied ? 'Copied!' : 'Copy link'}</button>
+        </div>
+        <p class="muted" style="font-size:12px;margin:0 0 16px">Drag to bookmarks bar · Copy if bar is hidden</p>
+        <div class="modal-actions">
+          <button class="btn btn-primary" onclick={closeNewDelegate}>Done</button>
+        </div>
+      {/if}
+    </div>
+  </div>
 {/if}
 
 <!-- ── Biometric setup modal ───────────────────────────────────────────────── -->
@@ -917,13 +1032,57 @@
 
   .about-url:hover { color: var(--accent); }
 
-  /* ── Autofill bookmarklet ────────────────────────────────────────────────── */
-  .vs-autofill-help {
-    font-size: 14px;
-    margin: 0 0 14px;
-    line-height: 1.5;
+  /* ── Autofill delegates ──────────────────────────────────────────────────── */
+  .delegate-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 14px;
   }
 
+  .delegate-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-card);
+  }
+
+  .delegate-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .delegate-name {
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .delegate-meta {
+    font-size: 12px;
+  }
+
+  .delegate-revoke {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--danger);
+    padding: 4px 2px;
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+  .delegate-revoke:hover { text-decoration: underline; }
+
+  /* ── Bookmarklet chip (used in delegate install modal) ───────────────────── */
   .vs-bookmarklet-row {
     display: flex;
     align-items: center;
@@ -967,9 +1126,4 @@
     flex-shrink: 0;
   }
   .vs-copy-btn:hover { text-decoration: underline; }
-
-  .vs-bookmarklet-hint {
-    font-size: 12px;
-    margin: 8px 0 0;
-  }
 </style>

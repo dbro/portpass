@@ -50,7 +50,20 @@ export default defineConfig({
             type: 'image/svg+xml',
             purpose: 'any'
           }
-        ]
+        ],
+        protocol_handlers: [
+          {
+            protocol: 'web+portpass',
+            url: '/portpass/?intent=%s'
+          }
+        ],
+        launch_handler: {
+          client_mode: 'focus-existing'
+        }
+      },
+      devOptions: {
+        enabled: true,
+        type: 'module',
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm,gz}'],
