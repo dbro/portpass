@@ -251,20 +251,62 @@
     genOpen = false
   }
 
+  // Returns a blocking error string (prevents save) for structural problems.
   function validateAutotype(seq) {
     if (!seq) return ''
     let i = 0
     while (i < seq.length) {
-      if (seq[i] !== '\\') return `Unexpected character at position ${i + 1}`
+      if (seq[i] !== '\\') { i++; continue }
       if (i + 1 >= seq.length) return 'Sequence ends with \\'
       const code = seq[i + 1]
-      if (!['u', 'p', 't', 'n'].includes(code)) return `Unknown code: \\${code}`
-      i += 2
+      if (code === 'f') {
+        const d = seq[i + 2]
+        if (d !== undefined && /^[0-9]$/.test(d)) {
+          if (d === '0') return '\\f0 is not valid — field numbers start at 1'
+          i += 3
+        } else {
+          i += 2
+        }
+      } else if (code === 'w' || code === 'W') {
+        let j = i + 2, count = 0
+        while (j < seq.length && count < 3 && /^[0-9]$/.test(seq[j])) { j++; count++ }
+        if (count === 0) return `\\${code} must be followed by 1–3 digits`
+        i = j
+      } else {
+        i += 2  // known and unknown codes both advance; unknown flagged by warnAutotype
+      }
     }
     return ''
   }
 
-  let autotypeError = $derived(validateAutotype(draft.Autotype))
+  // Returns a warning string (non-blocking) for codes Portpass doesn't support.
+  function warnAutotype(seq) {
+    if (!seq) return ''
+    const supported = new Set(['u', 'p', 't', 'n', 'm', '2', 's', '\\', 'f', 'w', 'W'])
+    const unknown = new Set()
+    let i = 0
+    while (i < seq.length) {
+      if (seq[i] !== '\\') { i++; continue }
+      if (i + 1 >= seq.length) break
+      const code = seq[i + 1]
+      if (code === 'f') {
+        const d = seq[i + 2]
+        d !== undefined && /^[0-9]$/.test(d) ? (i += 3) : (i += 2)
+      } else if (code === 'w' || code === 'W') {
+        let j = i + 2, count = 0
+        while (j < seq.length && count < 3 && /^[0-9]$/.test(seq[j])) { j++; count++ }
+        i = count ? j : i + 2
+      } else {
+        if (!supported.has(code)) unknown.add('\\' + code)
+        i += 2
+      }
+    }
+    if (!unknown.size) return ''
+    return `Portpass will skip unsupported code${unknown.size > 1 ? 's' : ''}: ${[...unknown].join(', ')}`
+  }
+
+  let autotypeError   = $derived(validateAutotype(draft.Autotype))
+  let autotypeWarning = $derived(!autotypeError ? warnAutotype(draft.Autotype) : '')
 </script>
 
 {#if genOpen}
@@ -516,8 +558,10 @@
         autocomplete="off" spellcheck="false"/>
       {#if autotypeError}
         <div class="autotype-error">{autotypeError}</div>
+      {:else if autotypeWarning}
+        <div class="autotype-warning">{autotypeWarning}</div>
       {:else if draft.Autotype}
-        <div class="autotype-hint muted">\u = username · \p = password · \t = Tab · \n = Enter</div>
+        <div class="autotype-hint muted">\u username · \p password · \m email · \2 OTP · \fN custom field N · \t Tab · \s Shift-Tab · \n Enter · \wNNN wait NNNms · \WNNN wait NNNs · \\ = \</div>
       {:else}
         <div class="autotype-hint muted">Leave blank to use default: \u\t\p\n</div>
       {/if}
@@ -722,6 +766,13 @@
   .autotype-error {
     font-size: 12px;
     color: var(--danger);
+    margin-top: 4px;
+    padding: 0 2px;
+  }
+
+  .autotype-warning {
+    font-size: 12px;
+    color: var(--accent);
     margin-top: 4px;
     padding: 0 2px;
   }

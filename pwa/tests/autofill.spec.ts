@@ -36,15 +36,15 @@ test.describe('Autofill sequence — edit form', () => {
     await expect(page.getByRole('button', { name: 'Save' })).not.toBeDisabled()
   })
 
-  test('unknown code blocks Save and shows error', async ({ page }) => {
+  test('unknown code shows warning but does not block Save', async ({ page }) => {
     await createVault(page)
     await page.getByRole('button', { name: 'New', exact: true }).click()
     await page.getByPlaceholder('e.g. Bank of America').fill('Test')
     await page.locator('input.mono').first().fill('pass')
     await page.locator('.autotype-input').fill('\\u\\x\\p')
-    await expect(page.locator('.autotype-error')).toBeVisible()
-    await expect(page.locator('.autotype-error')).toContainText('\\x')
-    await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled()
+    await expect(page.locator('.autotype-warning')).toBeVisible()
+    await expect(page.locator('.autotype-warning')).toContainText('\\x')
+    await expect(page.getByRole('button', { name: 'Save' })).not.toBeDisabled()
   })
 
   test('trailing backslash blocks Save and shows error', async ({ page }) => {
@@ -57,14 +57,35 @@ test.describe('Autofill sequence — edit form', () => {
     await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled()
   })
 
-  test('literal character in sequence blocks Save and shows error', async ({ page }) => {
+  test('\\f0 blocks Save and shows error', async ({ page }) => {
     await createVault(page)
     await page.getByRole('button', { name: 'New', exact: true }).click()
     await page.getByPlaceholder('e.g. Bank of America').fill('Test')
     await page.locator('input.mono').first().fill('pass')
-    await page.locator('.autotype-input').fill('abc')
+    await page.locator('.autotype-input').fill('\\f0')
+    await expect(page.locator('.autotype-error')).toBeVisible()
+    await expect(page.locator('.autotype-error')).toContainText('\\f0')
+    await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled()
+  })
+
+  test('\\w with no digits blocks Save and shows error', async ({ page }) => {
+    await createVault(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    await page.getByPlaceholder('e.g. Bank of America').fill('Test')
+    await page.locator('input.mono').first().fill('pass')
+    await page.locator('.autotype-input').fill('\\w')
     await expect(page.locator('.autotype-error')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled()
+  })
+
+  test('literal text in sequence is valid', async ({ page }) => {
+    await createVault(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    await page.getByPlaceholder('e.g. Bank of America').fill('Test')
+    await page.locator('input.mono').first().fill('pass')
+    await page.locator('.autotype-input').fill('\\u\\tabc123\\t\\p')
+    await expect(page.locator('.autotype-error')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Save' })).not.toBeDisabled()
   })
 
   test('empty sequence shows default hint and does not block save', async ({ page }) => {
@@ -77,12 +98,12 @@ test.describe('Autofill sequence — edit form', () => {
     await expect(page.getByRole('button', { name: 'Save' })).not.toBeDisabled()
   })
 
-  test('correcting invalid sequence clears the error', async ({ page }) => {
+  test('correcting a structural error clears it', async ({ page }) => {
     await createVault(page)
     await page.getByRole('button', { name: 'New', exact: true }).click()
     await page.getByPlaceholder('e.g. Bank of America').fill('Test')
     await page.locator('input.mono').first().fill('pass')
-    await page.locator('.autotype-input').fill('\\q')
+    await page.locator('.autotype-input').fill('\\f0')
     await expect(page.locator('.autotype-error')).toBeVisible()
     await page.locator('.autotype-input').fill('\\u\\p')
     await expect(page.locator('.autotype-error')).toHaveCount(0)
@@ -145,7 +166,12 @@ test.describe('Autofill sequence — round-trip persistence', () => {
     await page.getByRole('button', { name: 'New', exact: true }).click()
     await page.getByPlaceholder('e.g. Bank of America').fill('Test')
     await page.locator('input.mono').first().fill('pass')
-    for (const seq of ['\\u', '\\p', '\\t', '\\n', '\\u\\t\\p\\n', '\\u\\p\\u\\p']) {
+    for (const seq of [
+      '\\u', '\\p', '\\t', '\\n', '\\m', '\\2', '\\s', '\\\\',
+      '\\f', '\\f1', '\\f9',
+      '\\w1', '\\w100', '\\w999', '\\W1', '\\W999',
+      '\\u\\t\\p\\n', 'abc', '\\u\\tabc123\\t\\p',
+    ]) {
       await page.locator('.autotype-input').fill(seq)
       await expect(page.locator('.autotype-error')).toHaveCount(0)
     }

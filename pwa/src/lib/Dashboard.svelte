@@ -7,7 +7,7 @@
     updateRecordFields, updateDBFields, deleteRecord as wasmDeleteRecord,
     searchRecords, closeDatabase, loadVaultFile,
     copyFieldToClipboard, copyCustomFieldToClipboard, copyTOTP as wasmCopyTOTP,
-    getFieldValue,
+    getTOTP, getFieldValue, getCustomFieldValue,
   } from '../wasm.js'
   import { addSecondaryCredential, removeSecondaryCredential } from './secondaryVaults.js'
   import { isBiometricEnrolledForFile, unlockWithBiometric } from './biometric.js'
@@ -173,9 +173,35 @@
     const parseErr = autofillValidateSequence(autotype)
     if (parseErr) throw new Error(`Could not parse autofill sequence: ${autotype}`)
 
+    // Parse sequence to determine which fields are referenced.
+    const codes = new Set()
+    const fieldNums = new Set()
+    for (let i = 0; i < autotype.length; ) {
+      if (autotype[i] !== '\\') { i++; continue }
+      const code = autotype[i + 1]
+      if (!code) break
+      if (code === 'f') {
+        const d = autotype[i + 2]
+        if (d && /^[1-9]$/.test(d)) { fieldNums.add(parseInt(d)); i += 3 }
+        else { fieldNums.add(1); i += 2 }
+      } else if (code === 'w' || code === 'W') {
+        let j = i + 2, count = 0
+        while (j < autotype.length && count < 3 && /^[0-9]$/.test(autotype[j])) { j++; count++ }
+        i = j
+      } else {
+        codes.add(code); i += 2
+      }
+    }
+
     const fields = {}
-    if (autotype.includes('\\u')) fields.u = rec.Username ?? ''
-    if (autotype.includes('\\p')) fields.p = getFieldValue(v, uuid, 'Password') ?? ''
+    if (codes.has('u')) fields.u = rec.Username ?? ''
+    if (codes.has('p')) fields.p = getFieldValue(v, uuid, 'Password') ?? ''
+    if (codes.has('m')) fields.m = rec.Email ?? ''
+    if (codes.has('2')) fields['2'] = getTOTP(v, uuid).code ?? ''
+    for (const n of fieldNums) {
+      const cf = rec.CustomFields?.[n - 1]
+      fields['f' + n] = cf ? (cf.Value !== null ? cf.Value : (getCustomFieldValue(v, uuid, cf.Name) ?? '')) : ''
+    }
 
     const iv = crypto.getRandomValues(new Uint8Array(12))
     const pt = new TextEncoder().encode(JSON.stringify(fields))
@@ -212,11 +238,25 @@
     if (!seq) return ''
     let i = 0
     while (i < seq.length) {
-      if (seq[i] !== '\\') return `Unexpected character at position ${i + 1}`
+      if (seq[i] !== '\\') { i++; continue }
       if (i + 1 >= seq.length) return 'Sequence ends with \\'
       const code = seq[i + 1]
-      if (!['u', 'p', 't', 'n'].includes(code)) return `Unknown code: \\${code}`
-      i += 2
+      if (code === 'f') {
+        const d = seq[i + 2]
+        if (d !== undefined && /^[0-9]$/.test(d)) {
+          if (d === '0') return '\\f0 is not valid — field numbers start at 1'
+          i += 3
+        } else {
+          i += 2
+        }
+      } else if (code === 'w' || code === 'W') {
+        let j = i + 2, count = 0
+        while (j < seq.length && count < 3 && /^[0-9]$/.test(seq[j])) { j++; count++ }
+        if (count === 0) return `\\${code} must be followed by 1–3 digits`
+        i = j
+      } else {
+        i += 2  // known and unknown codes advance; unknown silently skipped at fill time
+      }
     }
     return ''
   }

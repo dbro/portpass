@@ -109,8 +109,7 @@ function BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN) {
     document.body.appendChild(div)
 
     if (startEl) {
-      executeAutotype(startEl, autotype, fields)
-      setTimeout(removeOverlay, 1200)
+      executeAutotype(startEl, autotype, fields).then(removeOverlay)
     } else {
       function onFieldClick(e) {
         var el  = e.target
@@ -180,6 +179,40 @@ function BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN) {
     return s.replace(/\/+$/, '')
   }
 
+  function parseAutotype(seq) {
+    var tokens = []
+    var lit = ''
+    var i = 0
+    while (i < seq.length) {
+      if (seq[i] !== '\\') { lit += seq[i]; i++; continue }
+      var code = seq[i + 1]
+      if (!code) break
+      if (code === '\\') {
+        // Literal backslash — accumulate into lit without flushing, so adjacent
+        // literals stay in one token and don't overwrite each other in fillField.
+        lit += '\\'; i += 2
+      } else if (code === 'f') {
+        if (lit) { tokens.push({ type: 'lit', text: lit }); lit = '' }
+        var d = seq[i + 2]
+        if (d && /^[1-9]$/.test(d)) { tokens.push({ type: 'f', n: parseInt(d) }); i += 3 }
+        else { tokens.push({ type: 'f', n: 1 }); i += 2 }
+      } else if (code === 'w' || code === 'W') {
+        if (lit) { tokens.push({ type: 'lit', text: lit }); lit = '' }
+        var j = i + 2, count = 0
+        while (j < seq.length && count < 3 && /^[0-9]$/.test(seq[j])) { j++; count++ }
+        var ms = (parseInt(seq.slice(i + 2, j)) || 0) * (code === 'W' ? 1000 : 1)
+        tokens.push({ type: 'delay', ms: ms }); i = j
+      } else if ('uptmn2s'.indexOf(code) >= 0) {
+        if (lit) { tokens.push({ type: 'lit', text: lit }); lit = '' }
+        tokens.push({ type: 'code', code: code }); i += 2
+      } else {
+        i += 2  // unknown code — skip without flushing lit so surrounding literals merge
+      }
+    }
+    if (lit) tokens.push({ type: 'lit', text: lit })
+    return tokens
+  }
+
   function isUsableInput(el) {
     if (!el) return false
     var tag = el.tagName
@@ -199,7 +232,7 @@ function BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN) {
     el.dispatchEvent(new Event('change', { bubbles: true }))
   }
 
-  function nextFocusable(el) {
+  function focusableList() {
     var q = 'input:not([disabled]):not([type=hidden]):not([type=submit]):not([type=button])' +
             ':not([type=reset]):not([type=image]):not([type=checkbox]):not([type=radio]),' +
             'textarea:not([disabled])'
@@ -210,27 +243,44 @@ function BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN) {
     var pos  = all.filter(function(e) { return e.tabIndex > 0 })
                .sort(function(a, b) { return a.tabIndex - b.tabIndex })
     var zero = all.filter(function(e) { return e.tabIndex === 0 })
-    var sorted = pos.concat(zero)
+    return pos.concat(zero)
+  }
+
+  function nextFocusable(el) {
+    var sorted = focusableList()
     var i = sorted.indexOf(el)
     return i >= 0 ? sorted[i + 1] || null : null
   }
 
-  function executeAutotype(startEl, sequence, fields) {
+  function prevFocusable(el) {
+    var sorted = focusableList()
+    var i = sorted.indexOf(el)
+    return i > 0 ? sorted[i - 1] : null
+  }
+
+  async function executeAutotype(startEl, sequence, fields) {
+    var tokens = parseAutotype(sequence)
     var el = startEl
-    for (var i = 0; i < sequence.length; i += 2) {
-      var code = sequence[i + 1]
-      if (code === 'u' || code === 'p') {
-        if (el) fillField(el, fields[code] || '')
-      } else if (code === 't') {
-        var next = nextFocusable(el)
-        if (next) {
-          if (el) el.dispatchEvent(new Event('blur', { bubbles: true }))
-          next.focus()
-          el = next
+    for (var i = 0; i < tokens.length; i++) {
+      var tok = tokens[i]
+      if (tok.type === 'delay') {
+        await new Promise(function(r) { setTimeout(r, tok.ms) })
+      } else if (tok.type === 'lit' || tok.type === 'f') {
+        if (el) fillField(el, tok.type === 'f' ? (fields['f' + tok.n] || '') : tok.text)
+      } else {
+        var code = tok.code
+        if (code === 'u' || code === 'p' || code === 'm' || code === '2') {
+          if (el) fillField(el, fields[code] || '')
+        } else if (code === 't') {
+          var next = nextFocusable(el)
+          if (next) { if (el) el.dispatchEvent(new Event('blur', { bubbles: true })); next.focus(); el = next }
+        } else if (code === 's') {
+          var prev = prevFocusable(el)
+          if (prev) { if (el) el.dispatchEvent(new Event('blur', { bubbles: true })); prev.focus(); el = prev }
+        } else if (code === 'n') {
+          var form = el && el.closest('form')
+          if (form) try { form.requestSubmit() } catch (_) { form.submit() }
         }
-      } else if (code === 'n') {
-        var form = el && el.closest('form')
-        if (form) try { form.requestSubmit() } catch (_) { form.submit() }
       }
     }
   }

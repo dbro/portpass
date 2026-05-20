@@ -215,6 +215,31 @@
     return relTime(new Date(ts * 1000).toISOString())
   }
 
+  function warnAutotype(seq) {
+    if (!seq) return ''
+    const supported = new Set(['u', 'p', 't', 'n', 'm', '2', 's', '\\', 'f', 'w', 'W'])
+    const unknown = new Set()
+    let i = 0
+    while (i < seq.length) {
+      if (seq[i] !== '\\') { i++; continue }
+      if (i + 1 >= seq.length) break
+      const code = seq[i + 1]
+      if (code === 'f') {
+        const d = seq[i + 2]
+        d !== undefined && /^[0-9]$/.test(d) ? (i += 3) : (i += 2)
+      } else if (code === 'w' || code === 'W') {
+        let j = i + 2, count = 0
+        while (j < seq.length && count < 3 && /^[0-9]$/.test(seq[j])) { j++; count++ }
+        i = count ? j : i + 2
+      } else {
+        if (!supported.has(code)) unknown.add('\\' + code)
+        i += 2
+      }
+    }
+    if (!unknown.size) return ''
+    return `Portpass will skip unsupported code${unknown.size > 1 ? 's' : ''}: ${[...unknown].join(', ')}`
+  }
+
   function parseHistory(raw) {
     if (!raw || raw.length < 5) return []
     const count = parseInt(raw.slice(3, 5), 16)
@@ -472,6 +497,9 @@
     <div class="record-autotype">
       <div class="copy-row-label muted">Autofill sequence</div>
       <div class="autotype-value mono">{record.Autotype}</div>
+      {#if warnAutotype(record.Autotype)}
+        <div class="autotype-warning">{warnAutotype(record.Autotype)}</div>
+      {/if}
     </div>
   {/if}
 
@@ -556,5 +584,11 @@
     font-size: 14px;
     color: var(--text-soft);
     padding: 2px 0;
+  }
+
+  .autotype-warning {
+    font-size: 12px;
+    color: var(--accent);
+    margin-top: 4px;
   }
 </style>
