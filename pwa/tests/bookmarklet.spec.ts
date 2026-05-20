@@ -95,10 +95,13 @@ async function activateBookmarklet(login: Page, bookmarkletUrl: string) {
   const relay = await popupPromise
   await relay.waitForLoadState('domcontentloaded')
 
-  // Wait for either the picker (record rows) or the popup closing (error case).
+  // Wait for: picker rows, popup close, or error overlay on login page.
+  // The error overlay check covers the case where the popup stays open (debug close
+  // timeout) but the error message has already been forwarded to the login page.
   const which = await Promise.race([
     relay.locator('.rec-row').first().waitFor({ timeout: 10000 }).then(() => 'picker').catch(() => 'timeout'),
     relay.waitForEvent('close', { timeout: 10000 }).then(() => 'closed').catch(() => 'timeout'),
+    login.locator('#__pp').waitFor({ timeout: 10000 }).then(() => 'error').catch(() => 'timeout'),
   ])
 
   if (which === 'picker') {
