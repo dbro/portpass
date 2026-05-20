@@ -11,6 +11,7 @@
   } from '../wasm.js'
   import { addSecondaryCredential, removeSecondaryCredential } from './secondaryVaults.js'
   import { isBiometricEnrolledForFile, unlockWithBiometric } from './biometric.js'
+  import { getDelegates, verifyAndUpdate } from './delegates.js'
   import Icon from './Icon.svelte'
   import RecordList from './RecordList.svelte'
   import RecordRead from './RecordRead.svelte'
@@ -345,6 +346,44 @@
     onclearintent?.()
     processAutofillIntent(intent)
   })
+
+  // On window focus, check portpass-relay for any pending cross-profile autofill requests.
+  // relay.html POSTs the signed request to /drop/{delegateId}; we pick it up here.
+  $effect(() => {
+    if (isPopup) return
+    function onFocus() { checkPendingAutofillRequests() }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  })
+
+  async function checkPendingAutofillRequests() {
+    const delegates = await getDelegates(dbKey)
+    if (!delegates.length) return
+    console.log('[portpass] checking relay server for pending requests; delegates='+delegates.length)
+    for (const delegate of delegates) {
+      try {
+        const resp = await fetch('http://127.0.0.1:7677/pick/' + delegate.id)
+        if (!resp.ok) continue  // 404 = nothing pending
+        const req = await resp.json()
+        console.log('[portpass] got pending request for delegate "'+delegate.name+'"; nonce='+req.nonce)
+
+        const age = Date.now() - req.ts
+        if (age > 60000 || age < -5000) { console.log('[portpass] request expired, age='+age+'ms'); continue }
+
+        const spkiBytes = Uint8Array.from(atob(req.pub), c => c.charCodeAt(0))
+        const sigBytes  = Uint8Array.from(atob(req.sig), c => c.charCodeAt(0))
+        const message   = new TextEncoder().encode(JSON.stringify({ url: req.url, nonce: req.nonce, ecdh: req.ecdh, ts: req.ts }))
+        const verified  = await verifyAndUpdate(dbKey, spkiBytes, message, sigBytes)
+        console.log('[portpass] signature verified='+!!verified+' for delegate "'+delegate.name+'"')
+        if (!verified) continue
+
+        await processAutofillIntent({ url: req.url, nonce: req.nonce, ecdhSpkiB64: req.ecdh })
+      } catch (e) {
+        if (!(e instanceof TypeError)) console.log('[portpass] checkPending error:', e.message)
+        // TypeError = relay server not running — silent
+      }
+    }
+  }
 
   // Autofill postMessage handler — ECDH key exchange then encrypted query response.
   function autofillValidateSequence(seq) {

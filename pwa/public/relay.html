@@ -95,6 +95,7 @@ label.rec-replace span { font-size: 11px; color: #aaa }
 
   // ── Mode detection state ──────────────────────────────────────────────────
   var cprivKey = null       // private key from init message; used by cross-profile path
+  var delegateId = null     // delegate UUID; relay server request endpoint
   var bcPongArrived = false
   var modeDecided = false
   var modeTimer = null
@@ -158,8 +159,9 @@ label.rec-replace span { font-size: 11px; color: #aaa }
     saveUrl = msg.saveUrl || currentUrl
     isSecure = !!msg.isSecure
     cprivKey = msg.privKey || null
+    delegateId = msg.delegateId || null
 
-    console.log('[portpass relay] init received; url='+currentUrl+' hasPrivKey='+!!cprivKey+' bcPongArrived='+bcPongArrived+' isSecure='+isSecure)
+    console.log('[portpass relay] init received; url='+currentUrl+' hasPrivKey='+!!cprivKey+' delegateId='+delegateId+' bcPongArrived='+bcPongArrived+' isSecure='+isSecure)
 
     // Validate URL hostname against browser-reported origin.
     if (currentUrl) {
@@ -213,21 +215,20 @@ label.rec-replace span { font-size: 11px; color: #aaa }
       var sigB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(sigBytes)))
       console.log('[portpass relay] pubSpkiB64 length='+pubSpkiB64.length+' sigB64 length='+sigB64.length)
 
-      var params = new URLSearchParams({
-        url: currentUrl, sig: sigB64, pub: pubSpkiB64,
-        ecdh: cpEcdhSpkiB64, nonce: nonce, ts: String(ts)
-      })
-      var intentUrl = 'web+portpass://autofill?' + params.toString()
-      console.log('[portpass relay] firing intent URL (first 120 chars):', intentUrl.slice(0, 120))
-      var a = document.createElement('a')
-      a.href = intentUrl
-      a.style.display = 'none'
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
+      if (!delegateId) throw new Error('No delegate ID — reinstall the bookmarklet')
 
-      $status.textContent = 'Waiting for Portpass…'
-      console.log('[portpass relay] polling relay server for nonce', nonce)
+      // POST signed request to relay server under the delegate's ID slot.
+      // Portpass polls this slot on window focus and processes any pending request.
+      console.log('[portpass relay] POSTing request to /drop/'+delegateId)
+      var dropResp = await fetch('http://127.0.0.1:7677/drop/' + delegateId, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: currentUrl, nonce: nonce, ecdh: cpEcdhSpkiB64, ts: ts, sig: sigB64, pub: pubSpkiB64 }),
+      })
+      if (!dropResp.ok) throw new Error('Relay server error ' + dropResp.status)
+
+      $status.textContent = 'Switch to Portpass to approve…'
+      console.log('[portpass relay] waiting for credentials at nonce', nonce)
       var blob = await pollRelayServer(nonce, 60000)
       console.log('[portpass relay] blob received, keys:', Object.keys(blob))
       await processRelayBlob(blob)
@@ -262,20 +263,30 @@ label.rec-replace span { font-size: 11px; color: #aaa }
   // Or error format: { error: "message" }
   // Plaintext: JSON array of records, each with pre-decrypted fields.
   async function processRelayBlob(blob) {
-    if (blob.error) { sendError(blob.error); return }
-    var ephPubJwk = JSON.parse(atob(blob.ephPub))
-    var ephPubKey = await crypto.subtle.importKey(
-      'jwk', ephPubJwk, { name: 'ECDH', namedCurve: 'P-256' }, false, []
-    )
-    var cpSessionKey = await crypto.subtle.deriveKey(
-      { name: 'ECDH', public: ephPubKey }, cpEcdhKeyPair.privateKey,
-      { name: 'AES-GCM', length: 256 }, false, ['decrypt']
-    )
-    var iv = Uint8Array.from(atob(blob.iv), function(c) { return c.charCodeAt(0) })
-    var ct = Uint8Array.from(atob(blob.ciphertext), function(c) { return c.charCodeAt(0) })
-    var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, cpSessionKey, ct)
-    var records = JSON.parse(new TextDecoder().decode(pt))
-    showCrossProfilePicker(records)
+    if (blob.error) { console.log('[portpass relay] blob error:', blob.error); sendError(blob.error); return }
+    console.log('[portpass relay] processRelayBlob: keys='+Object.keys(blob)+' cpEcdhKeyPair='+!!cpEcdhKeyPair)
+    try {
+      var ephPubJwk = JSON.parse(atob(blob.ephPub))
+      console.log('[portpass relay] importing ephemeral pubkey')
+      var ephPubKey = await crypto.subtle.importKey(
+        'jwk', ephPubJwk, { name: 'ECDH', namedCurve: 'P-256' }, false, []
+      )
+      console.log('[portpass relay] deriving session key')
+      var cpSessionKey = await crypto.subtle.deriveKey(
+        { name: 'ECDH', public: ephPubKey }, cpEcdhKeyPair.privateKey,
+        { name: 'AES-GCM', length: 256 }, false, ['decrypt']
+      )
+      var iv = Uint8Array.from(atob(blob.iv), function(c) { return c.charCodeAt(0) })
+      var ct = Uint8Array.from(atob(blob.ciphertext), function(c) { return c.charCodeAt(0) })
+      console.log('[portpass relay] decrypting: iv.length='+iv.length+' ct.length='+ct.length)
+      var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, cpSessionKey, ct)
+      var records = JSON.parse(new TextDecoder().decode(pt))
+      console.log('[portpass relay] decrypted '+records.length+' records; opener='+!!window.opener)
+      showCrossProfilePicker(records)
+    } catch(e) {
+      console.log('[portpass relay] processRelayBlob error:', e.message, e)
+      sendError('Decrypt failed: ' + e.message)
+    }
   }
 
   // Cross-profile picker: fields are already decrypted; clicking a row sends fill immediately.

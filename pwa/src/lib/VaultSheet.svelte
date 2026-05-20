@@ -190,7 +190,7 @@
       const delegate   = await addDelegate(_vaultUuid, newDelegateName.trim(), pubKeySpki)
       delegates = [delegate, ...delegates]
       newDelegateUrl  = makeDelegateBookmarkletUrl(
-        window.location.origin + import.meta.env.BASE_URL, privKeyJwk
+        window.location.origin + import.meta.env.BASE_URL, privKeyJwk, delegate.id
       )
       newDelegateStep = 'install'
     } catch (e) {

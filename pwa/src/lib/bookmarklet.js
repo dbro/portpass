@@ -2,17 +2,17 @@
 // makeDelegateBookmarkletUrl(portpassUrl, privKeyJwk) returns the javascript: URL
 // for a named delegate. privKeyJwk is a Web Crypto JWK export of the ECDSA P-256 private key.
 
-export function makeDelegateBookmarkletUrl(portpassUrl, privKeyJwk) {
+export function makeDelegateBookmarkletUrl(portpassUrl, privKeyJwk, delegateId) {
   const origin = new URL(portpassUrl).origin
   return 'javascript:' + encodeURIComponent(
-    `(${DELEGATE_BOOKMARKLET_IIFE.toString()})(${JSON.stringify(portpassUrl)},${JSON.stringify(origin)},${JSON.stringify(privKeyJwk)})`
+    `(${DELEGATE_BOOKMARKLET_IIFE.toString()})(${JSON.stringify(portpassUrl)},${JSON.stringify(origin)},${JSON.stringify(privKeyJwk)},${JSON.stringify(delegateId)})`
   )
 }
 
 // Self-contained IIFE embedded in the javascript: URL.
 // PORTPASS_URL and PORTPASS_ORIGIN are baked in at install time via JSON.stringify.
-// PRIV_KEY_JWK is the ECDSA P-256 private key; passed to relay.html which signs the request.
-function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, PRIV_KEY_JWK) {
+// PRIV_KEY_JWK is the ECDSA P-256 private key; DELEGATE_ID identifies the delegate on the relay server.
+function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, PRIV_KEY_JWK, DELEGATE_ID) {
   'use strict'
 
   if (window.__ppRunning) return
@@ -41,14 +41,15 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, PRIV_KEY_JWK) 
       }
       if (readyMsg.type === 'error') { showError(readyMsg.message); return }
 
-      // Send URL + private signing key to relay.html with strict targetOrigin.
-      // relay.html signs the request, fires web+portpass://, and polls the relay server.
+      // Send URL, private signing key, and delegate ID to relay.html with strict targetOrigin.
+      // relay.html signs and POSTs the request to portpass-relay, then polls for the response.
       pp.postMessage({
         type: 'init',
         url: currentCanonical,
         saveUrl: saveUrl,
         isSecure: isSecure,
         privKey: PRIV_KEY_JWK,
+        delegateId: DELEGATE_ID,
       }, PORTPASS_ORIGIN)
 
       // Wait for fill command (relay decrypted and forwarded credentials) or error.
