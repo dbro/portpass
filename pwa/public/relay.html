@@ -77,6 +77,7 @@ label.rec-replace span { font-size: 11px; color: #aaa }
   var bookmarkletOrigin = null
   var isSecure = false
   var currentUrl = ''
+  var saveUrl = ''
   var selectedUuid = null
   var selectedVaultUuid = null
 
@@ -149,6 +150,7 @@ label.rec-replace span { font-size: 11px; color: #aaa }
 
     bookmarkletOrigin = event.origin
     currentUrl = msg.url || ''
+    saveUrl = msg.saveUrl || currentUrl
     isSecure = /^https:/i.test(event.origin) || /^http:\/\/localhost/i.test(event.origin)
 
     // Validate: canonical URL hostname must match the browser-provided event.origin.
@@ -218,7 +220,7 @@ label.rec-replace span { font-size: 11px; color: #aaa }
         replaceCheck.type = 'checkbox'
         replaceCheck.onclick = function(e) { e.stopPropagation() }
         var replaceText = document.createElement('span')
-        replaceText.textContent = 'Replace "' + canonicalURL(rec.existingUrl) + '" → "' + currentUrl + '"'
+        replaceText.textContent = 'Replace "' + rec.existingUrl + '" → "' + saveUrl + '"'
         replaceLabel.appendChild(replaceCheck)
         replaceLabel.appendChild(replaceText)
         row.appendChild(replaceLabel)
@@ -240,7 +242,7 @@ label.rec-replace span { font-size: 11px; color: #aaa }
     $status.style.display = ''
     $status.textContent = 'Fetching credentials…'
     if (replaceUrl) {
-      ch.postMessage({ type: 'relay-save-url', uuid: uuid, vaultUuid: vaultUuid, url: currentUrl, nonce: relayNonce })
+      ch.postMessage({ type: 'relay-save-url', uuid: uuid, vaultUuid: vaultUuid, url: saveUrl, nonce: relayNonce })
     } else {
       fetchCredentials()
     }

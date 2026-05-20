@@ -24,6 +24,7 @@ function BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN) {
 
   var isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost'
   var currentCanonical = canonicalURL(window.location.href)
+  var saveUrl = window.location.origin + window.location.pathname
   var RELAY_URL = PORTPASS_URL + 'relay.html'
 
   ;(async function run() {
@@ -44,12 +45,20 @@ function BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN) {
       if (readyMsg.type === 'error') { showError(readyMsg.message); return }
 
       // Send the current page URL so relay can search for matching records.
-      pp.postMessage({ type: 'init', url: currentCanonical, isSecure: isSecure }, PORTPASS_ORIGIN)
+      pp.postMessage({ type: 'init', url: currentCanonical, saveUrl: saveUrl, isSecure: isSecure }, PORTPASS_ORIGIN)
 
-      // Wait for fill command or error. User may take time to pick a record.
+      // Wait for fill command or error. Also watch for the user closing the popup.
       var result
-      try { result = await recv(pp, ['fill', 'error'], 60000) }
-      catch (_) { try { pp.close() } catch (_2) {} ; return }
+      try {
+        result = await Promise.race([
+          recv(pp, ['fill', 'error'], 3600000),
+          new Promise(function(_, reject) {
+            var t = setInterval(function() {
+              if (pp.closed) { clearInterval(t); reject(new Error('closed')) }
+            }, 200)
+          }),
+        ])
+      } catch (_) { return }
       if (result.type === 'error') { showError(result.message); return }
 
       // Execute the autofill sequence on the login page.
