@@ -194,20 +194,22 @@
     }
 
     const fields = {}
+    const sensitiveCodes = []  // field codes whose values are sensitive (blocked on HTTP)
     if (codes.has('u')) fields.u = rec.Username ?? ''
-    if (codes.has('p')) fields.p = getFieldValue(v, uuid, 'Password') ?? ''
+    if (codes.has('p')) { fields.p = getFieldValue(v, uuid, 'Password') ?? ''; sensitiveCodes.push('p') }
     if (codes.has('m')) fields.m = rec.Email ?? ''
-    if (codes.has('2')) fields['2'] = getTOTP(v, uuid).code ?? ''
+    if (codes.has('2')) { fields['2'] = getTOTP(v, uuid).code ?? ''; sensitiveCodes.push('2') }
     for (const n of fieldNums) {
       const cf = rec.CustomFields?.[n - 1]
       fields['f' + n] = cf ? (cf.Value !== null ? cf.Value : (getCustomFieldValue(v, uuid, cf.Name) ?? '')) : ''
+      if (cf?.Value === null) sensitiveCodes.push('f' + n)  // null = sensitive custom field
     }
 
     const iv = crypto.getRandomValues(new Uint8Array(12))
     const pt = new TextEncoder().encode(JSON.stringify(fields))
     const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, sessionKey, pt)
     return {
-      title: rec.Title, autotype,
+      title: rec.Title, autotype, sensitiveCodes,
       iv: btoa(String.fromCharCode(...iv)),
       ciphertext: btoa(String.fromCharCode(...new Uint8Array(ct))),
     }

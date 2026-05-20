@@ -279,11 +279,38 @@ label.rec-replace span { font-size: 11px; color: #aaa }
     ch.postMessage({ type: 'relay-query', uuid: selectedUuid, vaultUuid: selectedVaultUuid, nonce: relayNonce })
   }
 
+  // Returns true if the autotype sequence references any of the given sensitive field codes.
+  // Parses the sequence properly so that \\ (literal backslash) does not cause false positives.
+  function sequenceHasSensitiveCode(seq, sensitiveCodes) {
+    if (!sensitiveCodes || !sensitiveCodes.length) return false
+    var i = 0
+    while (i < seq.length) {
+      if (seq[i] !== '\\') { i++; continue }
+      var code = seq[i + 1]
+      if (!code) break
+      if (code === '\\') { i += 2; continue }  // literal backslash, not a field code
+      if (code === 'f') {
+        var d = seq[i + 2]
+        var fieldCode = (d && /^[1-9]$/.test(d)) ? 'f' + d : 'f1'
+        if (sensitiveCodes.indexOf(fieldCode) >= 0) return true
+        i += (d && /^[0-9]$/.test(d)) ? 3 : 2
+      } else if (code === 'w' || code === 'W') {
+        var j = i + 2, count = 0
+        while (j < seq.length && count < 3 && /^[0-9]$/.test(seq[j])) { j++; count++ }
+        i = count ? j : i + 2
+      } else {
+        if (sensitiveCodes.indexOf(code) >= 0) return true
+        i += 2
+      }
+    }
+    return false
+  }
+
   // 6. Decrypt credentials and deliver fill command to opener.
   async function deliverFill(msg) {
     try {
-      if (!isSecure && msg.autotype && msg.autotype.includes('\\p')) {
-        sendError('Cannot autofill password on a non-HTTPS page')
+      if (!isSecure && sequenceHasSensitiveCode(msg.autotype || '', msg.sensitiveCodes || [])) {
+        sendError('Cannot autofill sensitive fields on a non-HTTPS page')
         return
       }
       var iv = Uint8Array.from(atob(msg.iv), function(c) { return c.charCodeAt(0) })
