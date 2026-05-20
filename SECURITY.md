@@ -146,7 +146,7 @@ portpass-relay (`localhost:7677`) is a dumb pipe — it stores and forwards encr
 ### What autofill does not protect against
 
 - **Credential in the DOM**: after filling, the credential is in `input.value` and readable by any extension on the page. This is identical to manual typing or any other password manager and cannot be avoided without browser-level APIs.
-- **Bookmarklet theft**: if an attacker can read your browser's bookmark store (requires local access), they obtain the delegate's private key. Revoke the delegate in Portpass and drag a new bookmarklet to replace it.
+- **Bookmarklet theft**: the delegate's private key is in the bookmark store, which no web API or browser extension can read. Obtaining it requires physical access to the device (someone at the keyboard), a compromised OS, or full control of the browser process itself — not achievable by a malicious web page or extension. If you believe a device has been physically compromised, revoke the delegate in Portpass and drag a new bookmarklet to replace it.
 - **Extension present at drag-install time**: an extension could modify the bookmarklet's JavaScript before it is dragged. The effective security boundary is: no hostile extension may be present when the bookmarklet is installed.
 
 ---
