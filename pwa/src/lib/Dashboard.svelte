@@ -278,18 +278,14 @@
   }
 
   async function processAutofillIntent({ url, nonce, ecdhSpkiB64 }) {
-    console.log('[portpass] processAutofillIntent url='+url+' nonce='+nonce)
     const DROP_URL = `http://localhost:7677/drop/${nonce}`
     const postError = msg => {
-      console.log('[portpass] posting error blob:', msg)
       return fetch(DROP_URL, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ error: msg }),
-      }).catch(e => console.log('[portpass] postError fetch failed:', e.message))
     }
 
     const records = autofillFindRecords(url)
-    console.log('[portpass] autofillFindRecords returned', records.length, 'records')
     if (!records.length) { await postError('No matching passwords found'); return }
 
     try {
@@ -330,14 +326,11 @@
         iv: btoa(String.fromCharCode(...iv)),
         ciphertext: btoa(String.fromCharCode(...new Uint8Array(ct))),
       })
-      console.log('[portpass] posting credential blob for', recordsWithFields.length, 'records; DROP_URL='+DROP_URL+' bodyLength='+bodyStr.length)
       const postResp = await fetch(DROP_URL, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: bodyStr,
       })
-      console.log('[portpass] drop response status:', postResp.status)
     } catch (e) {
-      console.log('[portpass] processAutofillIntent error:', e.message)
       await postError(e.message || 'Autofill failed')
     }
   }
@@ -364,27 +357,22 @@
     try {
     const delegates = await getDelegates(dbKey)
     if (!delegates.length) return
-    console.log('[portpass] checking relay server for pending requests; delegates='+delegates.length)
     for (const delegate of delegates) {
       try {
         const resp = await fetch('http://localhost:7677/pick/' + delegate.id)
         if (!resp.ok) continue  // 404 = nothing pending
         const req = await resp.json()
-        console.log('[portpass] got pending request for delegate "'+delegate.name+'"; nonce='+req.nonce)
 
         const age = Date.now() - req.ts
-        if (age > 60000 || age < -5000) { console.log('[portpass] request expired, age='+age+'ms'); continue }
 
         const spkiBytes = Uint8Array.from(atob(req.pub), c => c.charCodeAt(0))
         const sigBytes  = Uint8Array.from(atob(req.sig), c => c.charCodeAt(0))
         const message   = new TextEncoder().encode(JSON.stringify({ url: req.url, nonce: req.nonce, ecdh: req.ecdh, ts: req.ts }))
         const verified  = await verifyAndUpdate(dbKey, spkiBytes, message, sigBytes)
-        console.log('[portpass] signature verified='+!!verified+' for delegate "'+delegate.name+'"')
         if (!verified) continue
 
         await processAutofillIntent({ url: req.url, nonce: req.nonce, ecdhSpkiB64: req.ecdh })
       } catch (e) {
-        if (!(e instanceof TypeError)) console.log('[portpass] checkPending error:', e.message)
         // TypeError = relay server not running — silent
       }
     }
@@ -542,7 +530,6 @@
           const sigBytes  = Uint8Array.from(atob(msg.sig),  c => c.charCodeAt(0))
           const sigMsg    = new TextEncoder().encode(JSON.stringify({ relayNonce: msg.nonce, ecdhSpki: msg.ecdhSpki }))
           const verified  = await verifyAndUpdate(dbKey, spkiBytes, sigMsg, sigBytes)
-          console.log('[portpass] relay-hello verified='+!!verified)
           if (!verified) {
             ch.postMessage({ type: 'relay-error', message: 'Autofill request not authorized', nonce: msg.nonce })
             return

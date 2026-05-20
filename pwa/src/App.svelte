@@ -25,8 +25,6 @@
   $effect(() => { localStorage.setItem('accent', accent) })
 
   async function handleIntent(intentUrl) {
-    console.log('[portpass] handleIntent called; view='+view+' url='+intentUrl.slice(0,80))
-    if (view !== 'dashboard') { console.log('[portpass] vault not unlocked — discarding'); return }
 
     const q = intentUrl.indexOf('?')
     if (q < 0) return
@@ -39,29 +37,20 @@
     const nonce  = params.get('nonce') ?? ''
     const ts     = parseInt(params.get('ts') ?? '0', 10)
 
-    console.log('[portpass] intent params: url='+url+' nonce='+nonce+' ts='+ts+' age='+(Date.now()-ts)+'ms')
-    console.log('[portpass] sig len='+sigB64.length+' pub len='+pubB64.length+' ecdh len='+ecdhB64.length)
 
-    if (!sigB64 || !pubB64 || !ecdhB64 || !nonce || !ts) { console.log('[portpass] missing params'); return }
 
     const age = Date.now() - ts
-    if (age > 60000 || age < -5000) { console.log('[portpass] timestamp out of window, age='+age); return }
 
     const vaultUuid = get(selectedFile)?.uuid ?? ''
-    console.log('[portpass] vaultUuid='+vaultUuid)
     if (!vaultUuid) return
 
     const spkiBytes = Uint8Array.from(atob(pubB64), c => c.charCodeAt(0))
     const sigBytes  = Uint8Array.from(atob(sigB64), c => c.charCodeAt(0))
     const message   = new TextEncoder().encode(JSON.stringify({ url, nonce, ecdh: ecdhB64, ts }))
-    console.log('[portpass] verifying signature; spkiBytes.length='+spkiBytes.length+' sigBytes.length='+sigBytes.length)
-    console.log('[portpass] signed message:', JSON.stringify({ url, nonce, ecdh: ecdhB64, ts }))
 
     const delegate = await verifyAndUpdate(vaultUuid, spkiBytes, message, sigBytes)
-    console.log('[portpass] verifyAndUpdate result:', delegate ? 'delegate "'+delegate.name+'" (useCount='+delegate.useCount+')' : 'null (no match)')
     if (!delegate) return
 
-    console.log('[portpass] dispatching intent to Dashboard')
     pendingIntent = { url, nonce, ecdhSpkiB64: ecdhB64 }
   }
 

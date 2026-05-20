@@ -136,12 +136,10 @@ label.rec-replace span { font-size: 11px; color: #aaa }
   // Mode is finalised in onOpenerMessage once init arrives.
   ch.onmessage = function(e) {
     if (e.data && e.data.type === 'relay-pong' && e.data.nonce === nonce) {
-      console.log('[portpass relay] BC pong received; modeDecided='+modeDecided+' cprivKey='+!!cprivKey)
       bcPongArrived = true
       if (!modeDecided && cprivKey !== null) {
         modeDecided = true
         clearTimeout(modeTimer)
-        console.log('[portpass relay] mode: same-profile (BC)')
         doHello()
       }
     }
@@ -161,8 +159,6 @@ label.rec-replace span { font-size: 11px; color: #aaa }
     cprivKey = msg.privKey || null
     delegateId = msg.delegateId || null
 
-    console.log('[portpass relay] init received; url='+currentUrl+' hasPrivKey='+!!cprivKey+' delegateId='+delegateId+' bcPongArrived='+bcPongArrived+' isSecure='+isSecure)
-
     // Validate URL hostname against browser-reported origin.
     if (currentUrl) {
       try {
@@ -174,14 +170,12 @@ label.rec-replace span { font-size: 11px; color: #aaa }
 
     if (bcPongArrived) {
       modeDecided = true
-      console.log('[portpass relay] mode: same-profile (BC pong already here)')
       doHello()
     } else {
       modeTimer = setTimeout(function() {
         if (!modeDecided) {
           modeDecided = true
           if (cprivKey) {
-            console.log('[portpass relay] mode: cross-profile (no BC pong after 200ms)')
             startCrossProfile(cprivKey)
           } else {
             sendError('Portpass is not open — open and unlock Portpass first')
@@ -208,12 +202,10 @@ label.rec-replace span { font-size: 11px; color: #aaa }
 
       var ts = Date.now()
       var signedPayload = JSON.stringify({ url: currentUrl, nonce: nonce, ecdh: cpEcdhSpkiB64, ts: ts })
-      console.log('[portpass relay] signing payload:', signedPayload)
       var sigBytes = await crypto.subtle.sign(
         { name: 'ECDSA', hash: 'SHA-256' }, signingKey, new TextEncoder().encode(signedPayload)
       )
       var sigB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(sigBytes)))
-      console.log('[portpass relay] pubSpkiB64 length='+pubSpkiB64.length+' sigB64 length='+sigB64.length)
 
       if (!delegateId) throw new Error('No delegate ID — reinstall the bookmarklet')
 
@@ -221,7 +213,6 @@ label.rec-replace span { font-size: 11px; color: #aaa }
       // Portpass polls this slot on interval and processes any pending request.
       var requestBody = JSON.stringify({ url: currentUrl, nonce: nonce, ecdh: cpEcdhSpkiB64, ts: ts, sig: sigB64, pub: pubSpkiB64 })
       async function postRequest() {
-        console.log('[portpass relay] POSTing request to /drop/'+delegateId)
         try {
           var r = await fetch('http://localhost:7677/drop/' + delegateId, {
             method: 'POST',
@@ -238,18 +229,14 @@ label.rec-replace span { font-size: 11px; color: #aaa }
 
       // On bad blob (empty/unparseable), re-post the request so Portpass re-processes.
       async function onBadBlob() {
-        console.log('[portpass relay] bad blob — re-posting request')
         await postRequest().catch(function() {})
       }
 
       $status.textContent = 'Waiting for Portpass…'
-      console.log('[portpass relay] waiting for credentials at nonce', nonce)
       var blob = await pollRelayServer(nonce, 60000, onBadBlob)
-      console.log('[portpass relay] blob received, keys:', Object.keys(blob))
       await processRelayBlob(blob)
 
     } catch(e) {
-      console.log('[portpass relay] cross-profile error:', e.message)
       sendError(e.message || 'Autofill failed')
     }
   }
@@ -270,11 +257,9 @@ label.rec-replace span { font-size: 11px; color: #aaa }
             try { parsed = JSON.parse(text) } catch(_) {}
           }
           if (parsed && (parsed.ephPub || parsed.error)) {
-            console.log('[portpass relay] /pick response received')
             return parsed
           }
           // Bad blob — log and trigger re-post
-          console.log('[portpass relay] bad blob (first 40):', JSON.stringify(text.slice(0, 40)))
           if (onBadBlob) await onBadBlob()
         } else if (resp.status !== 404) throw new Error('Relay server error ' + resp.status)
       } catch(e) {
@@ -291,28 +276,21 @@ label.rec-replace span { font-size: 11px; color: #aaa }
   // Or error format: { error: "message" }
   // Plaintext: JSON array of records, each with pre-decrypted fields.
   async function processRelayBlob(blob) {
-    if (blob.error) { console.log('[portpass relay] blob error:', blob.error); sendError(blob.error); return }
-    console.log('[portpass relay] processRelayBlob: keys='+Object.keys(blob)+' cpEcdhKeyPair='+!!cpEcdhKeyPair)
     try {
       var ephPubJwk = JSON.parse(atob(blob.ephPub))
-      console.log('[portpass relay] importing ephemeral pubkey')
       var ephPubKey = await crypto.subtle.importKey(
         'jwk', ephPubJwk, { name: 'ECDH', namedCurve: 'P-256' }, false, []
       )
-      console.log('[portpass relay] deriving session key')
       var cpSessionKey = await crypto.subtle.deriveKey(
         { name: 'ECDH', public: ephPubKey }, cpEcdhKeyPair.privateKey,
         { name: 'AES-GCM', length: 256 }, false, ['decrypt']
       )
       var iv = Uint8Array.from(atob(blob.iv), function(c) { return c.charCodeAt(0) })
       var ct = Uint8Array.from(atob(blob.ciphertext), function(c) { return c.charCodeAt(0) })
-      console.log('[portpass relay] decrypting: iv.length='+iv.length+' ct.length='+ct.length)
       var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, cpSessionKey, ct)
       var records = JSON.parse(new TextDecoder().decode(pt))
-      console.log('[portpass relay] decrypted '+records.length+' records; opener='+!!window.opener)
       showCrossProfilePicker(records)
     } catch(e) {
-      console.log('[portpass relay] processRelayBlob error:', e.message, e)
       sendError('Decrypt failed: ' + e.message)
     }
   }
@@ -365,7 +343,7 @@ label.rec-replace span { font-size: 11px; color: #aaa }
               bookmarkletOrigin || '*'
             )
           }
-          setTimeout(function() { window.close() }, 10000)
+          setTimeout(function() { window.close() }, 100)
         }
       })(rec)
 
@@ -583,7 +561,7 @@ label.rec-replace span { font-size: 11px; color: #aaa }
     errEl.textContent = message
     document.getElementById('app').appendChild(errEl)
     if (window.opener) window.opener.postMessage({ type: 'error', message: message }, '*')
-    setTimeout(function() { window.close() }, 30000)
+    setTimeout(function() { window.close() }, 3000)
   }
 
   function canonicalURL(href) {
