@@ -56,7 +56,13 @@ Extensions are installed per-profile. A profile with no extensions has no extens
 
 **Workflow:** Alt-tab to the Portpass window when you need a password, copy it, and paste it in your main browser. The 30-second clipboard autoclear limits the window during which a compromised extension could read it.
 
-**Autofill and the dedicated profile.** The Autofill bookmarklet feature requires Portpass to run in the same browser profile as the pages you are filling — making the dedicated clean-profile approach above incompatible with Autofill. This is a deliberate opt-in tradeoff: you gain the convenience of autofill at the cost of exposing Portpass to any extensions installed in your main profile. Users who want the strongest extension isolation should continue using Portpass in a clean profile with manual copy and paste.
+**Autofill and the dedicated profile.** Portpass supports two autofill modes that work alongside the dedicated clean-profile setup:
+
+- **Same-profile autofill**: both Portpass and the page being filled are in the same browser profile. The bookmarklet opens a relay popup that communicates with Portpass via BroadcastChannel. This is more convenient but exposes Portpass to any extensions in that profile.
+
+- **Cross-profile autofill**: Portpass runs in a clean, extension-free profile; the bookmarklet runs in your main browsing profile. Credentials travel from Portpass to the login page via [portpass-relay](https://github.com/dbro/portpass), a tiny local HTTP dead-drop server (`localhost:7677`). This preserves full extension isolation — Portpass never touches the browsing profile. Requires portpass-relay to be running as a background service.
+
+Both modes use the **delegate model**: each bookmarklet installation holds an ECDSA P-256 private key; the corresponding public key is registered in Portpass. Every autofill request is signed with the private key and verified by Portpass before any credentials are exchanged. This means a malicious extension on the page cannot impersonate a legitimate bookmarklet and trick Portpass into delivering credentials to an attacker's key.
 
 ---
 
@@ -110,6 +116,38 @@ Clipboard access is restricted at the OS level on **iOS, Android, and Linux (Way
 Passkeys (WebAuthn) eliminate the clipboard and extension risks entirely — there is no password to copy, intercept, or sniff. Authentication is a cryptographic challenge/response that never leaves your device. If a site you use offers passkey login, using it is the strongest choice available. Portpass is for sites that still require a password; for everything else, prefer your platform's passkey manager (iCloud Keychain, Google Password Manager, Windows Hello, etc.).
 
 **Windows and Linux (X11)** have no OS-level clipboard isolation which means any running process can read the clipboard at any time. Users on these platforms should be especially careful to use the dedicated browser profile mitigation, and be aware that other apps may be able to read a copied password before the clipboard gets cleared.
+
+---
+
+## Autofill security
+
+The Autofill bookmarklet uses a **delegate model** to create a cryptographically authenticated channel between the bookmarklet and Portpass, without any server infrastructure and without browser extensions.
+
+### Trusted islands
+
+- **Bookmarklet URL** — stored in the browser's bookmark store, which no web API can read or modify. Contains an ECDSA P-256 private key unique to this installation.
+- **relay.html** — served from the Portpass HTTPS origin, cross-origin isolated from the page being autofilled. Receives the private key from the bookmarklet via `postMessage` with strict `targetOrigin`.
+- **Portpass** — holds the registered public key for each delegate; verifies every autofill request signature before acting.
+
+### Authentication
+
+Before exchanging any credentials, relay.html signs a challenge `{relayNonce, ecdhSpki}` (same-profile) or `{url, nonce, ecdh, timestamp}` (cross-profile) with the delegate's ECDSA P-256 private key. Portpass verifies the signature against the registered public keys. A forged or unsigned request is silently rejected.
+
+This prevents the masquerade attack: a malicious extension or page script running at the Portpass origin can observe the BroadcastChannel but cannot forge a valid ECDSA signature for a registered delegate's key.
+
+### Credential encryption in transit
+
+After authentication, credentials are encrypted with ECDH P-256 + AES-256-GCM. The session key is ephemeral — a fresh ECDH key pair is generated for each autofill session. Credentials in transit are ciphertext only; no key material appears on the channel.
+
+### Cross-profile relay server
+
+portpass-relay (`localhost:7677`) is a dumb pipe — it stores and forwards encrypted blobs without inspecting content. It binds to `127.0.0.1` only and is not accessible over the network. An attacker who can read the relay server's memory has OS-level access and is outside the threat model.
+
+### What autofill does not protect against
+
+- **Credential in the DOM**: after filling, the credential is in `input.value` and readable by any extension on the page. This is identical to manual typing or any other password manager and cannot be avoided without browser-level APIs.
+- **Bookmarklet theft**: if an attacker can read your browser's bookmark store (requires local access), they obtain the delegate's private key. Revoke the delegate in Portpass and drag a new bookmarklet to replace it.
+- **Extension present at drag-install time**: an extension could modify the bookmarklet's JavaScript before it is dragged. The effective security boundary is: no hostile extension may be present when the bookmarklet is installed.
 
 ---
 
