@@ -1,5 +1,5 @@
 import { test, expect, BrowserContext, Page } from '@playwright/test'
-import { makeBookmarkletUrl } from '../src/lib/bookmarklet.js'
+import { makeDelegateBookmarkletUrl } from '../src/lib/bookmarklet.js'
 
 const PORTPASS_URL    = 'http://localhost:5173/portpass/'
 const PORTPASS_ORIGIN = 'http://localhost:5173'
@@ -15,9 +15,30 @@ const LOGIN_FORM_HTML = `<!doctype html><html><body>
 <script>document.getElementById('f').onsubmit=e=>e.preventDefault()</script>
 </body></html>`
 
-// Opens a main (non-popup) Portpass tab with an unlocked vault, then a separate login
-// page. The bookmarklet will open a relay popup that bridges to the main Portpass tab.
-async function setupAutofillTest(context: BrowserContext): Promise<{ login: Page, portpass: Page }> {
+// Creates a delegate via the VaultSheet UI and returns its bookmarklet URL.
+// The private key is embedded in the returned javascript: URL by the app.
+async function createDelegateBookmarklet(portpass: Page): Promise<string> {
+  await portpass.locator('.vault-pill').click()
+  await expect(portpass.locator('.vault-settings-body')).toBeVisible()
+
+  await portpass.getByRole('button', { name: '+ New bookmarklet' }).click()
+  await portpass.getByPlaceholder('e.g. Chrome — work profile').fill('test')
+  await portpass.getByRole('button', { name: 'Create' }).click()
+
+  await portpass.locator('.vs-bookmarklet-chip').waitFor({ timeout: 5000 })
+  const url = await portpass.locator('.vs-bookmarklet-chip').getAttribute('href') ?? ''
+
+  await portpass.getByRole('button', { name: 'Done' }).click()
+  await portpass.keyboard.press('Escape')
+  await expect(portpass.locator('.vault-settings-body')).not.toBeVisible({ timeout: 3000 })
+
+  return url
+}
+
+// Opens a main (non-popup) Portpass tab with an unlocked vault, registers a delegate
+// bookmarklet, then opens a separate login page. Returns the login page, the Portpass
+// page, and the bookmarklet URL to use when activating autofill.
+async function setupAutofillTest(context: BrowserContext): Promise<{ login: Page, portpass: Page, bookmarkletUrl: string }> {
   await context.addInitScript(() => {
     if ((window as any).PublicKeyCredential) {
       (window.PublicKeyCredential as any).isUserVerifyingPlatformAuthenticatorAvailable = async () => false
@@ -28,7 +49,6 @@ async function setupAutofillTest(context: BrowserContext): Promise<{ login: Page
     })
   })
 
-  // Main Portpass tab (non-popup) — the relay popup will bridge to this.
   const portpass = await context.newPage()
   await portpass.goto(PORTPASS_URL)
   await portpass.getByRole('button', { name: 'Create one' }).click()
@@ -36,14 +56,15 @@ async function setupAutofillTest(context: BrowserContext): Promise<{ login: Page
   await portpass.getByRole('button', { name: 'Create vault' }).click()
   await expect(portpass.getByPlaceholder('Search vault')).toBeVisible({ timeout: 10000 })
 
-  // Login form page — the bookmarklet runs here.
+  const bookmarkletUrl = await createDelegateBookmarklet(portpass)
+
   const login = await context.newPage()
   await login.route(LOGIN_PATH, route =>
     route.fulfill({ contentType: 'text/html', body: LOGIN_FORM_HTML })
   )
   await login.goto(LOGIN_URL)
 
-  return { login, portpass }
+  return { login, portpass, bookmarkletUrl }
 }
 
 // Create a record in portpass and open its detail view.
@@ -62,14 +83,13 @@ async function createRecord(portpass: Page, opts: {
 }
 
 // Run the bookmarklet on the login page. Opens the relay popup, drives the picker
-// (selecting the first record and clicking Autofill), and waits for the popup to close.
+// (selecting the first record), and waits for the popup to close.
 // For error cases the popup closes automatically; the caller then checks login page state.
-async function activateBookmarklet(login: Page) {
+async function activateBookmarklet(login: Page, bookmarkletUrl: string) {
   const context = login.context()
   const popupPromise = context.waitForEvent('page')
 
-  const code = makeBookmarkletUrl(PORTPASS_URL)
-    .replace('javascript:', '')  // strip the scheme — evaluate runs the code directly
+  const code = bookmarkletUrl.replace('javascript:', '')
   await login.evaluate(new Function(decodeURIComponent(code)) as any)
 
   const relay = await popupPromise
@@ -85,7 +105,7 @@ async function activateBookmarklet(login: Page) {
     // Click the first record row — single click triggers autofill immediately.
     await relay.locator('.rec-row').first().click()
     // Wait for relay to close after delivering the fill command.
-    await relay.waitForEvent('close', { timeout: 8000 }).catch(() => {})
+    await relay.waitForEvent('close', { timeout: 12000 }).catch(() => {})
   }
 
   // Give the browser one animation frame so any fill overlay or error overlay on the
@@ -93,26 +113,26 @@ async function activateBookmarklet(login: Page) {
   await login.evaluate(() => new Promise(r => requestAnimationFrame(r)))
 }
 
-test.setTimeout(25000)
+test.setTimeout(30000)
 
 test.describe('Bookmarklet — overlay and autofill', () => {
 
   test('overlay shows record title and "Click the field to start from"', async ({ context }) => {
-    const { login, portpass } = await setupAutofillTest(context)
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
     await createRecord(portpass, { title: 'My Bank', autotype: '\\u\\t\\p\\n' })
 
-    await activateBookmarklet(login)
+    await activateBookmarklet(login, bookmarkletUrl)
     await expect(login.locator('#__pp')).toContainText('My Bank')
     await expect(login.locator('#__pp')).toContainText('Click the field to start from')
   })
 
   test('\\u\\t\\p fills username, tabs to password, fills password', async ({ context }) => {
-    const { login, portpass } = await setupAutofillTest(context)
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
     await createRecord(portpass, {
       title: 'My Bank', username: 'alice', password: 'hunter2', autotype: '\\u\\t\\p',
     })
 
-    await activateBookmarklet(login)
+    await activateBookmarklet(login, bookmarkletUrl)
     await login.locator('#user').click()
     // Overlay is removed by onFieldClick — its absence confirms autotype ran.
     await expect(login.locator('#__pp')).not.toBeVisible({ timeout: 3000 })
@@ -122,19 +142,18 @@ test.describe('Bookmarklet — overlay and autofill', () => {
   })
 
   test('\\u\\t\\p\\n fills both fields and submits the form', async ({ context }) => {
-    const { login, portpass } = await setupAutofillTest(context)
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
     await createRecord(portpass, {
       title: 'My Bank', username: 'alice', password: 'hunter2', autotype: '\\u\\t\\p\\n',
     })
 
-    // Detect form submission.
     let submitted = false
     await login.exposeFunction('__ppSubmitted', () => { submitted = true })
     await login.evaluate(() => {
       document.getElementById('f')!.addEventListener('submit', () => (window as any).__ppSubmitted())
     })
 
-    await activateBookmarklet(login)
+    await activateBookmarklet(login, bookmarkletUrl)
     await login.locator('#user').click()
 
     await expect(login.locator('#user')).toHaveValue('alice')
@@ -143,12 +162,12 @@ test.describe('Bookmarklet — overlay and autofill', () => {
   })
 
   test('\\u only fills username, does not touch password', async ({ context }) => {
-    const { login, portpass } = await setupAutofillTest(context)
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
     await createRecord(portpass, {
       title: 'Site', username: 'bob', password: 'secret', autotype: '\\u',
     })
 
-    await activateBookmarklet(login)
+    await activateBookmarklet(login, bookmarkletUrl)
     await login.locator('#user').click()
 
     await expect(login.locator('#user')).toHaveValue('bob')
@@ -156,12 +175,12 @@ test.describe('Bookmarklet — overlay and autofill', () => {
   })
 
   test('\\p only fills password field (starting from password input)', async ({ context }) => {
-    const { login, portpass } = await setupAutofillTest(context)
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
     await createRecord(portpass, {
       title: 'Site', password: 'mypassword', autotype: '\\p',
     })
 
-    await activateBookmarklet(login)
+    await activateBookmarklet(login, bookmarkletUrl)
     await login.locator('#pass').click()
 
     await expect(login.locator('#pass')).toHaveValue('mypassword')
@@ -169,7 +188,6 @@ test.describe('Bookmarklet — overlay and autofill', () => {
   })
 
   test('\\t skips non-input elements (e.g. show-password button) to reach password field', async ({ context }) => {
-    // Form with a button between username and password — simulates real-world sites.
     const formWithButton = `<!doctype html><html><body>
 <form id="f">
   <input id="user" type="text" name="username"/>
@@ -180,9 +198,8 @@ test.describe('Bookmarklet — overlay and autofill', () => {
 <script>document.getElementById('f').onsubmit=e=>e.preventDefault()</script>
 </body></html>`
 
-    const { login: _login, portpass } = await setupAutofillTest(context)
+    const { login: _login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
 
-    // Override the login page content with the button-in-the-middle form.
     const login = _login
     await login.route('/login-button-test', route =>
       route.fulfill({ contentType: 'text/html', body: formWithButton })
@@ -193,33 +210,32 @@ test.describe('Bookmarklet — overlay and autofill', () => {
       title: 'Button Site', username: 'alice', password: 'secret', autotype: '\\u\\t\\p',
     })
 
-    await activateBookmarklet(login)
+    await activateBookmarklet(login, bookmarkletUrl)
     await login.locator('#user').click()
 
     await expect(login.locator('#user')).toHaveValue('alice')
-    // The "Show" button was skipped; password field should be filled.
     await expect(login.locator('#pass')).toHaveValue('secret')
   })
 
   test('dismiss button removes the overlay', async ({ context }) => {
-    const { login, portpass } = await setupAutofillTest(context)
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
     await createRecord(portpass, { title: 'Site', autotype: '\\u\\p' })
 
-    await activateBookmarklet(login)
+    await activateBookmarklet(login, bookmarkletUrl)
     await login.locator('#__pp button').click()
     await expect(login.locator('#__pp')).toHaveCount(0)
   })
 
   test('error shown when no record is selected in Portpass', async ({ context }) => {
-    const { login, portpass } = await setupAutofillTest(context)
+    const { login, bookmarkletUrl } = await setupAutofillTest(context)
     // Vault is open but no record is selected.
 
-    await activateBookmarklet(login)
+    await activateBookmarklet(login, bookmarkletUrl)
     await expect(login.locator('#__pp')).toContainText('Open a record')
   })
 
   test('record without autotype sequence uses the default and shows overlay', async ({ context }) => {
-    const { login, portpass } = await setupAutofillTest(context)
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
     await portpass.getByRole('button', { name: 'New', exact: true }).click()
     await portpass.getByPlaceholder('e.g. Bank of America').fill('No Autotype')
     await portpass.locator('input.mono').first().fill('pass')
@@ -227,8 +243,7 @@ test.describe('Bookmarklet — overlay and autofill', () => {
     await portpass.getByRole('button', { name: 'Save' }).click()
     await portpass.locator('.record-row', { hasText: 'No Autotype' }).click()
 
-    await activateBookmarklet(login)
-    // Overlay should show the record name, not an error.
+    await activateBookmarklet(login, bookmarkletUrl)
     await expect(login.locator('#__pp')).toContainText('No Autotype')
     await expect(login.locator('#__pp')).toContainText('Click the field to start from')
   })
