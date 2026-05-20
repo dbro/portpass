@@ -134,7 +134,7 @@
         for (const uuid of searchRecords(vaultUuid, canonical, 2)) {
           const rec = getRecordData(vaultUuid, uuid)
           exact.push({ uuid, vaultUuid: vaultUuid === dbKey ? null : vaultUuid,
-            title: rec.Title, existingUrl: rec.URL, isCurrent: uuid === selectedUUID })
+            title: rec.Title, existingUrl: rec.URL, isCurrent: uuid === selectedUUID, matchType: 'exact' })
         }
       } catch {}
     }
@@ -146,7 +146,7 @@
 
     if (selectedUUID && record) {
       candidates.push({ uuid: selectedUUID, vaultUuid: selectedVaultUuid,
-        title: record.Title, existingUrl: record.URL, isCurrent: true, _d: -1 })
+        title: record.Title, existingUrl: record.URL, isCurrent: true, matchType: 'current', _d: -1 })
     }
 
     for (const { uuid: vaultUuid, items } of allVaults) {
@@ -157,7 +157,7 @@
         const d = levenshtein(queryHost, itemHost)
         if (d <= 5)
           candidates.push({ uuid: item.uuid, vaultUuid: vaultUuid === dbKey ? null : vaultUuid,
-            title: item.title, existingUrl: item.url, isCurrent: false, _d: d })
+            title: item.title, existingUrl: item.url, isCurrent: false, matchType: 'fuzzy', _d: d })
       }
     }
 

@@ -208,6 +208,17 @@ label.rec-replace span { font-size: 11px; color: #aaa }
         badge.textContent = 'open'
         titleRow.appendChild(badge)
       }
+      if (rec.matchType === 'exact') {
+        var mb = document.createElement('span')
+        mb.style.cssText = 'font-size:11px;color:#7dbf8e;flex-shrink:0'
+        mb.textContent = 'URL match'
+        titleRow.appendChild(mb)
+      } else if (rec.matchType === 'fuzzy') {
+        var mb = document.createElement('span')
+        mb.style.cssText = 'font-size:11px;color:#888;flex-shrink:0'
+        mb.textContent = 'similar URL'
+        titleRow.appendChild(mb)
+      }
       row.appendChild(titleRow)
 
       // Replace URL checkbox — always visible when record URL differs from current page.
