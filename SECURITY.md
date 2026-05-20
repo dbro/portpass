@@ -147,7 +147,7 @@ portpass-relay (`localhost:7677`) is a dumb pipe — it stores and forwards encr
 
 - **Credential in the DOM**: after filling, the credential is in `input.value` and readable by any extension on the page. This is identical to manual typing or any other password manager and cannot be avoided without browser-level APIs.
 - **Bookmarklet theft**: the delegate's private key is in the bookmark store, which no web API or browser extension can read. Obtaining it requires physical access to the device (someone at the keyboard), a compromised OS, or full control of the browser process itself — not achievable by a malicious web page or extension. If you believe a device has been physically compromised, revoke the delegate in Portpass and drag a new bookmarklet to replace it.
-- **Extension present at drag-install time**: an extension could modify the bookmarklet's JavaScript before it is dragged. The effective security boundary is: no hostile extension may be present when the bookmarklet is installed.
+- **Extension present at drag-install time**: an extension running in the **Portpass profile** (the clean profile where the bookmarklet is dragged *from*) could modify the bookmarklet's JavaScript or substitute a different key before the drag completes. This is why the clean profile must have no extensions — not just to protect the vault, but to ensure the bookmarklet delivered to the bookmarks bar is genuine. Extensions in the *destination* browsing profile cannot intercept the bookmarklet because it arrives already stored in the bookmark store, which extensions cannot read.
 
 ---
 
