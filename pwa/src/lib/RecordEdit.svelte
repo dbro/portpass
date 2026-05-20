@@ -560,7 +560,8 @@
         <div class="autotype-error">{autotypeError}</div>
       {:else if autotypeWarning}
         <div class="autotype-warning">{autotypeWarning}</div>
-      {:else if draft.Autotype}
+      {/if}
+      {#if draft.Autotype}
         <div class="autotype-hint muted">\u username · \p password · \m email · \2 OTP · \fN custom field N · \t Tab · \s Shift-Tab · \n Enter · \wNNN wait NNNms · \WNNN wait NNNs · \\ = \</div>
       {:else}
         <div class="autotype-hint muted">Leave blank to use default: \u\t\p\n</div>
