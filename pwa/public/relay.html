@@ -85,15 +85,30 @@ label.rec-replace span { font-size: 11px; color: #aaa }
 ;(function() {
   'use strict'
 
+  // ── Shared state ──────────────────────────────────────────────────────────
   var nonce = crypto.randomUUID()
-  var relayNonce = null
   var ch = new BroadcastChannel('portpass-autofill')
-  var sessionKey = null
-  var keyPair = null
   var bookmarkletOrigin = null
   var isSecure = false
   var currentUrl = ''
   var saveUrl = ''
+
+  // ── Mode detection state ──────────────────────────────────────────────────
+  var cprivKey = null       // private key from init message; used by cross-profile path
+  var bcPongArrived = false
+  var modeDecided = false
+  var modeTimer = null
+
+  // ── Cross-profile state ───────────────────────────────────────────────────
+  // ECDH key pair generated at startup; public key sent to Portpass in the
+  // web+portpass:// URL so Portpass can encrypt the credential blob for us.
+  var cpEcdhKeyPair = null
+  var cpEcdhSpkiB64 = null
+
+  // ── Same-profile state ────────────────────────────────────────────────────
+  var relayNonce = null
+  var sessionKey = null
+  var keyPair = null
   var selectedUuid = null
   var selectedVaultUuid = null
 
@@ -101,21 +116,223 @@ label.rec-replace span { font-size: 11px; color: #aaa }
   var $status  = document.getElementById('status')
   var $records = document.getElementById('records')
 
-  // 1. Ping Dashboard via BroadcastChannel to confirm it is open and unlocked.
-  var pingTimer = setTimeout(function() {
-    ch.close()
-    sendError('Portpass is not open — open and unlock Portpass first')
-  }, 5000)
+  // ── Startup: generate ECDH key pair, signal ready ─────────────────────────
+  // 'ready' is sent as soon as the key pair is available, before the BC ping
+  // completes. Mode is decided in onOpenerMessage once both init and pong state are known.
+  crypto.subtle.generateKey(
+    { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey']
+  ).then(function(kp) {
+    cpEcdhKeyPair = kp
+    return crypto.subtle.exportKey('spki', kp.publicKey)
+  }).then(function(spki) {
+    cpEcdhSpkiB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(spki)))
+    if (window.opener) window.opener.postMessage({ type: 'ready' }, '*')
+    window.addEventListener('message', onOpenerMessage)
+  }).catch(function() { sendError('Startup failed') })
 
+  // ── Ping Dashboard via BroadcastChannel (runs concurrently with ECDH above) ─
+  // If Portpass responds, same-profile mode is used; otherwise cross-profile.
+  // Mode is finalised in onOpenerMessage once init arrives.
   ch.onmessage = function(e) {
     if (e.data && e.data.type === 'relay-pong' && e.data.nonce === nonce) {
-      clearTimeout(pingTimer)
-      doHello()
+      bcPongArrived = true
+      if (!modeDecided && cprivKey !== null) {
+        // init already arrived; pong confirms same-profile
+        modeDecided = true
+        clearTimeout(modeTimer)
+        doHello()
+      }
     }
   }
   ch.postMessage({ type: 'relay-ping', nonce: nonce })
 
-  // 2. ECDH key exchange with Dashboard.
+  // ── Mode detection: init message from bookmarklet ─────────────────────────
+  function onOpenerMessage(event) {
+    var msg = event.data
+    if (!msg || msg.type !== 'init') return
+    window.removeEventListener('message', onOpenerMessage)
+
+    bookmarkletOrigin = event.origin
+    currentUrl = msg.url || ''
+    saveUrl = msg.saveUrl || currentUrl
+    isSecure = !!msg.isSecure
+    cprivKey = msg.privKey || null
+
+    // Validate URL hostname against browser-reported origin.
+    if (currentUrl) {
+      try {
+        var sentHost = currentUrl.split('/')[0]
+        var evHost = new URL(event.origin).host.replace(/^www\./, '').toLowerCase()
+        if (evHost && sentHost !== evHost) { sendError('URL mismatch — security check failed'); return }
+      } catch(_) {}
+    }
+
+    if (bcPongArrived) {
+      // BC pong already received: Portpass is in the same profile.
+      modeDecided = true
+      doHello()
+    } else {
+      // Wait briefly for a BC pong. If none arrives, fall back to cross-profile.
+      modeTimer = setTimeout(function() {
+        if (!modeDecided) {
+          modeDecided = true
+          if (cprivKey) {
+            startCrossProfile(cprivKey)
+          } else {
+            sendError('Portpass is not open — open and unlock Portpass first')
+          }
+        }
+      }, 200)
+    }
+  }
+
+  // ── Cross-profile path ────────────────────────────────────────────────────
+
+  async function startCrossProfile(privKeyJwk) {
+    $status.textContent = 'Requesting credentials…'
+    try {
+      // Import ECDSA private signing key from the JWK embedded in the bookmarklet.
+      var signingKey = await crypto.subtle.importKey(
+        'jwk', privKeyJwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']
+      )
+
+      // Derive the ECDSA public key SPKI from the JWK (x, y are the public components).
+      // Portpass uses this to identify which registered delegate is making the request.
+      var pubJwk = { kty: privKeyJwk.kty, crv: privKeyJwk.crv, x: privKeyJwk.x, y: privKeyJwk.y }
+      var pubKey = await crypto.subtle.importKey(
+        'jwk', pubJwk, { name: 'ECDSA', namedCurve: 'P-256' }, true, ['verify']
+      )
+      var pubSpki = await crypto.subtle.exportKey('spki', pubKey)
+      var pubSpkiB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(pubSpki)))
+
+      // Sign {url, nonce, ecdh, ts}. Portpass verifies this before acting.
+      var ts = Date.now()
+      var signedPayload = JSON.stringify({ url: currentUrl, nonce: nonce, ecdh: cpEcdhSpkiB64, ts: ts })
+      var sigBytes = await crypto.subtle.sign(
+        { name: 'ECDSA', hash: 'SHA-256' }, signingKey, new TextEncoder().encode(signedPayload)
+      )
+      var sigB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(sigBytes)))
+
+      // Fire web+portpass:// URL via anchor click (doesn't navigate relay.html away).
+      var params = new URLSearchParams({
+        url: currentUrl, sig: sigB64, pub: pubSpkiB64,
+        ecdh: cpEcdhSpkiB64, nonce: nonce, ts: String(ts)
+      })
+      var a = document.createElement('a')
+      a.href = 'web+portpass://autofill?' + params.toString()
+      a.style.display = 'none'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+
+      // Poll relay server until Portpass deposits the encrypted blob.
+      $status.textContent = 'Waiting for Portpass…'
+      var blob = await pollRelayServer(nonce, 60000)
+      await processRelayBlob(blob)
+
+    } catch(e) {
+      sendError(e.message || 'Autofill failed')
+    }
+  }
+
+  // Polls GET /pick/{nonce} every 500ms until a blob is available or timeout.
+  // Throws immediately if relay server is not reachable (TypeError = connection refused).
+  async function pollRelayServer(pollNonce, timeout) {
+    var deadline = Date.now() + timeout
+    var url = 'http://127.0.0.1:7677/pick/' + pollNonce
+    while (Date.now() < deadline) {
+      try {
+        var resp = await fetch(url)
+        if (resp.ok) return resp.json()
+        if (resp.status !== 404) throw new Error('Relay server error ' + resp.status)
+      } catch(e) {
+        if (e instanceof TypeError) throw new Error('portpass-relay is not running — start it first')
+        throw e
+      }
+      await new Promise(function(r) { setTimeout(r, 500) })
+    }
+    throw new Error('Timed out waiting for Portpass')
+  }
+
+  // Decrypts the relay server blob using the ECDH key pair generated at startup.
+  // Blob format: { ephPub: base64(JSON-stringified JWK), iv: base64, ciphertext: base64 }
+  // Or error format: { error: "message" }
+  // Plaintext: JSON array of records, each with pre-decrypted fields.
+  async function processRelayBlob(blob) {
+    if (blob.error) { sendError(blob.error); return }
+    var ephPubJwk = JSON.parse(atob(blob.ephPub))
+    var ephPubKey = await crypto.subtle.importKey(
+      'jwk', ephPubJwk, { name: 'ECDH', namedCurve: 'P-256' }, false, []
+    )
+    var cpSessionKey = await crypto.subtle.deriveKey(
+      { name: 'ECDH', public: ephPubKey }, cpEcdhKeyPair.privateKey,
+      { name: 'AES-GCM', length: 256 }, false, ['decrypt']
+    )
+    var iv = Uint8Array.from(atob(blob.iv), function(c) { return c.charCodeAt(0) })
+    var ct = Uint8Array.from(atob(blob.ciphertext), function(c) { return c.charCodeAt(0) })
+    var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, cpSessionKey, ct)
+    var records = JSON.parse(new TextDecoder().decode(pt))
+    showCrossProfilePicker(records)
+  }
+
+  // Cross-profile picker: fields are already decrypted; clicking a row sends fill immediately.
+  function showCrossProfilePicker(records) {
+    if (!records || !records.length) { sendError('No matching passwords found'); return }
+    $status.style.display = 'none'
+    $header.style.display = ''
+    $records.style.display = ''
+
+    records.forEach(function(rec) {
+      var row = document.createElement('div')
+      row.className = 'rec-row'
+      var titleRow = document.createElement('div')
+      titleRow.className = 'rec-title-row'
+      var titleEl = document.createElement('span')
+      titleEl.className = 'rec-title'
+      titleEl.textContent = rec.title
+      titleRow.appendChild(titleEl)
+
+      if (rec.isCurrent) {
+        var badge = document.createElement('span')
+        badge.className = 'rec-badge'
+        badge.textContent = 'open'
+        titleRow.appendChild(badge)
+      }
+      if (rec.matchType === 'exact') {
+        var mb = document.createElement('span')
+        mb.style.cssText = 'font-size:11px;color:#7dbf8e;flex-shrink:0'
+        mb.textContent = 'URL match'
+        titleRow.appendChild(mb)
+      } else if (rec.matchType === 'fuzzy') {
+        var mb = document.createElement('span')
+        mb.style.cssText = 'font-size:11px;color:#888;flex-shrink:0'
+        mb.textContent = 'similar URL'
+        titleRow.appendChild(mb)
+      }
+      row.appendChild(titleRow)
+
+      ;(function(r) {
+        row.onclick = function() {
+          if (!isSecure && sequenceHasSensitiveCode(r.autotype || '', r.sensitiveCodes || [])) {
+            sendError('Cannot autofill sensitive fields on a non-HTTPS page')
+            return
+          }
+          if (window.opener) {
+            window.opener.postMessage(
+              { type: 'fill', title: r.title, autotype: r.autotype, fields: r.fields },
+              bookmarkletOrigin || '*'
+            )
+          }
+          setTimeout(function() { window.close() }, 100)
+        }
+      })(rec)
+
+      $records.appendChild(row)
+    })
+  }
+
+  // ── Same-profile path ─────────────────────────────────────────────────────
+
   async function doHello() {
     try {
       keyPair = await crypto.subtle.generateKey(
@@ -145,43 +362,11 @@ label.rec-replace span { font-size: 11px; color: #aaa }
         { name: 'ECDH', public: ppPub }, keyPair.privateKey,
         { name: 'AES-GCM', length: 256 }, false, ['decrypt']
       )
-    } catch(_) {
-      sendError('Key exchange failed')
-      return
-    }
+    } catch(_) { sendError('Key exchange failed'); return }
 
     ch.onmessage = onBCMessage
 
-    // Signal bookmarklet that relay is ready.
-    if (window.opener) window.opener.postMessage({ type: 'ready' }, '*')
-
-    // 3. Wait for init message from bookmarklet with the current page URL.
-    window.addEventListener('message', onOpenerMessage)
-  }
-
-  function onOpenerMessage(event) {
-    var msg = event.data
-    if (!msg || msg.type !== 'init') return
-    window.removeEventListener('message', onOpenerMessage)
-
-    bookmarkletOrigin = event.origin
-    currentUrl = msg.url || ''
-    saveUrl = msg.saveUrl || currentUrl
-    isSecure = /^https:/i.test(event.origin) || /^http:\/\/localhost/i.test(event.origin)
-
-    // Validate: canonical URL hostname must match the browser-provided event.origin.
-    if (currentUrl) {
-      try {
-        var sentHost = currentUrl.split('/')[0]
-        var evHost = new URL(event.origin).host.replace(/^www\./, '').toLowerCase()
-        if (evHost && sentHost !== evHost) {
-          sendError('URL mismatch — security check failed')
-          return
-        }
-      } catch(_) {}
-    }
-
-    // 4. Ask Dashboard for URL-matching records.
+    // currentUrl is set from init before doHello() was called.
     $status.textContent = 'Searching for matches…'
     ch.postMessage({ type: 'relay-query', url: currentUrl, nonce: relayNonce })
   }
@@ -189,19 +374,14 @@ label.rec-replace span { font-size: 11px; color: #aaa }
   function onBCMessage(e) {
     var msg = e.data
     if (!msg || msg.nonce !== relayNonce) return
-    if (msg.type === 'relay-records')  showPicker(msg.records)
+    if (msg.type === 'relay-records')    showPicker(msg.records)
     else if (msg.type === 'relay-record')    deliverFill(msg)
     else if (msg.type === 'relay-url-saved') fetchCredentials()
     else if (msg.type === 'relay-error')     sendError(msg.message)
   }
 
-  // 5. Render the record picker UI. Clicking a row immediately triggers autofill.
   function showPicker(records) {
-    if (!records || !records.length) {
-      sendError('Open a record in Portpass first')
-      return
-    }
-
+    if (!records || !records.length) { sendError('Open a record in Portpass first'); return }
     $status.style.display = 'none'
     $header.style.display = ''
     $records.style.display = ''
@@ -209,10 +389,8 @@ label.rec-replace span { font-size: 11px; color: #aaa }
     records.forEach(function(rec) {
       var row = document.createElement('div')
       row.className = 'rec-row'
-
       var titleRow = document.createElement('div')
       titleRow.className = 'rec-title-row'
-
       var titleEl = document.createElement('span')
       titleEl.className = 'rec-title'
       titleEl.textContent = rec.title
@@ -237,8 +415,6 @@ label.rec-replace span { font-size: 11px; color: #aaa }
       }
       row.appendChild(titleRow)
 
-      // Replace URL checkbox — always visible when record URL differs from current page.
-      // Clicking the checkbox does not trigger autofill (stopPropagation).
       var replaceCheck = null
       if (rec.existingUrl && canonicalURL(rec.existingUrl) !== currentUrl) {
         var replaceLabel = document.createElement('label')
@@ -279,34 +455,6 @@ label.rec-replace span { font-size: 11px; color: #aaa }
     ch.postMessage({ type: 'relay-query', uuid: selectedUuid, vaultUuid: selectedVaultUuid, nonce: relayNonce })
   }
 
-  // Returns true if the autotype sequence references any of the given sensitive field codes.
-  // Parses the sequence properly so that \\ (literal backslash) does not cause false positives.
-  function sequenceHasSensitiveCode(seq, sensitiveCodes) {
-    if (!sensitiveCodes || !sensitiveCodes.length) return false
-    var i = 0
-    while (i < seq.length) {
-      if (seq[i] !== '\\') { i++; continue }
-      var code = seq[i + 1]
-      if (!code) break
-      if (code === '\\') { i += 2; continue }  // literal backslash, not a field code
-      if (code === 'f') {
-        var d = seq[i + 2]
-        var fieldCode = (d && /^[1-9]$/.test(d)) ? 'f' + d : 'f1'
-        if (sensitiveCodes.indexOf(fieldCode) >= 0) return true
-        i += (d && /^[0-9]$/.test(d)) ? 3 : 2
-      } else if (code === 'w' || code === 'W') {
-        var j = i + 2, count = 0
-        while (j < seq.length && count < 3 && /^[0-9]$/.test(seq[j])) { j++; count++ }
-        i = count ? j : i + 2
-      } else {
-        if (sensitiveCodes.indexOf(code) >= 0) return true
-        i += 2
-      }
-    }
-    return false
-  }
-
-  // 6. Decrypt credentials and deliver fill command to opener.
   async function deliverFill(msg) {
     try {
       if (!isSecure && sequenceHasSensitiveCode(msg.autotype || '', msg.sensitiveCodes || [])) {
@@ -327,6 +475,35 @@ label.rec-replace span { font-size: 11px; color: #aaa }
     } catch(_) {
       sendError('Failed to decrypt credentials')
     }
+  }
+
+  // ── Shared helpers ────────────────────────────────────────────────────────
+
+  // Returns true if the autotype sequence references any of the given sensitive field codes.
+  // Parses properly so \\ (literal backslash) does not cause false positives.
+  function sequenceHasSensitiveCode(seq, sensitiveCodes) {
+    if (!sensitiveCodes || !sensitiveCodes.length) return false
+    var i = 0
+    while (i < seq.length) {
+      if (seq[i] !== '\\') { i++; continue }
+      var code = seq[i + 1]
+      if (!code) break
+      if (code === '\\') { i += 2; continue }
+      if (code === 'f') {
+        var d = seq[i + 2]
+        var fieldCode = (d && /^[1-9]$/.test(d)) ? 'f' + d : 'f1'
+        if (sensitiveCodes.indexOf(fieldCode) >= 0) return true
+        i += (d && /^[0-9]$/.test(d)) ? 3 : 2
+      } else if (code === 'w' || code === 'W') {
+        var j = i + 2, count = 0
+        while (j < seq.length && count < 3 && /^[0-9]$/.test(seq[j])) { j++; count++ }
+        i = count ? j : i + 2
+      } else {
+        if (sensitiveCodes.indexOf(code) >= 0) return true
+        i += 2
+      }
+    }
+    return false
   }
 
   function sendError(message) {
@@ -355,6 +532,7 @@ label.rec-replace span { font-size: 11px; color: #aaa }
     else s = s.replace(/^www\./, '')
     return s.replace(/\/+$/, '')
   }
+
 })()
 </script>
 </body>

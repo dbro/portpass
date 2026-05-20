@@ -17,7 +17,7 @@
   import RecordEdit from './RecordEdit.svelte'
   import VaultSheet from './VaultSheet.svelte'
 
-  let { onclosed, isPopup = false, theme, accent, isDesktop, ontheme, onaccent } = $props()
+  let { onclosed, isPopup = false, theme, accent, isDesktop, ontheme, onaccent, intent = null, onclearintent } = $props()
 
   function focusOnMount(node) {
     setTimeout(() => node.focus(), 0)
@@ -234,6 +234,109 @@
       await w.write(data); await w.close()
     }
   }
+
+  // ── Cross-profile autofill intent handler ────────────────────────────────
+
+  // Extracts plain credential fields for a record (same logic as autofillEncryptRecord
+  // but returns unencrypted fields for cross-profile blob encryption).
+  function buildRecordFields(uuid, vaultUuid) {
+    const v = vaultUuid || dbKey
+    const rec = getRecordData(v, uuid)
+    const autotype = rec.Autotype || '\\u\\t\\p\\n'
+    if (autofillValidateSequence(autotype)) throw new Error(`Invalid autotype: ${autotype}`)
+
+    const codes = new Set()
+    const fieldNums = new Set()
+    for (let i = 0; i < autotype.length; ) {
+      if (autotype[i] !== '\\') { i++; continue }
+      const code = autotype[i + 1]
+      if (!code) break
+      if (code === 'f') {
+        const d = autotype[i + 2]
+        if (d && /^[1-9]$/.test(d)) { fieldNums.add(parseInt(d)); i += 3 }
+        else { fieldNums.add(1); i += 2 }
+      } else if (code === 'w' || code === 'W') {
+        let j = i + 2, count = 0
+        while (j < autotype.length && count < 3 && /^[0-9]$/.test(autotype[j])) { j++; count++ }
+        i = j
+      } else { codes.add(code); i += 2 }
+    }
+
+    const fields = {}
+    const sensitiveCodes = []
+    if (codes.has('u')) fields.u = rec.Username ?? ''
+    if (codes.has('p')) { fields.p = getFieldValue(v, uuid, 'Password') ?? ''; sensitiveCodes.push('p') }
+    if (codes.has('m')) fields.m = rec.Email ?? ''
+    if (codes.has('2')) { fields['2'] = getTOTP(v, uuid).code ?? ''; sensitiveCodes.push('2') }
+    for (const n of fieldNums) {
+      const cf = rec.CustomFields?.[n - 1]
+      fields['f' + n] = cf ? (cf.Value !== null ? cf.Value : (getCustomFieldValue(v, uuid, cf.Name) ?? '')) : ''
+      if (cf?.Value === null) sensitiveCodes.push('f' + n)
+    }
+    return { autotype, sensitiveCodes, fields }
+  }
+
+  async function processAutofillIntent({ url, nonce, ecdhSpkiB64 }) {
+    const DROP_URL = `http://127.0.0.1:7677/drop/${nonce}`
+    const postError = msg => fetch(DROP_URL, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: msg }),
+    }).catch(() => {})
+
+    const records = autofillFindRecords(url)
+    if (!records.length) { await postError('No matching passwords found'); return }
+
+    try {
+      const ephPair = await crypto.subtle.generateKey(
+        { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey']
+      )
+      const relayPubKey = await crypto.subtle.importKey(
+        'spki', Uint8Array.from(atob(ecdhSpkiB64), c => c.charCodeAt(0)),
+        { name: 'ECDH', namedCurve: 'P-256' }, false, []
+      )
+      const sessionKey = await crypto.subtle.deriveKey(
+        { name: 'ECDH', public: relayPubKey }, ephPair.privateKey,
+        { name: 'AES-GCM', length: 256 }, false, ['encrypt']
+      )
+
+      const recordsWithFields = []
+      for (const rec of records) {
+        try {
+          const rf = buildRecordFields(rec.uuid, rec.vaultUuid)
+          recordsWithFields.push({
+            uuid: rec.uuid, vaultUuid: rec.vaultUuid, title: rec.title,
+            matchType: rec.matchType, isCurrent: rec.isCurrent, existingUrl: rec.existingUrl,
+            autotype: rf.autotype, sensitiveCodes: rf.sensitiveCodes, fields: rf.fields,
+          })
+        } catch { /* skip records with invalid autotype */ }
+      }
+      if (!recordsWithFields.length) { await postError('No matching passwords found'); return }
+
+      const iv = crypto.getRandomValues(new Uint8Array(12))
+      const ct = await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv }, sessionKey,
+        new TextEncoder().encode(JSON.stringify(recordsWithFields))
+      )
+      const ephPubJwk = await crypto.subtle.exportKey('jwk', ephPair.publicKey)
+
+      await fetch(DROP_URL, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ephPub: btoa(JSON.stringify(ephPubJwk)),
+          iv: btoa(String.fromCharCode(...iv)),
+          ciphertext: btoa(String.fromCharCode(...new Uint8Array(ct))),
+        }),
+      })
+    } catch (e) {
+      await postError(e.message || 'Autofill failed')
+    }
+  }
+
+  $effect(() => {
+    if (!intent) return
+    onclearintent?.()
+    processAutofillIntent(intent)
+  })
 
   // Autofill postMessage handler — ECDH key exchange then encrypted query response.
   function autofillValidateSequence(seq) {

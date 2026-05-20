@@ -1,5 +1,8 @@
 <script>
   import { onMount } from 'svelte'
+  import { get } from 'svelte/store'
+  import { selectedFile } from './store.js'
+  import { verifyAndUpdate } from './lib/delegates.js'
   import { loadWasm } from './wasm.js'
   import StartPage from './lib/StartPage.svelte'
   import Dashboard from './lib/Dashboard.svelte'
@@ -12,6 +15,7 @@
   let multipleInstances = $state(false)
   let isPopup = $state(false)
   let relayMode = $state(false)
+  let pendingIntent = $state(null)
 
   let theme  = $state(localStorage.getItem('theme')  || 'dark')
   let accent = $state(localStorage.getItem('accent') || 'amber')
@@ -20,10 +24,37 @@
   $effect(() => { localStorage.setItem('theme',  theme)  })
   $effect(() => { localStorage.setItem('accent', accent) })
 
-  function handleIntent(intentUrl) {
-    // TODO: parse intentUrl (web+portpass://autofill?url=...&pubkey=...&nonce=...)
-    // and POST encrypted credential to http://127.0.0.1:7677/drop/{nonce}
-    console.log('[intent]', intentUrl)
+  async function handleIntent(intentUrl) {
+    if (view !== 'dashboard') return
+
+    const q = intentUrl.indexOf('?')
+    if (q < 0) return
+    const params = new URLSearchParams(intentUrl.slice(q + 1))
+
+    const url    = params.get('url')   ?? ''
+    const sigB64 = params.get('sig')   ?? ''
+    const pubB64 = params.get('pub')   ?? ''
+    const ecdhB64 = params.get('ecdh') ?? ''
+    const nonce  = params.get('nonce') ?? ''
+    const ts     = parseInt(params.get('ts') ?? '0', 10)
+
+    if (!sigB64 || !pubB64 || !ecdhB64 || !nonce || !ts) return
+
+    // Reject replayed requests (older than 60s or more than 5s in the future)
+    const age = Date.now() - ts
+    if (age > 60000 || age < -5000) return
+
+    const vaultUuid = get(selectedFile)?.uuid ?? ''
+    if (!vaultUuid) return
+
+    const spkiBytes = Uint8Array.from(atob(pubB64), c => c.charCodeAt(0))
+    const sigBytes  = Uint8Array.from(atob(sigB64), c => c.charCodeAt(0))
+    const message   = new TextEncoder().encode(JSON.stringify({ url, nonce, ecdh: ecdhB64, ts }))
+
+    const delegate = await verifyAndUpdate(vaultUuid, spkiBytes, message, sigBytes)
+    if (!delegate) return  // invalid signature — discard silently
+
+    pendingIntent = { url, nonce, ecdhSpkiB64: ecdhB64 }
   }
 
   // Respond to autofill queries when vault is locked (Dashboard handles unlocked case).
@@ -214,6 +245,8 @@
       {isDesktop}
       ontheme={t => theme = t}
       onaccent={a => accent = a}
+      intent={pendingIntent}
+      onclearintent={() => { pendingIntent = null }}
     />
   {/if}
   {#if multipleInstances && !isPopup}
