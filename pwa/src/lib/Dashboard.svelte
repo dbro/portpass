@@ -12,7 +12,7 @@
   import { addSecondaryCredential, removeSecondaryCredential } from './secondaryVaults.js'
   import { getSwitchboardUrl, getCrossProfileEnabled } from './delegates.js'
   import { isBiometricEnrolledForFile, unlockWithBiometric } from './biometric.js'
-  import { getDelegates, verifyAndUpdate } from './delegates.js'
+  import { getDelegates, verifyAndUpdate, setPinVerified, revokeDelegate } from './delegates.js'
   import Icon from './Icon.svelte'
   import RecordList from './RecordList.svelte'
   import RecordRead from './RecordRead.svelte'
@@ -54,6 +54,8 @@
   let _secondaryHandle = null
   let secondarySetup = $state(null) // { password, showPw, busy, error, needsAuth, filename }
   let newRecordVaultUuid = $state(null) // null = primary vault
+  let pinPending = $state(null) // { pin, delegateName, delegateId, onConfirm, onReject }
+  let delegatesVersion = $state(0)
 
   function relSaveTime(when) {
     if (!when) return ''
@@ -280,8 +282,9 @@
     return { autotype, sensitiveCodes, fields }
   }
 
-  async function processAutofillIntent({ url, nonce, ecdhSpkiB64 }) {
-    const wsSend = (msg) => { if (_sbWs) _sbWs.send(JSON.stringify(msg)) }
+  async function processAutofillIntent({ url, nonce, ecdhSpkiB64, delegate = null }) {
+    const ws = _sbWs
+    const wsSend = (msg) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg)) }
     const wsError = (error) => wsSend({ type: 'reply', replyTo: nonce, error })
 
     const records = autofillFindRecords(url)
@@ -289,43 +292,75 @@
 
     try {
       const ephPair = await crypto.subtle.generateKey(
-        { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey']
+        { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey', 'deriveBits']
       )
       const relayPubKey = await crypto.subtle.importKey(
         'spki', Uint8Array.from(atob(ecdhSpkiB64), c => c.charCodeAt(0)),
         { name: 'ECDH', namedCurve: 'P-256' }, false, []
       )
-      const sessionKey = await crypto.subtle.deriveKey(
-        { name: 'ECDH', public: relayPubKey }, ephPair.privateKey,
-        { name: 'AES-GCM', length: 256 }, false, ['encrypt']
-      )
+      const ephPubStr = btoa(JSON.stringify(await crypto.subtle.exportKey('jwk', ephPair.publicKey)))
 
-      const recordsWithFields = []
-      for (const rec of records) {
-        try {
-          const rf = buildRecordFields(rec.uuid, rec.vaultUuid)
-          recordsWithFields.push({
-            uuid: rec.uuid, vaultUuid: rec.vaultUuid, title: rec.title,
-            matchType: rec.matchType, isCurrent: rec.isCurrent, existingUrl: rec.existingUrl,
-            autotype: rf.autotype, sensitiveCodes: rf.sensitiveCodes, fields: rf.fields,
-          })
-        } catch { /* skip records with invalid autotype */ }
+      const sendCredentials = async () => {
+        const sessionKey = await crypto.subtle.deriveKey(
+          { name: 'ECDH', public: relayPubKey }, ephPair.privateKey,
+          { name: 'AES-GCM', length: 256 }, false, ['encrypt']
+        )
+        const recordsWithFields = []
+        for (const rec of records) {
+          try {
+            const rf = buildRecordFields(rec.uuid, rec.vaultUuid)
+            recordsWithFields.push({
+              uuid: rec.uuid, vaultUuid: rec.vaultUuid, title: rec.title,
+              matchType: rec.matchType, isCurrent: rec.isCurrent, existingUrl: rec.existingUrl,
+              autotype: rf.autotype, sensitiveCodes: rf.sensitiveCodes, fields: rf.fields,
+            })
+          } catch { /* skip records with invalid autotype */ }
+        }
+        if (!recordsWithFields.length) { wsError('No matching passwords found'); return }
+        const iv = crypto.getRandomValues(new Uint8Array(12))
+        const ct = await crypto.subtle.encrypt(
+          { name: 'AES-GCM', iv }, sessionKey,
+          new TextEncoder().encode(JSON.stringify(recordsWithFields))
+        )
+        wsSend({
+          type: 'reply', replyTo: nonce,
+          ephPub: ephPubStr,
+          iv: btoa(String.fromCharCode(...iv)),
+          ciphertext: btoa(String.fromCharCode(...new Uint8Array(ct))),
+        })
       }
-      if (!recordsWithFields.length) { wsError('No matching passwords found'); return }
 
-      const iv = crypto.getRandomValues(new Uint8Array(12))
-      const ct = await crypto.subtle.encrypt(
-        { name: 'AES-GCM', iv }, sessionKey,
-        new TextEncoder().encode(JSON.stringify(recordsWithFields))
-      )
-      const ephPubJwk = await crypto.subtle.exportKey('jwk', ephPair.publicKey)
+      if (delegate && !delegate.pinVerified) {
+        if (pinPending) { wsError('Another pairing is in progress'); return }
+        const pinBits = await crypto.subtle.deriveBits(
+          { name: 'ECDH', public: relayPubKey }, ephPair.privateKey, 24
+        )
+        const pb = new Uint8Array(pinBits)
+        const pin = String(((pb[0] << 16) | (pb[1] << 8) | pb[2]) % 1000000).padStart(6, '0')
+        wsSend({ type: 'reply', replyTo: nonce, pinRequired: true, ephPub: ephPubStr })
+        const delegateId = delegate.id
+        const timeout = setTimeout(() => { if (pinPending?.delegateId === delegateId) pinPending = null }, 60000)
+        pinPending = {
+          pin, delegateName: delegate.name, delegateId,
+          onConfirm: async () => {
+            clearTimeout(timeout)
+            try { await setPinVerified(dbKey, delegateId); wsSend({ type: 'reply', replyTo: nonce, paired: true }) }
+            catch (e) { wsError(e.message || 'Pairing failed') }
+            delegatesVersion++
+            pinPending = null
+          },
+          onReject: async () => {
+            clearTimeout(timeout)
+            await revokeDelegate(dbKey, delegateId)
+            wsError('Pairing rejected — bookmarklet has been revoked')
+            delegatesVersion++
+            pinPending = null
+          },
+        }
+        return
+      }
 
-      wsSend({
-        type: 'reply', replyTo: nonce,
-        ephPub: btoa(JSON.stringify(ephPubJwk)),
-        iv: btoa(String.fromCharCode(...iv)),
-        ciphertext: btoa(String.fromCharCode(...new Uint8Array(ct))),
-      })
+      await sendCredentials()
     } catch (e) {
       wsError(e.message || 'Autofill failed')
     }
@@ -379,9 +414,9 @@
         const spkiBytes = Uint8Array.from(atob(msg.pub), c => c.charCodeAt(0))
         const sigBytes  = Uint8Array.from(atob(msg.sig), c => c.charCodeAt(0))
         const message   = new TextEncoder().encode(JSON.stringify({ url: msg.url, nonce: msg.replyTo, ecdh: msg.ecdh, ts: msg.ts }))
-        const verified  = await verifyAndUpdate(dbKey, spkiBytes, message, sigBytes, 'relay')
-        if (!verified) return
-        await processAutofillIntent({ url: msg.url, nonce: msg.replyTo, ecdhSpkiB64: msg.ecdh })
+        const delegate  = await verifyAndUpdate(dbKey, spkiBytes, message, sigBytes, 'relay')
+        if (!delegate) return
+        await processAutofillIntent({ url: msg.url, nonce: msg.replyTo, ecdhSpkiB64: msg.ecdh, delegate })
       } catch(e) {}
     }
     let closed = false
@@ -554,8 +589,8 @@
           const spkiBytes = Uint8Array.from(atob(msg.pub), c => c.charCodeAt(0))
           const sigBytes  = Uint8Array.from(atob(msg.sig),  c => c.charCodeAt(0))
           const sigMsg    = new TextEncoder().encode(JSON.stringify({ relayNonce: msg.nonce, ecdhSpki: msg.ecdhSpki }))
-          const verified  = await verifyAndUpdate(dbKey, spkiBytes, sigMsg, sigBytes, 'bc')
-          if (!verified) {
+          const delegate  = await verifyAndUpdate(dbKey, spkiBytes, sigMsg, sigBytes, 'bc')
+          if (!delegate) {
             ch.postMessage({ type: 'relay-error', message: 'Autofill request not authorized', nonce: msg.nonce })
             return
           }
@@ -563,14 +598,50 @@
             'jwk', msg.pubkey, { name: 'ECDH', namedCurve: 'P-256' }, false, []
           )
           const pair = await crypto.subtle.generateKey(
-            { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey']
+            { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey', 'deriveBits']
           )
-          relaySessionKey = await crypto.subtle.deriveKey(
+          const candidateKey = await crypto.subtle.deriveKey(
             { name: 'ECDH', public: openerPub }, pair.privateKey,
             { name: 'AES-GCM', length: 256 }, false, ['encrypt']
           )
           const pubJwk = await crypto.subtle.exportKey('jwk', pair.publicKey)
-          ch.postMessage({ type: 'relay-hello-response', pubkey: pubJwk, nonce: msg.nonce })
+
+          if (!delegate.pinVerified) {
+            if (pinPending) {
+              ch.postMessage({ type: 'relay-error', message: 'Another pairing is in progress', nonce: msg.nonce })
+              return
+            }
+            const pinBits = await crypto.subtle.deriveBits(
+              { name: 'ECDH', public: openerPub }, pair.privateKey, 24
+            )
+            const pb = new Uint8Array(pinBits)
+            const pin = String(((pb[0] << 16) | (pb[1] << 8) | pb[2]) % 1000000).padStart(6, '0')
+            const nonce = msg.nonce
+            const delegateId = delegate.id
+            const timeout = setTimeout(() => { if (pinPending?.delegateId === delegateId) pinPending = null }, 60000)
+            pinPending = {
+              pin, delegateName: delegate.name, delegateId,
+              onConfirm: async () => {
+                clearTimeout(timeout)
+                relaySessionKey = candidateKey  // commit session key only after PIN confirmed
+                await setPinVerified(dbKey, delegateId)
+                ch.postMessage({ type: 'relay-pin-confirmed', nonce })
+                delegatesVersion++
+                pinPending = null
+              },
+              onReject: async () => {
+                clearTimeout(timeout)
+                await revokeDelegate(dbKey, delegateId)
+                ch.postMessage({ type: 'relay-error', message: 'Pairing rejected — bookmarklet has been revoked', nonce })
+                delegatesVersion++
+                pinPending = null
+              },
+            }
+            ch.postMessage({ type: 'relay-hello-response', pubkey: pubJwk, nonce: msg.nonce, pinRequired: true })
+          } else {
+            relaySessionKey = candidateKey
+            ch.postMessage({ type: 'relay-hello-response', pubkey: pubJwk, nonce: msg.nonce })
+          }
         } catch {
           relaySessionKey = null
           ch.postMessage({ type: 'relay-error', message: 'Key exchange failed', nonce: msg.nonce })
@@ -1306,6 +1377,22 @@
   </div>
 </div>
 
+<!-- PIN PAIRING BANNER -->
+{#if pinPending}
+  <div class="pin-banner">
+    <div class="pin-banner-top">
+      <span class="pin-banner-label">New bookmarklet pairing</span>
+      <span class="pin-banner-name">{pinPending.delegateName}</span>
+    </div>
+    <div class="pin-banner-code">{pinPending.pin}</div>
+    <div class="pin-banner-hint">Confirm this code matches the Portpass Autofill window</div>
+    <div class="pin-banner-actions">
+      <button class="btn btn-ghost" onclick={pinPending.onReject}>Reject</button>
+      <button class="btn btn-primary" onclick={pinPending.onConfirm}>Confirm</button>
+    </div>
+  </div>
+{/if}
+
 <!-- LIST PANE -->
 <div class="list-screen">
   <div class="searchbar">
@@ -1387,6 +1474,8 @@
       {isDesktop}
       {theme}
       {accent}
+      {pinPending}
+      {delegatesVersion}
       onback={closeVaultSheet}
       onlock={lockVault}
       onlockall={lockAllVaults}
@@ -1461,6 +1550,21 @@
 </div>
 
 <style>
+  .pin-banner {
+    background: var(--surface-2, var(--surface));
+    border-bottom: 1px solid var(--border);
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .pin-banner-top { display: flex; align-items: baseline; gap: 8px; }
+  .pin-banner-label { font-size: 12px; font-weight: 600; color: var(--text-soft); text-transform: uppercase; letter-spacing: 0.05em; }
+  .pin-banner-name { font-size: 13px; color: var(--text-soft); }
+  .pin-banner-code { font-size: 30px; font-weight: 700; letter-spacing: 0.12em; color: var(--accent); line-height: 1.2; margin: 2px 0; }
+  .pin-banner-hint { font-size: 12px; color: var(--text-soft); }
+  .pin-banner-actions { display: flex; gap: 8px; margin-top: 6px; }
+
   .help-backdrop {
     position: fixed;
     inset: 0;

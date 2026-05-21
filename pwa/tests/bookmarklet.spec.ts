@@ -35,10 +35,9 @@ async function createDelegateBookmarklet(portpass: Page): Promise<string> {
   return url
 }
 
-// Opens a main (non-popup) Portpass tab with an unlocked vault, registers a delegate
-// bookmarklet, then opens a separate login page. Returns the login page, the Portpass
-// page, and the bookmarklet URL to use when activating autofill.
-async function setupAutofillTest(context: BrowserContext): Promise<{ login: Page, portpass: Page, bookmarkletUrl: string }> {
+// Base setup: vault + delegate + login page, but delegate is NOT yet paired.
+// Use this for PIN ceremony tests. Most tests should use setupAutofillTest instead.
+async function setupBase(context: BrowserContext): Promise<{ login: Page, portpass: Page, bookmarkletUrl: string }> {
   await context.addInitScript(() => {
     if ((window as any).PublicKeyCredential) {
       (window.PublicKeyCredential as any).isUserVerifyingPlatformAuthenticatorAvailable = async () => false
@@ -65,6 +64,33 @@ async function setupAutofillTest(context: BrowserContext): Promise<{ login: Page
   await login.goto(LOGIN_URL)
 
   return { login, portpass, bookmarkletUrl }
+}
+
+// Runs the first-use PIN pairing ceremony: activates the bookmarklet, confirms in
+// Portpass, and waits for the relay to close. Leaves the delegate paired.
+async function completePairing(login: Page, portpass: Page, bookmarkletUrl: string) {
+  const popupPromise = login.context().waitForEvent('page')
+  const code = bookmarkletUrl.replace('javascript:', '')
+  await login.evaluate(new Function(decodeURIComponent(code)) as any)
+  const relay = await popupPromise
+  await relay.waitForLoadState('domcontentloaded')
+
+  await relay.locator('#pin-screen').waitFor({ timeout: 10000 })
+  await portpass.locator('.pin-banner').waitFor({ timeout: 5000 })
+  await portpass.getByRole('button', { name: 'Confirm' }).click()
+  await relay.waitForEvent('close', { timeout: 5000 })
+
+  // Wait for bookmarklet to reset __ppRunning after detecting popup closed.
+  await login.waitForFunction(() => !(window as any).__ppRunning, { timeout: 3000 })
+}
+
+// Opens a main (non-popup) Portpass tab with an unlocked vault, registers a delegate
+// bookmarklet, completes PIN pairing, then opens a separate login page. Returns the
+// login page, the Portpass page, and the bookmarklet URL to use when activating autofill.
+async function setupAutofillTest(context: BrowserContext): Promise<{ login: Page, portpass: Page, bookmarkletUrl: string }> {
+  const result = await setupBase(context)
+  await completePairing(result.login, result.portpass, result.bookmarkletUrl)
+  return result
 }
 
 // Create a record in portpass and open its detail view.
@@ -251,4 +277,104 @@ test.describe('Bookmarklet — overlay and autofill', () => {
     await expect(login.locator('#__pp')).toContainText('Click the field to start from')
   })
 
+})
+
+test.describe('PIN pairing ceremony', () => {
+
+  test('first use shows PIN screen in relay and banner in Portpass', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupBase(context)
+
+    const popupPromise = context.waitForEvent('page')
+    const code = bookmarkletUrl.replace('javascript:', '')
+    await login.evaluate(new Function(decodeURIComponent(code)) as any)
+    const relay = await popupPromise
+    await relay.waitForLoadState('domcontentloaded')
+
+    await expect(relay.locator('#pin-screen')).toBeVisible({ timeout: 10000 })
+    await expect(portpass.locator('.pin-banner')).toBeVisible({ timeout: 5000 })
+  })
+
+  test('PIN code shown in relay matches PIN code shown in Portpass', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupBase(context)
+
+    const popupPromise = context.waitForEvent('page')
+    const code = bookmarkletUrl.replace('javascript:', '')
+    await login.evaluate(new Function(decodeURIComponent(code)) as any)
+    const relay = await popupPromise
+    await relay.waitForLoadState('domcontentloaded')
+
+    await relay.locator('#pin-screen').waitFor({ timeout: 10000 })
+    await portpass.locator('.pin-banner').waitFor({ timeout: 5000 })
+
+    const relayPin    = (await relay.locator('#pin-code').textContent())?.trim()
+    const portpassPin = (await portpass.locator('.pin-banner-code').textContent())?.trim()
+
+    expect(relayPin).toMatch(/^\d{6}$/)
+    expect(relayPin).toBe(portpassPin)
+  })
+
+  test('confirming clears banner in Portpass and closes relay', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupBase(context)
+    await completePairing(login, portpass, bookmarkletUrl)
+    await expect(portpass.locator('.pin-banner')).toHaveCount(0)
+  })
+
+  test('VaultSheet shows Not-paired before and Paired after confirming', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupBase(context)
+
+    await portpass.locator('.vault-pill').click()
+    await expect(portpass.locator('.delegate-badge.unpaired')).toBeVisible({ timeout: 3000 })
+    await portpass.keyboard.press('Escape')
+
+    await completePairing(login, portpass, bookmarkletUrl)
+
+    await portpass.locator('.vault-pill').click()
+    await expect(portpass.locator('.delegate-badge.paired')).toBeVisible({ timeout: 3000 })
+    await portpass.keyboard.press('Escape')
+  })
+
+  test('rejecting revokes delegate and forwards error to login page', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupBase(context)
+
+    const popupPromise = context.waitForEvent('page')
+    const code = bookmarkletUrl.replace('javascript:', '')
+    await login.evaluate(new Function(decodeURIComponent(code)) as any)
+    const relay = await popupPromise
+    await relay.waitForLoadState('domcontentloaded')
+
+    await relay.locator('#pin-screen').waitFor({ timeout: 10000 })
+    await portpass.locator('.pin-banner').waitFor({ timeout: 5000 })
+    await portpass.getByRole('button', { name: 'Reject' }).click()
+
+    await expect(login.locator('#__pp')).toContainText('rejected', { timeout: 5000 })
+
+    await portpass.locator('.vault-pill').click()
+    await expect(portpass.locator('.delegate-row')).toHaveCount(0, { timeout: 3000 })
+  })
+
+  test('second use after pairing skips ceremony and shows picker', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupBase(context)
+    await createRecord(portpass, { title: 'My Site', autotype: '\\u\\p' })
+    await completePairing(login, portpass, bookmarkletUrl)
+
+    const popupPromise = context.waitForEvent('page')
+    const code = bookmarkletUrl.replace('javascript:', '')
+    await login.evaluate(new Function(decodeURIComponent(code)) as any)
+    const relay = await popupPromise
+    await relay.waitForLoadState('domcontentloaded')
+
+    await expect(relay.locator('.rec-row')).toBeVisible({ timeout: 10000 })
+    await expect(relay.locator('#pin-screen')).toHaveCount(0)
+  })
+
+})
+
+test('bookmarklet shows error overlay when invoked on the Portpass page itself', async ({ context }) => {
+  const { portpass, bookmarkletUrl } = await setupAutofillTest(context)
+
+  const code = bookmarkletUrl.replace('javascript:', '')
+  await portpass.evaluate(new Function(decodeURIComponent(code)) as any)
+
+  await expect(portpass.locator('#__pp')).toContainText('Autofill', { timeout: 3000 })
+  await expect(portpass.locator('#__pp')).toContainText('available on the Portpass page', { timeout: 1000 })
 })

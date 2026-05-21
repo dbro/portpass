@@ -13,11 +13,13 @@ async function save(all) {
 }
 
 function migrate(d) {
-  if ('useCount' in d || 'lastUsed' in d) {
-    const { useCount, lastUsed, ...rest } = d
-    return { ...rest, bcCount: 0, bcLastUsed: null, relayCount: 0, relayLastUsed: null }
+  let r = d
+  if ('useCount' in r || 'lastUsed' in r) {
+    const { useCount, lastUsed, ...rest } = r
+    r = { ...rest, bcCount: 0, bcLastUsed: null, relayCount: 0, relayLastUsed: null }
   }
-  return d
+  if (!('pinVerified' in r)) r = { ...r, pinVerified: false }
+  return r
 }
 
 export async function getDelegates(vaultUuid) {
@@ -37,6 +39,7 @@ export async function addDelegate(vaultUuid, name, publicKeySpki) {
     bcLastUsed: null,
     relayCount: 0,
     relayLastUsed: null,
+    pinVerified: false,
   }
   all[vaultUuid] = [delegate, ...(all[vaultUuid] ?? [])]
   await save(all)
@@ -84,6 +87,13 @@ export async function verifyAndUpdate(vaultUuid, spkiBytes, message, signatureBy
     } catch { continue }
   }
   return null
+}
+
+export async function setPinVerified(vaultUuid, delegateId) {
+  const all = await load()
+  const list = (all[vaultUuid] ?? []).map(migrate)
+  const d = list.find(d => d.id === delegateId)
+  if (d) { d.pinVerified = true; all[vaultUuid] = list; await save(all) }
 }
 
 export async function getSwitchboardUrl(vaultUuid) {
