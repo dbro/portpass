@@ -26,7 +26,13 @@
 
   $effect(() => {
     void $delegatesVersion
-    getDelegates(_vaultUuid).then(d => delegates = d)
+    getDelegates(_vaultUuid).then(d => {
+      delegates = d
+      if (d.length === 0 && get(crossProfileEnabled)) {
+        setCrossProfileEnabled(_vaultUuid, false)
+        crossProfileEnabled.set(false)
+      }
+    })
   })
 
   async function disableBiometric() {
@@ -425,8 +431,8 @@
         <div class="vault-row" style="margin-bottom:4px">
           <span class="vault-label muted" style="font-size:13px">Enable cross-profile autofill</span>
           <div class="vault-segmented">
-            <button class:on={!$crossProfileEnabled} onclick={async () => { await setCrossProfileEnabled(_vaultUuid, false); crossProfileEnabled.set(false) }}>Off</button>
-            <button class:on={$crossProfileEnabled}  onclick={async () => { await setCrossProfileEnabled(_vaultUuid, true);  crossProfileEnabled.set(true)  }}>On</button>
+            <button class:on={!$crossProfileEnabled} disabled={!delegates.length} onclick={async () => { await setCrossProfileEnabled(_vaultUuid, false); crossProfileEnabled.set(false) }}>Off</button>
+            <button class:on={$crossProfileEnabled}  disabled={!delegates.length} onclick={async () => { await setCrossProfileEnabled(_vaultUuid, true);  crossProfileEnabled.set(true)  }}>On</button>
           </div>
         </div>
         {#if $crossProfileEnabled}
@@ -999,6 +1005,8 @@
     gap: 4px;
     width: fit-content;
   }
+
+  .vault-segmented button:disabled { opacity: 0.4; cursor: not-allowed; }
 
   .vault-segmented button {
     padding: 8px 32px;
