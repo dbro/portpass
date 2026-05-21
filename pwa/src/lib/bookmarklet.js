@@ -96,9 +96,36 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, PRIV_KEY_JWK, 
     return div
   }
 
+  function firstVisibleInput() {
+    var list = focusableList()
+    for (var i = 0; i < list.length; i++) {
+      var r = list[i].getBoundingClientRect()
+      if (r.bottom > 0 && r.top < window.innerHeight && r.right > 0 && r.left < window.innerWidth) return list[i]
+    }
+    return null
+  }
+
   function showFillOverlay(title, autotype, fields, startEl) {
     removeOverlay()
     var div = mkOverlay()
+
+    if (!startEl) {
+      var nearEl = firstVisibleInput()
+      if (nearEl) {
+        var r = nearEl.getBoundingClientRect()
+        var top = window.innerHeight - r.bottom >= 100
+          ? Math.round(r.bottom + 8)
+          : Math.max(8, Math.round(r.top - 96))
+        div.style.top   = top + 'px'
+        div.style.left  = Math.max(8, Math.min(Math.round(r.left), window.innerWidth - 344)) + 'px'
+        div.style.right = 'auto'
+      } else {
+        div.style.top       = '50%'
+        div.style.left      = '50%'
+        div.style.right     = 'auto'
+        div.style.transform = 'translate(-50%,-50%)'
+      }
+    }
 
     var brand = document.createElement('div')
     brand.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #2e3240'
