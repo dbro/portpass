@@ -1,7 +1,7 @@
 import { get, set, del } from 'idb-keyval'
 
 const STORAGE_KEY = 'delegates-v1'
-const SWITCHBOARD_URL_DEFAULT = 'http://localhost:7577'
+const SWITCHBOARD_URL_DEFAULT = 'ws://localhost:7577'
 
 async function load() {
   return (await get(STORAGE_KEY)) ?? {}

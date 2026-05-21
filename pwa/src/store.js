@@ -6,4 +6,5 @@ export const secondaryVaults  = writable([])   // Array of { handle, name, filen
 export const toast            = writable(null) // { message, action?, duration? }
 export const clipboardSession = writable(null) // { token: number, expiresAt: number } | null
 export const clipboardContext = writable(null) // { token, field, uuid, hash: number[] } | null
-export const switchboardUrl   = writable('http://localhost:7577')
+export const switchboardUrl       = writable('ws://localhost:7577')
+export const switchboardConnected = writable(false)

@@ -1,8 +1,8 @@
 <script>
-  import { onMount, onDestroy } from 'svelte'
+  import { onMount } from 'svelte'
   import { get } from 'svelte/store'
   import { getDatabaseInfo, openDatabase, updateDBFields } from '../wasm.js'
-  import { selectedFile, dbItems, secondaryVaults, switchboardUrl } from '../store.js'
+  import { selectedFile, dbItems, secondaryVaults, switchboardUrl, switchboardConnected } from '../store.js'
   import { isBiometricSupported, isBiometricEnrolled, enrollBiometric, clearBiometric } from './biometric.js'
   import { makeDelegateBookmarkletUrl } from './bookmarklet.js'
   import { getDelegates, addDelegate, revokeDelegate, setSwitchboardUrl } from './delegates.js'
@@ -206,11 +206,9 @@
   }
 
   // ── Advanced / switchboard ────────────────────────────────────────────────
-  let advancedOpen       = $state(false)
-  let relayProbeStatus   = $state(null)   // null | 'ok' | 'error'
-  let editSwitchboardUrl       = $state('')
-  let switchboardUrlDirty      = $state(false)
-  let advancedInterval   = null
+  let advancedOpen        = $state(false)
+  let editSwitchboardUrl  = $state('')
+  let switchboardUrlDirty = $state(false)
 
   let totalRelayCount = $derived(delegates.reduce((n, d) => n + (d.relayCount ?? 0), 0))
   let lastRelayUsed   = $derived(
@@ -222,21 +220,6 @@
     if (advancedOpen) {
       editSwitchboardUrl  = get(switchboardUrl)
       switchboardUrlDirty = false
-      probeRelay()
-      advancedInterval = setInterval(probeRelay, 5000)
-    } else {
-      clearInterval(advancedInterval)
-      advancedInterval   = null
-      relayProbeStatus   = null
-    }
-  }
-
-  async function probeRelay() {
-    try {
-      const r = await fetch(`${editSwitchboardUrl}/status`, { signal: AbortSignal.timeout(500) })
-      relayProbeStatus = r.ok ? 'ok' : 'error'
-    } catch {
-      relayProbeStatus = 'error'
     }
   }
 
@@ -244,15 +227,12 @@
     await setSwitchboardUrl(_vaultUuid, editSwitchboardUrl)
     switchboardUrl.set(editSwitchboardUrl)
     switchboardUrlDirty = false
-    probeRelay()
   }
 
   function cancelRelayUrlEdit() {
     editSwitchboardUrl  = get(switchboardUrl)
     switchboardUrlDirty = false
   }
-
-  onDestroy(() => clearInterval(advancedInterval))
 
   function copyChip() {
     navigator.clipboard.writeText(newDelegateUrl).then(() => {
@@ -444,7 +424,7 @@
           style="font-size:13px"
           bind:value={editSwitchboardUrl}
           oninput={() => { switchboardUrlDirty = editSwitchboardUrl !== get(switchboardUrl) }}
-          placeholder="http://localhost:7577"
+          placeholder="ws://localhost:7577"
         />
         {#if switchboardUrlDirty}
           <div class="switchboard-url-actions">
@@ -453,13 +433,9 @@
           </div>
         {/if}
         <div class="switchboard-status-row">
-          <span class="switchboard-status-dot" class:switchboard-ok={relayProbeStatus === 'ok'} class:switchboard-error={relayProbeStatus === 'error'}></span>
+          <span class="switchboard-status-dot" class:switchboard-ok={$switchboardConnected} class:switchboard-error={!$switchboardConnected}></span>
           <span class="muted" style="font-size:13px">
-            {#if relayProbeStatus === 'ok'}
-              Cross-profile autofill ready
-            {:else if relayProbeStatus === 'error'}
-              portpass-switchboard not detected
-            {/if}
+            {$switchboardConnected ? 'Cross-profile autofill ready' : 'portpass-switchboard not connected'}
           </span>
         </div>
         <div class="muted" style="font-size:12px">

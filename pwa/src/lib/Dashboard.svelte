@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { get } from 'svelte/store'
-  import { selectedFile, dbItems, secondaryVaults, toast, clipboardSession, clipboardContext, switchboardUrl } from '../store.js'
+  import { selectedFile, dbItems, secondaryVaults, toast, clipboardSession, clipboardContext, switchboardUrl, switchboardConnected } from '../store.js'
   import {
     getRecordData, getDatabaseData, saveDatabase, getDatabaseInfo,
     updateRecordFields, updateDBFields, deleteRecord as wasmDeleteRecord,
@@ -344,7 +344,8 @@
   let _sbConnecting = false
 
   function sbWsUrl() {
-    return get(switchboardUrl).replace(/^http/, 'ws') + '/ws'
+    // Accept both ws:// and http:// stored formats
+    return get(switchboardUrl).replace(/^http/, 'ws').replace(/\/ws$/, '') + '/ws'
   }
 
   function connectSwitchboard() {
@@ -355,6 +356,7 @@
     ws.onopen = async () => {
       _sbWs = ws
       _sbConnecting = false
+      switchboardConnected.set(true)
       const delegates = await getDelegates(dbKey)
       if (delegates.length && _sbWs === ws)
         ws.send(JSON.stringify({ type: 'register', delegates: delegates.map(d => d.id) }))
@@ -374,7 +376,7 @@
       } catch(e) {}
     }
     ws.onclose = ws.onerror = () => {
-      if (_sbWs === ws) { _sbWs = null; _sbConnecting = false }
+      if (_sbWs === ws) { _sbWs = null; _sbConnecting = false; switchboardConnected.set(false) }
       setTimeout(connectSwitchboard, 2000)
     }
   }
@@ -385,7 +387,7 @@
     if (_sbWs) { _sbWs.close(); _sbWs = null }
     _sbConnecting = false
     connectSwitchboard()
-    return () => { if (_sbWs) { _sbWs.close(); _sbWs = null }; _sbConnecting = false }
+    return () => { if (_sbWs) { _sbWs.close(); _sbWs = null }; _sbConnecting = false; switchboardConnected.set(false) }
   })
 
   // Autofill postMessage handler — ECDH key exchange then encrypted query response.
