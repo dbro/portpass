@@ -375,8 +375,12 @@
         await processAutofillIntent({ url: msg.url, nonce: msg.nonce, ecdhSpkiB64: msg.ecdh })
       } catch(e) {}
     }
+    let closed = false
     ws.onclose = ws.onerror = () => {
-      if (_sbWs === ws) { _sbWs = null; _sbConnecting = false; switchboardConnected.set(false) }
+      if (closed) return
+      closed = true
+      if (_sbWs === ws) { _sbWs = null; switchboardConnected.set(false) }
+      _sbConnecting = false
       setTimeout(connectSwitchboard, 2000)
     }
   }
