@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { get } from 'svelte/store'
-  import { selectedFile, dbItems, secondaryVaults, toast, clipboardSession, clipboardContext, switchboardUrl, switchboardConnected } from '../store.js'
+  import { selectedFile, dbItems, secondaryVaults, toast, clipboardSession, clipboardContext, switchboardUrl, switchboardConnected, crossProfileEnabled } from '../store.js'
   import {
     getRecordData, getDatabaseData, saveDatabase, getDatabaseInfo,
     updateRecordFields, updateDBFields, deleteRecord as wasmDeleteRecord,
@@ -10,7 +10,7 @@
     getTOTP, getFieldValue, getCustomFieldValue,
   } from '../wasm.js'
   import { addSecondaryCredential, removeSecondaryCredential } from './secondaryVaults.js'
-  import { getSwitchboardUrl } from './delegates.js'
+  import { getSwitchboardUrl, getCrossProfileEnabled } from './delegates.js'
   import { isBiometricEnrolledForFile, unlockWithBiometric } from './biometric.js'
   import { getDelegates, verifyAndUpdate } from './delegates.js'
   import Icon from './Icon.svelte'
@@ -78,6 +78,7 @@
       lastSave = info?.when ?? ''
     } catch (e) {}
     getSwitchboardUrl(dbKey).then(url => switchboardUrl.set(url)).catch(() => {})
+    getCrossProfileEnabled(dbKey).then(v => crossProfileEnabled.set(v)).catch(() => {})
     document.addEventListener('visibilitychange', onVisibilityChange)
     window.addEventListener('focus', onWindowFocus)
     return () => {
@@ -348,9 +349,17 @@
     return get(switchboardUrl).replace(/^http/, 'ws').replace(/\/ws$/, '') + '/ws'
   }
 
-  function connectSwitchboard() {
+  async function connectSwitchboard() {
     if (_sbWs || _sbConnecting) return
+    if (!get(crossProfileEnabled)) return
     _sbConnecting = true
+    const delegates = await getDelegates(dbKey)
+    if (!delegates.length) {
+      _sbConnecting = false
+      setTimeout(connectSwitchboard, 10000)  // retry when a delegate may have been created
+      return
+    }
+    if (_sbWs) { _sbConnecting = false; return }  // connected while we awaited
     let ws
     try { ws = new WebSocket(sbWsUrl()) } catch { _sbConnecting = false; return }
     ws.onopen = async () => {
@@ -387,7 +396,8 @@
 
   $effect(() => {
     if (isPopup) return
-    const _url = $switchboardUrl  // re-connect when URL changes
+    const _url = $switchboardUrl       // re-connect when URL changes
+    const _en  = $crossProfileEnabled  // re-connect when toggled on
     if (_sbWs) { _sbWs.close(); _sbWs = null }
     _sbConnecting = false
     connectSwitchboard()

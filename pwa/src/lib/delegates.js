@@ -97,3 +97,14 @@ export async function setSwitchboardUrl(vaultUuid, url) {
   if (!url || url === SWITCHBOARD_URL_DEFAULT) await del(key)
   else await set(key, url)
 }
+
+export async function getCrossProfileEnabled(vaultUuid) {
+  if (!vaultUuid) return false
+  return (await get(`cross-profile-enabled-${vaultUuid}`)) === true
+}
+
+export async function setCrossProfileEnabled(vaultUuid, enabled) {
+  const key = `cross-profile-enabled-${vaultUuid}`
+  if (enabled) await set(key, true)
+  else await del(key)
+}

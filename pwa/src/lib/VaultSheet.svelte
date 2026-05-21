@@ -2,10 +2,10 @@
   import { onMount } from 'svelte'
   import { get } from 'svelte/store'
   import { getDatabaseInfo, openDatabase, updateDBFields } from '../wasm.js'
-  import { selectedFile, dbItems, secondaryVaults, switchboardUrl, switchboardConnected } from '../store.js'
+  import { selectedFile, dbItems, secondaryVaults, switchboardUrl, switchboardConnected, crossProfileEnabled } from '../store.js'
   import { isBiometricSupported, isBiometricEnrolled, enrollBiometric, clearBiometric } from './biometric.js'
   import { makeDelegateBookmarkletUrl } from './bookmarklet.js'
-  import { getDelegates, addDelegate, revokeDelegate, setSwitchboardUrl } from './delegates.js'
+  import { getDelegates, addDelegate, revokeDelegate, setSwitchboardUrl, setCrossProfileEnabled } from './delegates.js'
   import Icon from './Icon.svelte'
 
   let { isDesktop, onback, onlock, onlockall, onlocksecondary, onunlockadditional, ondbsave, ondirtychange, theme, accent, ontheme, onaccent } = $props()
@@ -412,37 +412,46 @@
     {/if}
     <button class="vault-unlock-more" onclick={openNewDelegate}>+ New bookmarklet</button>
 
-    <!-- Advanced -->
+    <!-- Cross-profile autofill -->
     <button class="delegate-advanced-toggle muted" onclick={toggleAdvanced}>
-      Advanced {advancedOpen ? '▲' : '▼'}
+      Cross-profile autofill {advancedOpen ? '▲' : '▼'}
     </button>
     {#if advancedOpen}
       <div class="delegate-advanced-body">
-        <label class="vault-label muted" style="font-size:12px;display:block;margin-bottom:4px">
-          Switchboard URL
-          <input
-            class="input"
-            style="font-size:13px;display:block;width:100%;margin-top:4px"
-            bind:value={editSwitchboardUrl}
-            oninput={() => { switchboardUrlDirty = editSwitchboardUrl !== get(switchboardUrl) }}
-            placeholder="ws://localhost:7577"
-          />
-        </label>
-        {#if switchboardUrlDirty}
-          <div class="switchboard-url-actions">
-            <button class="btn btn-ghost" style="font-size:13px" onclick={cancelRelayUrlEdit}>Cancel</button>
-            <button class="btn btn-primary" style="font-size:13px" onclick={saveRelayUrl}>Save</button>
+        <div class="vault-row" style="margin-bottom:4px">
+          <span class="vault-label muted" style="font-size:13px">Enable cross-profile autofill</span>
+          <div class="vault-segmented">
+            <button class:on={!$crossProfileEnabled} onclick={async () => { await setCrossProfileEnabled(_vaultUuid, false); crossProfileEnabled.set(false) }}>Off</button>
+            <button class:on={$crossProfileEnabled}  onclick={async () => { await setCrossProfileEnabled(_vaultUuid, true);  crossProfileEnabled.set(true)  }}>On</button>
+          </div>
+        </div>
+        {#if $crossProfileEnabled}
+          <label class="vault-label muted" style="font-size:12px;display:block;margin-bottom:4px">
+            Switchboard URL
+            <input
+              class="input"
+              style="font-size:13px;display:block;width:100%;margin-top:4px"
+              bind:value={editSwitchboardUrl}
+              oninput={() => { switchboardUrlDirty = editSwitchboardUrl !== get(switchboardUrl) }}
+              placeholder="ws://localhost:7577"
+            />
+          </label>
+          {#if switchboardUrlDirty}
+            <div class="switchboard-url-actions">
+              <button class="btn btn-ghost" style="font-size:13px" onclick={cancelRelayUrlEdit}>Cancel</button>
+              <button class="btn btn-primary" style="font-size:13px" onclick={saveRelayUrl}>Save</button>
+            </div>
+          {/if}
+          <div class="switchboard-status-row">
+            <span class="switchboard-status-dot" class:switchboard-ok={$switchboardConnected} class:switchboard-error={!$switchboardConnected}></span>
+            <span class="muted" style="font-size:13px">
+              {$switchboardConnected ? 'Cross-profile autofill ready' : 'portpass-switchboard not connected'}
+            </span>
+          </div>
+          <div class="muted" style="font-size:12px">
+            Count of cross-profile autofill uses: {totalRelayCount}{#if lastRelayUsed} · Last {fmtRelative(lastRelayUsed)}{/if}
           </div>
         {/if}
-        <div class="switchboard-status-row">
-          <span class="switchboard-status-dot" class:switchboard-ok={$switchboardConnected} class:switchboard-error={!$switchboardConnected}></span>
-          <span class="muted" style="font-size:13px">
-            {$switchboardConnected ? 'Cross-profile autofill ready' : 'portpass-switchboard not connected'}
-          </span>
-        </div>
-        <div class="muted" style="font-size:12px">
-          Count of cross-profile autofill uses: {totalRelayCount}{#if lastRelayUsed} · Last {fmtRelative(lastRelayUsed)}{/if}
-        </div>
       </div>
     {/if}
   </div>
