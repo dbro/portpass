@@ -8,7 +8,7 @@
   import { getDelegates, addDelegate, revokeDelegate, setSwitchboardUrl, setCrossProfileEnabled } from './delegates.js'
   import Icon from './Icon.svelte'
 
-  let { isDesktop, onback, onlock, onlockall, onlocksecondary, onunlockadditional, ondbsave, ondirtychange, theme, accent, ontheme, onaccent, pinPending = null, delegatesVersion = 0 } = $props()
+  let { isDesktop, onback, onlock, onlockall, onlocksecondary, onunlockadditional, ondbsave, ondirtychange, theme, accent, ontheme, onaccent } = $props()
 
   // ── Biometric ──────────────────────────────────────────────────────────────
   let biometricAvailable = $state(false)
@@ -22,11 +22,7 @@
   onMount(async () => {
     biometricAvailable = await isBiometricSupported()
     biometricEnrolled  = await isBiometricEnrolled(info?.uuid)
-  })
-
-  $effect(() => {
-    void delegatesVersion
-    getDelegates(_vaultUuid).then(d => delegates = d)
+    delegates = await getDelegates(_vaultUuid)
   })
 
   async function disableBiometric() {
@@ -308,22 +304,6 @@
   </div>
 {/if}
 
-<!-- PIN PAIRING BANNER -->
-{#if pinPending}
-  <div class="pin-banner">
-    <div class="pin-banner-top">
-      <span class="pin-banner-label">New bookmarklet pairing</span>
-      <span class="pin-banner-name">{pinPending.delegateName}</span>
-    </div>
-    <div class="pin-banner-code">{pinPending.pin}</div>
-    <div class="pin-banner-hint">Confirm this code matches the Portpass Autofill window</div>
-    <div class="pin-banner-actions">
-      <button class="btn btn-ghost" onclick={pinPending.onReject}>Reject</button>
-      <button class="btn btn-primary" onclick={pinPending.onConfirm}>Confirm</button>
-    </div>
-  </div>
-{/if}
-
 <!-- ═══════════════════════════════════════════════════════════════════════════
      MAIN SETTINGS PAGE
 ════════════════════════════════════════════════════════════════════════════ -->
@@ -422,14 +402,7 @@
           {@const lastTs  = Math.max(d.bcLastUsed ?? 0, d.relayLastUsed ?? 0) || null}
           <div class="delegate-row">
             <div class="delegate-info">
-              <div class="delegate-name-row">
-                <span class="delegate-name">{d.name}</span>
-                {#if d.pinVerified}
-                  <span class="delegate-badge paired">Paired</span>
-                {:else}
-                  <span class="delegate-badge unpaired">Not paired</span>
-                {/if}
-              </div>
+              <span class="delegate-name">{d.name}</span>
               <span class="delegate-meta muted">Created {fmtDate(d.created)} · {total} {total === 1 ? 'use' : 'uses'} · Last used {fmtRelative(lastTs)}</span>
             </div>
             <button class="delegate-revoke" onclick={() => revokeOne(d.id)}>Revoke</button>
@@ -756,21 +729,6 @@
     color: var(--text-muted);
     text-align: center;
   }
-
-  .pin-banner {
-    background: var(--surface-2, var(--surface));
-    border-bottom: 1px solid var(--border);
-    padding: 12px 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .pin-banner-top { display: flex; align-items: baseline; gap: 8px; }
-  .pin-banner-label { font-size: 12px; font-weight: 600; color: var(--text-soft); text-transform: uppercase; letter-spacing: 0.05em; }
-  .pin-banner-name { font-size: 13px; color: var(--text-soft); }
-  .pin-banner-code { font-size: 30px; font-weight: 700; letter-spacing: 0.12em; color: var(--accent); line-height: 1.2; margin: 2px 0; }
-  .pin-banner-hint { font-size: 12px; color: var(--text-soft); }
-  .pin-banner-actions { display: flex; gap: 8px; margin-top: 6px; }
 
   .vault-section {
     margin-bottom: 32px;
@@ -1174,12 +1132,6 @@
     gap: 3px;
   }
 
-  .delegate-name-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
   .delegate-name {
     font-size: 14px;
     font-weight: 600;
@@ -1187,16 +1139,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-
-  .delegate-badge {
-    font-size: 11px;
-    padding: 1px 6px;
-    border-radius: 3px;
-    font-weight: 500;
-    flex-shrink: 0;
-  }
-  .delegate-badge.paired   { background: color-mix(in srgb, var(--success, #7dbf8e) 15%, transparent); color: var(--success, #7dbf8e); }
-  .delegate-badge.unpaired { background: color-mix(in srgb, var(--warn, #c8a55a) 15%, transparent);   color: var(--warn, #c8a55a);   }
 
   .delegate-meta {
     font-size: 12px;

@@ -498,19 +498,18 @@
 .vault-app.is-desktop {
   display: grid;
   grid-template-columns: 320px 1fr;
-  grid-template-rows: 52px auto auto 1fr;
+  grid-template-rows: 52px auto 1fr;
 }
 .vault-app.is-desktop .topbar { grid-column: 1 / -1; grid-row: 1; }
-.vault-app.is-desktop .pin-banner { grid-column: 1 / -1; grid-row: 2; }
 .vault-app.is-desktop .list-screen { display: contents; }
-.vault-app.is-desktop .searchbar { grid-column: 1; grid-row: 3; align-self: start; }
+.vault-app.is-desktop .searchbar { grid-column: 1; grid-row: 2; align-self: start; }
 .vault-app.is-desktop .list-collapsible {
-  grid-column: 1; grid-row: 4;
+  grid-column: 1; grid-row: 3;
   border-right: 1px solid var(--border);
   height: 100%; padding-bottom: 80px;
 }
 .vault-app.is-desktop .record-screen {
-  grid-column: 2; grid-row: 3 / -1; height: 100%;
+  grid-column: 2; grid-row: 2 / -1; height: 100%;
 }
 .vault-app.is-desktop .record-screen .record-bar { display: none; }
 .vault-app.is-desktop .record-pane-header {

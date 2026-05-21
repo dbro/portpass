@@ -69,10 +69,6 @@ label.rec-replace {
 }
 label.rec-replace span { font-size: 11px; color: #aaa }
 .err { color: #e06c75; font-size: 13px }
-#pin-screen { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 }
-#pin-label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.05em }
-#pin-code { font-size: 32px; font-weight: 700; letter-spacing: 0.12em; color: #e8b04a; line-height: 1.2 }
-#pin-hint { font-size: 12px; color: #888 }
 </style>
 </head>
 <body>
@@ -122,27 +118,11 @@ label.rec-replace span { font-size: 11px; color: #aaa }
   var $status  = document.getElementById('status')
   var $records = document.getElementById('records')
 
-  // Derives a 6-digit PIN from ECDH shared secret bits; same result on both sides.
-  function pinFromBits(bytes) {
-    var num = ((bytes[0] << 16) | (bytes[1] << 8) | bytes[2]) % 1000000
-    return ('000000' + num).slice(-6)
-  }
-
-  function showPinScreen(pin) {
-    $header.style.display = 'none'
-    $records.style.display = 'none'
-    $status.style.display = 'none'
-    var el = document.createElement('div')
-    el.id = 'pin-screen'
-    el.innerHTML = '<div id="pin-label">Pairing code</div><div id="pin-code">' + pin + '</div><div id="pin-hint">Confirm this code matches in Portpass to complete pairing</div>'
-    document.getElementById('app').appendChild(el)
-  }
-
   // ── Startup: generate ECDH key pair, signal ready ─────────────────────────
   // 'ready' is sent as soon as the key pair is available, before the BC ping
   // completes. Mode is decided in onOpenerMessage once both init and pong state are known.
   crypto.subtle.generateKey(
-    { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey', 'deriveBits']
+    { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey']
   ).then(function(kp) {
     cpEcdhKeyPair = kp
     return crypto.subtle.exportKey('spki', kp.publicKey)
@@ -234,60 +214,38 @@ label.rec-replace span { font-size: 11px; color: #aaa }
       if (!delegateId) throw new Error('No delegate ID — reinstall the bookmarklet')
 
       $status.textContent = 'Waiting for Portpass…'
-      var publishMsg = {
+      var blob = await sendViaSwitchboard({
         type: 'publish', channel: delegateId, replyTo: nonce,
         url: currentUrl, ecdh: cpEcdhSpkiB64, ts: ts, sig: sigB64, pub: pubSpkiB64
-      }
-
-      var ws
-      try { ws = new WebSocket(switchboardWsUrl) } catch(e) {
-        sendError('switchboard is not running — start it first'); return
-      }
-      var cpWs = ws
-      ws.onopen = function() { ws.send(JSON.stringify(publishMsg)) }
-      ws.onerror = function() { if (cpWs === ws) { cpWs = null; sendError('switchboard is not running — start it first') } }
-      ws.onclose = function() { if (cpWs === ws) { cpWs = null; sendError('switchboard closed unexpectedly') } }
-      ws.onmessage = async function(e) {
-        try {
-          var msg = JSON.parse(e.data)
-          if (msg.type === 'error') {
-            cpWs = null; ws.close()
-            sendError(msg.message || 'Autofill failed')
-            return
-          }
-          if (msg.type !== 'reply') return
-
-          if (msg.pinRequired) {
-            var ephPubJwk = JSON.parse(atob(msg.ephPub))
-            var ephPubKey = await crypto.subtle.importKey(
-              'jwk', ephPubJwk, { name: 'ECDH', namedCurve: 'P-256' }, false, []
-            )
-            var pinBits = await crypto.subtle.deriveBits(
-              { name: 'ECDH', public: ephPubKey }, cpEcdhKeyPair.privateKey, 24
-            )
-            showPinScreen(pinFromBits(new Uint8Array(pinBits)))
-            // Keep WS open; Dashboard sends paired/error reply after user confirms in Portpass.
-            return
-          }
-
-          cpWs = null; ws.close()
-          if (msg.paired) {
-            document.getElementById('pin-screen')?.remove()
-            $status.style.display = ''
-            $status.textContent = 'Bookmarklet paired — click it again to autofill'
-            setTimeout(function() { window.close() }, 2500)
-            return
-          }
-          await processRelayBlob(msg)
-        } catch(e) {
-          cpWs = null; ws.close()
-          sendError(e.message || 'Autofill failed')
-        }
-      }
+      })
+      await processRelayBlob(blob)
 
     } catch(e) {
       sendError(e.message || 'Autofill failed')
     }
+  }
+
+  // Opens a WebSocket to the switchboard, sends the request, and waits for a response.
+  // Returns a promise that resolves with the response message or rejects on error.
+  function sendViaSwitchboard(requestMsg) {
+    return new Promise(function(resolve, reject) {
+      var ws
+      try { ws = new WebSocket(switchboardWsUrl) } catch(e) {
+        reject(new Error('switchboard is not running — start it first')); return
+      }
+      var settled = false
+      function done(fn, arg) { if (!settled) { settled = true; ws.close(); fn(arg) } }
+      ws.onopen = function() { ws.send(JSON.stringify(requestMsg)) }
+      ws.onmessage = function(e) {
+        try {
+          var msg = JSON.parse(e.data)
+          if (msg.type === 'error') done(reject, new Error(msg.message || 'Autofill failed'))
+          else if (msg.type === 'reply') done(resolve, msg)
+        } catch(_) { done(reject, new Error('Invalid switchboard message')) }
+      }
+      ws.onerror = function() { done(reject, new Error('switchboard is not running — start it first')) }
+      ws.onclose = function() { if (!settled) done(reject, new Error('switchboard closed unexpectedly')) }
+    })
   }
 
   // Decrypts the switchboard reply using the ECDH key pair generated at startup.
@@ -376,7 +334,7 @@ label.rec-replace span { font-size: 11px; color: #aaa }
   async function doHello() {
     try {
       keyPair = await crypto.subtle.generateKey(
-        { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey', 'deriveBits']
+        { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey']
       )
       var pubJwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey)
       var ecdhSpki = await crypto.subtle.exportKey('spki', keyPair.publicKey)
@@ -420,9 +378,8 @@ label.rec-replace span { font-size: 11px; color: #aaa }
   }
 
   async function onHelloResponse(msg) {
-    var ppPub
     try {
-      ppPub = await crypto.subtle.importKey(
+      var ppPub = await crypto.subtle.importKey(
         'jwk', msg.pubkey, { name: 'ECDH', namedCurve: 'P-256' }, false, []
       )
       sessionKey = await crypto.subtle.deriveKey(
@@ -431,31 +388,9 @@ label.rec-replace span { font-size: 11px; color: #aaa }
       )
     } catch(_) { sendError('Key exchange failed'); return }
 
-    if (msg.pinRequired) {
-      try {
-        var pinBits = await crypto.subtle.deriveBits(
-          { name: 'ECDH', public: ppPub }, keyPair.privateKey, 24
-        )
-        showPinScreen(pinFromBits(new Uint8Array(pinBits)))
-      } catch(_) { sendError('PIN derivation failed'); return }
-
-      var waitNonce = relayNonce
-      ch.onmessage = function(e) {
-        var m = e.data
-        if (!m || m.nonce !== waitNonce) return
-        if (m.type === 'relay-pin-confirmed') {
-          document.getElementById('pin-screen')?.remove()
-          $status.style.display = ''
-          $status.textContent = 'Bookmarklet paired — click it again to autofill'
-          setTimeout(function() { window.close() }, 2500)
-        } else if (m.type === 'relay-error') {
-          sendError(m.message || 'Pairing failed')
-        }
-      }
-      return
-    }
-
     ch.onmessage = onBCMessage
+
+    // currentUrl is set from init before doHello() was called.
     $status.textContent = 'Searching for matches…'
     ch.postMessage({ type: 'relay-query', url: currentUrl, nonce: relayNonce })
   }
