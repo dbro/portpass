@@ -101,10 +101,11 @@ label.rec-replace span { font-size: 11px; color: #aaa }
   var modeTimer = null
 
   // ── Cross-profile state ───────────────────────────────────────────────────
-  // ECDH key pair generated at startup; public key sent to Portpass in the
-  // web+portpass:// URL so Portpass can encrypt the credential blob for us.
+  // ECDH key pair generated at startup; public key sent to Portpass via the
+  // switchboard so Portpass can encrypt the credential blob for us.
   var cpEcdhKeyPair = null
   var cpEcdhSpkiB64 = null
+  var switchboardWsUrl = 'ws://localhost:7577/ws'  // updated from relay-pong if available
 
   // ── Same-profile state ────────────────────────────────────────────────────
   var relayNonce = null
@@ -136,6 +137,9 @@ label.rec-replace span { font-size: 11px; color: #aaa }
   // Mode is finalised in onOpenerMessage once init arrives.
   ch.onmessage = function(e) {
     if (e.data && e.data.type === 'relay-pong' && e.data.nonce === nonce) {
+      if (e.data.switchboardUrl) {
+        switchboardWsUrl = e.data.switchboardUrl.replace(/^http/, 'ws') + '/ws'
+      }
       bcPongArrived = true
       if (!modeDecided && cprivKey !== null) {
         modeDecided = true
@@ -209,31 +213,11 @@ label.rec-replace span { font-size: 11px; color: #aaa }
 
       if (!delegateId) throw new Error('No delegate ID — reinstall the bookmarklet')
 
-      // POST signed request to switchboard under the delegate's ID slot.
-      // Portpass polls this slot on interval and processes any pending request.
-      var requestBody = JSON.stringify({ url: currentUrl, nonce: nonce, ecdh: cpEcdhSpkiB64, ts: ts, sig: sigB64, pub: pubSpkiB64 })
-      async function postRequest() {
-        try {
-          var r = await fetch('http://localhost:7577/drop/' + delegateId, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: requestBody,
-          })
-          if (!r.ok) throw new Error('Relay server error ' + r.status)
-        } catch(e) {
-          if (e instanceof TypeError) throw new Error('portpass-switchboard is not running — start it first')
-          throw e
-        }
-      }
-      await postRequest()
-
-      // On bad blob (empty/unparseable), re-post the request so Portpass re-processes.
-      async function onBadBlob() {
-        await postRequest().catch(function() {})
-      }
-
       $status.textContent = 'Waiting for Portpass…'
-      var blob = await pollRelayServer(nonce, 60000, onBadBlob)
+      var blob = await sendViaSwitchboard({
+        type: 'request', delegateId: delegateId, nonce: nonce,
+        url: currentUrl, ecdh: cpEcdhSpkiB64, ts: ts, sig: sigB64, pub: pubSpkiB64
+      })
       await processRelayBlob(blob)
 
     } catch(e) {
@@ -241,41 +225,35 @@ label.rec-replace span { font-size: 11px; color: #aaa }
     }
   }
 
-  // Polls GET /pick/{nonce} every 500ms until a blob is available or timeout.
-  // onBadBlob (optional) is called when a 200 response arrives but the body is
-  // empty, whitespace, or unparseable — caller can re-post the request to recover.
-  async function pollRelayServer(pollNonce, timeout, onBadBlob) {
-    var deadline = Date.now() + timeout
-    var url = 'http://localhost:7577/pick/' + pollNonce
-    while (Date.now() < deadline) {
-      try {
-        var resp = await fetch(url)
-        if (resp.ok) {
-          var text = await resp.text()
-          var parsed = null
-          if (text.trim()) {
-            try { parsed = JSON.parse(text) } catch(_) {}
-          }
-          if (parsed && (parsed.ephPub || parsed.error)) {
-            return parsed
-          }
-          // Bad blob — log and trigger re-post
-          if (onBadBlob) await onBadBlob()
-        } else if (resp.status !== 404) throw new Error('Relay server error ' + resp.status)
-      } catch(e) {
-        if (e instanceof TypeError) throw new Error('portpass-switchboard is not running — start it first')
-        throw e
+  // Opens a WebSocket to the switchboard, sends the request, and waits for a response.
+  // Returns a promise that resolves with the response message or rejects on error.
+  function sendViaSwitchboard(requestMsg) {
+    return new Promise(function(resolve, reject) {
+      var ws
+      try { ws = new WebSocket(switchboardWsUrl) } catch(e) {
+        reject(new Error('portpass-switchboard is not running — start it first')); return
       }
-      await new Promise(function(r) { setTimeout(r, 500) })
-    }
-    throw new Error('Timed out waiting for Portpass')
+      var settled = false
+      function done(fn, arg) { if (!settled) { settled = true; ws.close(); fn(arg) } }
+      ws.onopen = function() { ws.send(JSON.stringify(requestMsg)) }
+      ws.onmessage = function(e) {
+        try {
+          var msg = JSON.parse(e.data)
+          if (msg.type === 'error') done(reject, new Error(msg.message || 'Autofill failed'))
+          else if (msg.type === 'response') done(resolve, msg)
+        } catch(_) { done(reject, new Error('Invalid switchboard message')) }
+      }
+      ws.onerror = function() { done(reject, new Error('portpass-switchboard is not running — start it first')) }
+      ws.onclose = function() { if (!settled) done(reject, new Error('portpass-switchboard closed unexpectedly')) }
+    })
   }
 
-  // Decrypts the switchboard blob using the ECDH key pair generated at startup.
-  // Blob format: { ephPub: base64(JSON-stringified JWK), iv: base64, ciphertext: base64 }
-  // Or error format: { error: "message" }
+  // Decrypts the switchboard response using the ECDH key pair generated at startup.
+  // Response format: { type:"response", nonce, ephPub, iv, ciphertext }
+  // Or error: { type:"response", nonce, error: "message" }
   // Plaintext: JSON array of records, each with pre-decrypted fields.
   async function processRelayBlob(blob) {
+    if (blob.error) { sendError(blob.error); return }
     try {
       var ephPubJwk = JSON.parse(atob(blob.ephPub))
       var ephPubKey = await crypto.subtle.importKey(

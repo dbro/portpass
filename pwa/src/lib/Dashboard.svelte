@@ -280,15 +280,11 @@
   }
 
   async function processAutofillIntent({ url, nonce, ecdhSpkiB64 }) {
-    const DROP_URL = `${get(switchboardUrl)}/drop/${nonce}`
-    const postError = msg =>
-      fetch(DROP_URL, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ error: msg }),
-      }).catch(() => {})
+    const wsSend = (msg) => { if (_sbWs) _sbWs.send(JSON.stringify(msg)) }
+    const wsError = (error) => wsSend({ type: 'response', nonce, error })
 
     const records = autofillFindRecords(url)
-    if (!records.length) { await postError('No matching passwords found'); return }
+    if (!records.length) { wsError('No matching passwords found'); return }
 
     try {
       const ephPair = await crypto.subtle.generateKey(
@@ -314,7 +310,7 @@
           })
         } catch { /* skip records with invalid autotype */ }
       }
-      if (!recordsWithFields.length) { await postError('No matching passwords found'); return }
+      if (!recordsWithFields.length) { wsError('No matching passwords found'); return }
 
       const iv = crypto.getRandomValues(new Uint8Array(12))
       const ct = await crypto.subtle.encrypt(
@@ -323,17 +319,14 @@
       )
       const ephPubJwk = await crypto.subtle.exportKey('jwk', ephPair.publicKey)
 
-      const bodyStr = JSON.stringify({
+      wsSend({
+        type: 'response', nonce,
         ephPub: btoa(JSON.stringify(ephPubJwk)),
         iv: btoa(String.fromCharCode(...iv)),
         ciphertext: btoa(String.fromCharCode(...new Uint8Array(ct))),
       })
-      const postResp = await fetch(DROP_URL, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: bodyStr,
-      })
     } catch (e) {
-      await postError(e.message || 'Autofill failed')
+      wsError(e.message || 'Autofill failed')
     }
   }
 
@@ -343,44 +336,57 @@
     processAutofillIntent(intent)
   })
 
-  // Poll portpass-switchboard for pending cross-profile autofill requests while vault is unlocked.
-  // relay.html POSTs the signed request to /drop/{delegateId}; we pick it up here.
+  // ── Switchboard WebSocket (cross-profile autofill) ─────────────────────────
+  // relay.html connects to the switchboard and sends a signed request;
+  // the switchboard routes it here via WebSocket. No polling.
+
+  let _sbWs = null
+  let _sbConnecting = false
+
+  function sbWsUrl() {
+    return get(switchboardUrl).replace(/^http/, 'ws') + '/ws'
+  }
+
+  function connectSwitchboard() {
+    if (_sbWs || _sbConnecting) return
+    _sbConnecting = true
+    let ws
+    try { ws = new WebSocket(sbWsUrl()) } catch { _sbConnecting = false; return }
+    ws.onopen = async () => {
+      _sbWs = ws
+      _sbConnecting = false
+      const delegates = await getDelegates(dbKey)
+      if (delegates.length && _sbWs === ws)
+        ws.send(JSON.stringify({ type: 'register', delegates: delegates.map(d => d.id) }))
+    }
+    ws.onmessage = async (event) => {
+      try {
+        const msg = JSON.parse(event.data)
+        if (msg.type !== 'request') return
+        const age = Date.now() - msg.ts
+        if (age > 60000 || age < -5000) return
+        const spkiBytes = Uint8Array.from(atob(msg.pub), c => c.charCodeAt(0))
+        const sigBytes  = Uint8Array.from(atob(msg.sig), c => c.charCodeAt(0))
+        const message   = new TextEncoder().encode(JSON.stringify({ url: msg.url, nonce: msg.nonce, ecdh: msg.ecdh, ts: msg.ts }))
+        const verified  = await verifyAndUpdate(dbKey, spkiBytes, message, sigBytes, 'relay')
+        if (!verified) return
+        await processAutofillIntent({ url: msg.url, nonce: msg.nonce, ecdhSpkiB64: msg.ecdh })
+      } catch(e) {}
+    }
+    ws.onclose = ws.onerror = () => {
+      if (_sbWs === ws) { _sbWs = null; _sbConnecting = false }
+      setTimeout(connectSwitchboard, 2000)
+    }
+  }
+
   $effect(() => {
     if (isPopup) return
-    const id = setInterval(checkPendingAutofillRequests, 2000)
-    return () => clearInterval(id)
+    const _url = $switchboardUrl  // re-connect when URL changes
+    if (_sbWs) { _sbWs.close(); _sbWs = null }
+    _sbConnecting = false
+    connectSwitchboard()
+    return () => { if (_sbWs) { _sbWs.close(); _sbWs = null }; _sbConnecting = false }
   })
-
-  let _checkInProgress = false
-
-  async function checkPendingAutofillRequests() {
-    if (_checkInProgress) return
-    _checkInProgress = true
-    try {
-    const delegates = await getDelegates(dbKey)
-    if (!delegates.length) return
-    for (const delegate of delegates) {
-      try {
-        const resp = await fetch(`${get(switchboardUrl)}/pick/` + delegate.id)
-        if (resp.status === 204) continue  // 204 = nothing pending
-        const req = await resp.json()
-
-        const age = Date.now() - req.ts
-        if (age > 60000 || age < -5000) continue
-
-        const spkiBytes = Uint8Array.from(atob(req.pub), c => c.charCodeAt(0))
-        const sigBytes  = Uint8Array.from(atob(req.sig), c => c.charCodeAt(0))
-        const message   = new TextEncoder().encode(JSON.stringify({ url: req.url, nonce: req.nonce, ecdh: req.ecdh, ts: req.ts }))
-        const verified  = await verifyAndUpdate(dbKey, spkiBytes, message, sigBytes, 'relay')
-        if (!verified) continue
-
-        await processAutofillIntent({ url: req.url, nonce: req.nonce, ecdhSpkiB64: req.ecdh })
-      } catch (e) {
-        // TypeError = switchboard not running — silent
-      }
-    }
-    } finally { _checkInProgress = false }
-  }
 
   // Autofill postMessage handler — ECDH key exchange then encrypted query response.
   function autofillValidateSequence(seq) {
@@ -515,7 +521,7 @@
       if (!msg?.type) return
 
       if (msg.type === 'relay-ping') {
-        ch.postMessage({ type: 'relay-pong', nonce: msg.nonce })
+        ch.postMessage({ type: 'relay-pong', nonce: msg.nonce, switchboardUrl: get(switchboardUrl) })
         return
       }
 
