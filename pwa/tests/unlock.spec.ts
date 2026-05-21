@@ -44,6 +44,28 @@ test.describe('Unlock screen', () => {
     await expect(page.locator('.empty-vault')).toBeVisible()
   })
 
+  test('fallback file input opens vault read-only when showOpenFilePicker unavailable', async ({ page }) => {
+    await page.addInitScript(() => {
+      delete (window as any).showOpenFilePicker
+    })
+
+    await page.goto('/portpass/')
+    await expect(page.getByText('Read-only')).toBeVisible()
+
+    const [fileChooser] = await Promise.all([
+      page.waitForEvent('filechooser'),
+      page.getByRole('button', { name: 'Open vault file' }).click(),
+    ])
+    await fileChooser.setFiles(THREE_DB_PATH)
+
+    await expect(page.getByText('Read-only', { exact: false })).toBeVisible()
+    await page.getByPlaceholder('Master password').fill('three3#;')
+    await page.getByRole('button', { name: 'Unlock' }).click()
+
+    await expect(page.getByPlaceholder('Search vault')).toBeVisible({ timeout: 10000 })
+    await expect(page.locator('.desktop-new-btn')).not.toBeVisible()
+  })
+
   test('Enter key submits password', async ({ page }) => {
     const data = [...fs.readFileSync(THREE_DB_PATH)]
     await page.addInitScript((fileData: number[]) => {

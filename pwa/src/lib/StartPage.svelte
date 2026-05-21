@@ -30,6 +30,9 @@
 
   const supportsFilePicker = typeof window !== 'undefined' && 'showOpenFilePicker' in window
 
+  let fallbackFile = $state(null)  // File object when supportsFilePicker is false
+  let fileInputEl  = $state(null)
+
   onMount(async () => {
     biometricAvailable = await isBiometricSupported()
 
@@ -61,12 +64,27 @@
     }
   }
 
+  function pickFileFallback() {
+    fileInputEl.click()
+  }
+
+  function onFileInputChange(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    fallbackFile = file
+    mode = 'unlock'
+    error = ''
+    password = ''
+    biometricEnrolled = false
+  }
+
   // After a successful vault open, check whether to offer biometric enrollment.
   // The offer is shown at most once per vault file — if dismissed, the user can
   // enable biometric/PIN unlock later from the vault settings sheet.
   function afterUnlock() {
     const offerKey = `biometric-offered-${fileHandle?.name}`
-    if (biometricAvailable && !biometricEnrolled && !localStorage.getItem(offerKey)) {
+    if (!fallbackFile && biometricAvailable && !biometricEnrolled && !localStorage.getItem(offerKey)) {
       localStorage.setItem(offerKey, '1')
       mode = 'offer-biometric'
     } else {
@@ -75,24 +93,32 @@
   }
 
   async function unlock() {
-    if (!password || !fileHandle) return
+    if (!password || (!fileHandle && !fallbackFile)) return
     busy = true; error = ''
     try {
-      const perm = await fileHandle.requestPermission({ mode: 'read' })
-      if (perm !== 'granted') { error = 'File access was denied.'; return }
-      let file
-      try { file = await fileHandle.getFile() } catch (e) {
-        if (e.name === 'NotFoundError') { await handleFileMissing(); return }
-        throw e
+      let buf
+      if (fallbackFile) {
+        buf = await fallbackFile.arrayBuffer()
+      } else {
+        const perm = await fileHandle.requestPermission({ mode: 'read' })
+        if (perm !== 'granted') { error = 'File access was denied.'; return }
+        let file
+        try { file = await fileHandle.getFile() } catch (e) {
+          if (e.name === 'NotFoundError') { await handleFileMissing(); return }
+          throw e
+        }
+        buf = await file.arrayBuffer()
       }
-      const buf  = await file.arrayBuffer()
       const vaultUuid = openDatabase(new Uint8Array(buf), password)
       dbItems.set(getDatabaseData(vaultUuid))
-      const info     = getDatabaseInfo(vaultUuid)
-      const writable = await probeWriteAccess(fileHandle)
-      selectedFile.set({ handle: fileHandle, name: fileHandle.name, readonly: !writable, uuid: vaultUuid })
-      try { await pushRecentHandle(fileHandle, vaultUuid) } catch {}
-      await autoUnlockSecondaries(vaultUuid)
+      if (fallbackFile) {
+        selectedFile.set({ handle: null, name: fallbackFile.name, readonly: true, uuid: vaultUuid })
+      } else {
+        const writable = await probeWriteAccess(fileHandle)
+        selectedFile.set({ handle: fileHandle, name: fileHandle.name, readonly: !writable, uuid: vaultUuid })
+        try { await pushRecentHandle(fileHandle, vaultUuid) } catch {}
+        await autoUnlockSecondaries(vaultUuid)
+      }
       afterUnlock()
     } catch (e) {
       error = 'Wrong password or invalid file.'
@@ -215,7 +241,7 @@
   }
 
   function switchFile() {
-    fileHandle = null; password = ''; error = ''; mode = 'landing'
+    fileHandle = null; fallbackFile = null; password = ''; error = ''; mode = 'landing'
     secondaryVaults.set([])
   }
 
@@ -243,9 +269,9 @@
       {#if supportsFilePicker}
         <button class="btn btn-primary" onclick={pickFile}>Open vault file</button>
       {:else}
-        <div class="unlock-error" style="font-size:13px;text-align:center">
-          Your browser doesn't support file picker.<br>Try Chrome or Safari.
-        </div>
+        <button class="btn btn-primary" onclick={pickFileFallback}>Open vault file</button>
+        <div class="muted" style="font-size:12px;text-align:center;margin-top:4px">Read-only — your browser can't save changes back to the file</div>
+        <input bind:this={fileInputEl} type="file" accept=".psafe3,.dat" style="display:none" onchange={onFileInputChange} />
       {/if}
     </div>
 
@@ -261,10 +287,13 @@
       <div class="unlock-mark">
         <img src="{import.meta.env.BASE_URL}icon.svg" alt="Portpass" style="width:64px;height:64px" />
       </div>
-      <div class="unlock-vault">{fileHandle?.name ?? 'Vault'}</div>
+      <div class="unlock-vault">{(fallbackFile ?? fileHandle)?.name ?? 'Vault'}</div>
       <div class="unlock-sub" class:muted={!busy} class:unlock-busy={busy}>
         {busy ? 'Unlocking…' : isPopup ? 'Unlock to use Autofill' : 'Vault is locked'}
       </div>
+      {#if fallbackFile && !busy}
+        <div class="muted" style="font-size:12px">Read-only (your browser can't save changes)</div>
+      {/if}
 
       {#if busy}
         <div class="unlock-shimmer-wrap"><div class="unlock-shimmer"></div></div>
