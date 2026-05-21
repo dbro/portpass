@@ -106,6 +106,9 @@ label.rec-replace span { font-size: 11px; color: #aaa }
   var cpEcdhKeyPair = null
   var cpEcdhSpkiB64 = null
   var switchboardWsUrl = 'ws://localhost:7577/ws'  // updated from relay-pong if available
+  // Signing key retained after startCrossProfile so the picker can fire save-url requests.
+  var cpSigningKey = null
+  var cpPubSpkiB64 = null
 
   // ── Same-profile state ────────────────────────────────────────────────────
   var relayNonce = null
@@ -194,7 +197,7 @@ label.rec-replace span { font-size: 11px; color: #aaa }
   async function startCrossProfile(privKeyJwk) {
     $status.textContent = 'Requesting credentials…'
     try {
-      var signingKey = await crypto.subtle.importKey(
+      cpSigningKey = await crypto.subtle.importKey(
         'jwk', privKeyJwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']
       )
       var pubJwk = { kty: privKeyJwk.kty, crv: privKeyJwk.crv, x: privKeyJwk.x, y: privKeyJwk.y }
@@ -202,12 +205,13 @@ label.rec-replace span { font-size: 11px; color: #aaa }
         'jwk', pubJwk, { name: 'ECDSA', namedCurve: 'P-256' }, true, ['verify']
       )
       var pubSpki = await crypto.subtle.exportKey('spki', pubKey)
-      var pubSpkiB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(pubSpki)))
+      cpPubSpkiB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(pubSpki)))
+      var pubSpkiB64 = cpPubSpkiB64
 
       var ts = Date.now()
       var signedPayload = JSON.stringify({ url: currentUrl, nonce: nonce, ecdh: cpEcdhSpkiB64, ts: ts })
       var sigBytes = await crypto.subtle.sign(
-        { name: 'ECDSA', hash: 'SHA-256' }, signingKey, new TextEncoder().encode(signedPayload)
+        { name: 'ECDSA', hash: 'SHA-256' }, cpSigningKey, new TextEncoder().encode(signedPayload)
       )
       var sigB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(sigBytes)))
 
@@ -273,6 +277,75 @@ label.rec-replace span { font-size: 11px; color: #aaa }
     }
   }
 
+  // Builds a record row with title, badges, and optional Replace URL checkbox.
+  // Returns { row, replaceCheck } — caller sets row.onclick and appends to $records.
+  function buildRecordRow(rec) {
+    var row = document.createElement('div')
+    row.className = 'rec-row'
+    var titleRow = document.createElement('div')
+    titleRow.className = 'rec-title-row'
+    var titleEl = document.createElement('span')
+    titleEl.className = 'rec-title'
+    titleEl.textContent = rec.title
+    titleRow.appendChild(titleEl)
+    if (rec.isCurrent) {
+      var badge = document.createElement('span')
+      badge.className = 'rec-badge'
+      badge.textContent = 'open'
+      titleRow.appendChild(badge)
+    }
+    if (rec.matchType === 'exact') {
+      var mb = document.createElement('span')
+      mb.style.cssText = 'font-size:11px;color:#7dbf8e;flex-shrink:0'
+      mb.textContent = 'URL match'
+      titleRow.appendChild(mb)
+    } else if (rec.matchType === 'fuzzy') {
+      var mb = document.createElement('span')
+      mb.style.cssText = 'font-size:11px;color:#888;flex-shrink:0'
+      mb.textContent = 'similar URL'
+      titleRow.appendChild(mb)
+    }
+    row.appendChild(titleRow)
+    var replaceCheck = null
+    if (rec.existingUrl && canonicalURL(rec.existingUrl) !== currentUrl) {
+      var replaceLabel = document.createElement('label')
+      replaceLabel.className = 'rec-replace'
+      replaceCheck = document.createElement('input')
+      replaceCheck.type = 'checkbox'
+      replaceCheck.onclick = function(e) { e.stopPropagation() }
+      var replaceText = document.createElement('span')
+      replaceText.textContent = 'Replace "' + rec.existingUrl + '" → "' + saveUrl + '"'
+      replaceLabel.appendChild(replaceCheck)
+      replaceLabel.appendChild(replaceText)
+      row.appendChild(replaceLabel)
+    }
+    return { row: row, replaceCheck: replaceCheck }
+  }
+
+  // Fire-and-forget: sends a signed save-url request to Dashboard via the switchboard.
+  function saveUrlViaSwitchboard(uuid, vaultUuid) {
+    if (!cpSigningKey || !cpPubSpkiB64 || !delegateId) return
+    var saveNonce = crypto.randomUUID()
+    var ts = Date.now()
+    var payload = JSON.stringify({ url: saveUrl, nonce: saveNonce, ecdh: '', ts: ts })
+    crypto.subtle.sign(
+      { name: 'ECDSA', hash: 'SHA-256' }, cpSigningKey, new TextEncoder().encode(payload)
+    ).then(function(sigBytes) {
+      var sigB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(sigBytes)))
+      var ws
+      try { ws = new WebSocket(switchboardWsUrl) } catch(e) { return }
+      ws.onopen = function() {
+        ws.send(JSON.stringify({
+          type: 'publish', channel: delegateId, replyTo: saveNonce,
+          msgType: 'save-url', uuid: uuid, vaultUuid: vaultUuid,
+          url: saveUrl, ecdh: '', ts: ts, sig: sigB64, pub: cpPubSpkiB64
+        }))
+      }
+      ws.onmessage = function() { ws.close() }
+      ws.onerror = ws.onclose = function() {}
+    }).catch(function() {})
+  }
+
   // Cross-profile picker: fields are already decrypted; clicking a row sends fill immediately.
   function showCrossProfilePicker(records) {
     if (!records || !records.length) { sendError('No matching passwords found'); return }
@@ -281,40 +354,15 @@ label.rec-replace span { font-size: 11px; color: #aaa }
     $records.style.display = ''
 
     records.forEach(function(rec) {
-      var row = document.createElement('div')
-      row.className = 'rec-row'
-      var titleRow = document.createElement('div')
-      titleRow.className = 'rec-title-row'
-      var titleEl = document.createElement('span')
-      titleEl.className = 'rec-title'
-      titleEl.textContent = rec.title
-      titleRow.appendChild(titleEl)
-
-      if (rec.isCurrent) {
-        var badge = document.createElement('span')
-        badge.className = 'rec-badge'
-        badge.textContent = 'open'
-        titleRow.appendChild(badge)
-      }
-      if (rec.matchType === 'exact') {
-        var mb = document.createElement('span')
-        mb.style.cssText = 'font-size:11px;color:#7dbf8e;flex-shrink:0'
-        mb.textContent = 'URL match'
-        titleRow.appendChild(mb)
-      } else if (rec.matchType === 'fuzzy') {
-        var mb = document.createElement('span')
-        mb.style.cssText = 'font-size:11px;color:#888;flex-shrink:0'
-        mb.textContent = 'similar URL'
-        titleRow.appendChild(mb)
-      }
-      row.appendChild(titleRow)
-
+      var built = buildRecordRow(rec)
+      var row = built.row, replaceCheck = built.replaceCheck
       ;(function(r) {
         row.onclick = function() {
           if (!isSecure && sequenceHasSensitiveCode(r.autotype || '', r.sensitiveCodes || [])) {
             sendError('Cannot autofill sensitive fields on a non-HTTPS page')
             return
           }
+          if (replaceCheck && replaceCheck.checked) saveUrlViaSwitchboard(r.uuid, r.vaultUuid || null)
           if (window.opener) {
             window.opener.postMessage(
               { type: 'fill', title: r.title, autotype: r.autotype, fields: r.fields },
@@ -324,7 +372,6 @@ label.rec-replace span { font-size: 11px; color: #aaa }
           setTimeout(function() { window.close() }, 100)
         }
       })(rec)
-
       $records.appendChild(row)
     })
   }
@@ -405,58 +452,17 @@ label.rec-replace span { font-size: 11px; color: #aaa }
   }
 
   function showPicker(records) {
-    if (!records || !records.length) { sendError('Open a record in Portpass first'); return }
+    if (!records || !records.length) { sendError('No matching passwords found'); return }
     $status.style.display = 'none'
     $header.style.display = ''
     $records.style.display = ''
 
     records.forEach(function(rec) {
-      var row = document.createElement('div')
-      row.className = 'rec-row'
-      var titleRow = document.createElement('div')
-      titleRow.className = 'rec-title-row'
-      var titleEl = document.createElement('span')
-      titleEl.className = 'rec-title'
-      titleEl.textContent = rec.title
-      titleRow.appendChild(titleEl)
-
-      if (rec.isCurrent) {
-        var badge = document.createElement('span')
-        badge.className = 'rec-badge'
-        badge.textContent = 'open'
-        titleRow.appendChild(badge)
-      }
-      if (rec.matchType === 'exact') {
-        var mb = document.createElement('span')
-        mb.style.cssText = 'font-size:11px;color:#7dbf8e;flex-shrink:0'
-        mb.textContent = 'URL match'
-        titleRow.appendChild(mb)
-      } else if (rec.matchType === 'fuzzy') {
-        var mb = document.createElement('span')
-        mb.style.cssText = 'font-size:11px;color:#888;flex-shrink:0'
-        mb.textContent = 'similar URL'
-        titleRow.appendChild(mb)
-      }
-      row.appendChild(titleRow)
-
-      var replaceCheck = null
-      if (rec.existingUrl && canonicalURL(rec.existingUrl) !== currentUrl) {
-        var replaceLabel = document.createElement('label')
-        replaceLabel.className = 'rec-replace'
-        replaceCheck = document.createElement('input')
-        replaceCheck.type = 'checkbox'
-        replaceCheck.onclick = function(e) { e.stopPropagation() }
-        var replaceText = document.createElement('span')
-        replaceText.textContent = 'Replace "' + rec.existingUrl + '" → "' + saveUrl + '"'
-        replaceLabel.appendChild(replaceCheck)
-        replaceLabel.appendChild(replaceText)
-        row.appendChild(replaceLabel)
-      }
-
+      var built = buildRecordRow(rec)
+      var row = built.row, replaceCheck = built.replaceCheck
       row.onclick = function() {
         doAutofill(rec.uuid, rec.vaultUuid, replaceCheck ? replaceCheck.checked : false)
       }
-
       $records.appendChild(row)
     })
   }

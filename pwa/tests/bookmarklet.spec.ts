@@ -234,7 +234,7 @@ test.describe('Bookmarklet — overlay and autofill', () => {
     // Vault is open but no record is selected.
 
     await activateBookmarklet(login, bookmarkletUrl)
-    await expect(login.locator('#__pp')).toContainText('Open a record')
+    await expect(login.locator('#__pp')).toContainText('No matching passwords found')
   })
 
   test('record without autotype sequence uses the default and shows overlay', async ({ context }) => {

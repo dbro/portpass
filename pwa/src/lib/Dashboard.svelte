@@ -381,6 +381,11 @@
         const message   = new TextEncoder().encode(JSON.stringify({ url: msg.url, nonce: msg.replyTo, ecdh: msg.ecdh, ts: msg.ts }))
         const verified  = await verifyAndUpdate(dbKey, spkiBytes, message, sigBytes, 'relay')
         if (!verified) return
+        if (msg.msgType === 'save-url') {
+          try { await autofillSaveURL(msg.uuid, msg.vaultUuid || null, msg.url) } catch {}
+          if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo }))
+          return
+        }
         delegatesVersion.update(v => v + 1)
         await processAutofillIntent({ url: msg.url, nonce: msg.replyTo, ecdhSpkiB64: msg.ecdh })
       } catch(e) {}
