@@ -1,7 +1,7 @@
 import { get, set, del } from 'idb-keyval'
 
 const STORAGE_KEY = 'delegates-v1'
-const RELAY_URL_DEFAULT = 'http://localhost:7577'
+const SWITCHBOARD_URL_DEFAULT = 'http://localhost:7577'
 
 async function load() {
   return (await get(STORAGE_KEY)) ?? {}
@@ -86,14 +86,14 @@ export async function verifyAndUpdate(vaultUuid, spkiBytes, message, signatureBy
   return null
 }
 
-export async function getRelayUrl(vaultUuid) {
-  if (!vaultUuid) return RELAY_URL_DEFAULT
-  const key = `relay-url-${vaultUuid}`
-  return (await get(key)) ?? RELAY_URL_DEFAULT
+export async function getSwitchboardUrl(vaultUuid) {
+  if (!vaultUuid) return SWITCHBOARD_URL_DEFAULT
+  const key = `switchboard-url-${vaultUuid}`
+  return (await get(key)) ?? SWITCHBOARD_URL_DEFAULT
 }
 
-export async function setRelayUrl(vaultUuid, url) {
-  const key = `relay-url-${vaultUuid}`
-  if (!url || url === RELAY_URL_DEFAULT) await del(key)
+export async function setSwitchboardUrl(vaultUuid, url) {
+  const key = `switchboard-url-${vaultUuid}`
+  if (!url || url === SWITCHBOARD_URL_DEFAULT) await del(key)
   else await set(key, url)
 }

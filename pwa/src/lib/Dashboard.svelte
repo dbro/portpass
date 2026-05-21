@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { get } from 'svelte/store'
-  import { selectedFile, dbItems, secondaryVaults, toast, clipboardSession, clipboardContext, relayUrl } from '../store.js'
+  import { selectedFile, dbItems, secondaryVaults, toast, clipboardSession, clipboardContext, switchboardUrl } from '../store.js'
   import {
     getRecordData, getDatabaseData, saveDatabase, getDatabaseInfo,
     updateRecordFields, updateDBFields, deleteRecord as wasmDeleteRecord,
@@ -10,7 +10,7 @@
     getTOTP, getFieldValue, getCustomFieldValue,
   } from '../wasm.js'
   import { addSecondaryCredential, removeSecondaryCredential } from './secondaryVaults.js'
-  import { getRelayUrl } from './delegates.js'
+  import { getSwitchboardUrl } from './delegates.js'
   import { isBiometricEnrolledForFile, unlockWithBiometric } from './biometric.js'
   import { getDelegates, verifyAndUpdate } from './delegates.js'
   import Icon from './Icon.svelte'
@@ -77,7 +77,7 @@
       dbName   = info?.name ?? ''
       lastSave = info?.when ?? ''
     } catch (e) {}
-    getRelayUrl(dbKey).then(url => relayUrl.set(url)).catch(() => {})
+    getSwitchboardUrl(dbKey).then(url => switchboardUrl.set(url)).catch(() => {})
     document.addEventListener('visibilitychange', onVisibilityChange)
     window.addEventListener('focus', onWindowFocus)
     return () => {
@@ -280,7 +280,7 @@
   }
 
   async function processAutofillIntent({ url, nonce, ecdhSpkiB64 }) {
-    const DROP_URL = `${get(relayUrl)}/drop/${nonce}`
+    const DROP_URL = `${get(switchboardUrl)}/drop/${nonce}`
     const postError = msg =>
       fetch(DROP_URL, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -343,7 +343,7 @@
     processAutofillIntent(intent)
   })
 
-  // Poll portpass-relay for pending cross-profile autofill requests while vault is unlocked.
+  // Poll portpass-switchboard for pending cross-profile autofill requests while vault is unlocked.
   // relay.html POSTs the signed request to /drop/{delegateId}; we pick it up here.
   $effect(() => {
     if (isPopup) return
@@ -361,7 +361,7 @@
     if (!delegates.length) return
     for (const delegate of delegates) {
       try {
-        const resp = await fetch(`${get(relayUrl)}/pick/` + delegate.id)
+        const resp = await fetch(`${get(switchboardUrl)}/pick/` + delegate.id)
         if (resp.status === 204) continue  // 204 = nothing pending
         const req = await resp.json()
 
@@ -376,7 +376,7 @@
 
         await processAutofillIntent({ url: req.url, nonce: req.nonce, ecdhSpkiB64: req.ecdh })
       } catch (e) {
-        // TypeError = relay server not running — silent
+        // TypeError = switchboard not running — silent
       }
     }
     } finally { _checkInProgress = false }

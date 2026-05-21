@@ -11,7 +11,7 @@ export function makeDelegateBookmarkletUrl(portpassUrl, privKeyJwk, delegateId) 
 
 // Self-contained IIFE embedded in the javascript: URL.
 // PORTPASS_URL and PORTPASS_ORIGIN are baked in at install time via JSON.stringify.
-// PRIV_KEY_JWK is the ECDSA P-256 private key; DELEGATE_ID identifies the delegate on the relay server.
+// PRIV_KEY_JWK is the ECDSA P-256 private key; DELEGATE_ID identifies the delegate on the switchboard.
 function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, PRIV_KEY_JWK, DELEGATE_ID) {
   'use strict'
 
@@ -36,13 +36,13 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, PRIV_KEY_JWK, 
       try { readyMsg = await recv(pp, ['ready', 'error'], 10000) }
       catch (_) {
         try { pp.close() } catch (_2) {}
-        showError('Portpass autofill did not start — make sure portpass-relay is running')
+        showError('Portpass autofill did not start — make sure portpass-switchboard is running')
         return
       }
       if (readyMsg.type === 'error') { showError(readyMsg.message); return }
 
       // Send URL, private signing key, and delegate ID to relay.html with strict targetOrigin.
-      // relay.html signs and POSTs the request to portpass-relay, then polls for the response.
+      // relay.html signs and POSTs the request to portpass-switchboard, then polls for the response.
       pp.postMessage({
         type: 'init',
         url: currentCanonical,

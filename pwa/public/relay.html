@@ -95,7 +95,7 @@ label.rec-replace span { font-size: 11px; color: #aaa }
 
   // ── Mode detection state ──────────────────────────────────────────────────
   var cprivKey = null       // private key from init message; used by cross-profile path
-  var delegateId = null     // delegate UUID; relay server request endpoint
+  var delegateId = null     // delegate UUID; switchboard request endpoint
   var bcPongArrived = false
   var modeDecided = false
   var modeTimer = null
@@ -209,7 +209,7 @@ label.rec-replace span { font-size: 11px; color: #aaa }
 
       if (!delegateId) throw new Error('No delegate ID — reinstall the bookmarklet')
 
-      // POST signed request to relay server under the delegate's ID slot.
+      // POST signed request to switchboard under the delegate's ID slot.
       // Portpass polls this slot on interval and processes any pending request.
       var requestBody = JSON.stringify({ url: currentUrl, nonce: nonce, ecdh: cpEcdhSpkiB64, ts: ts, sig: sigB64, pub: pubSpkiB64 })
       async function postRequest() {
@@ -221,7 +221,7 @@ label.rec-replace span { font-size: 11px; color: #aaa }
           })
           if (!r.ok) throw new Error('Relay server error ' + r.status)
         } catch(e) {
-          if (e instanceof TypeError) throw new Error('portpass-relay is not running — start it first')
+          if (e instanceof TypeError) throw new Error('portpass-switchboard is not running — start it first')
           throw e
         }
       }
@@ -263,7 +263,7 @@ label.rec-replace span { font-size: 11px; color: #aaa }
           if (onBadBlob) await onBadBlob()
         } else if (resp.status !== 404) throw new Error('Relay server error ' + resp.status)
       } catch(e) {
-        if (e instanceof TypeError) throw new Error('portpass-relay is not running — start it first')
+        if (e instanceof TypeError) throw new Error('portpass-switchboard is not running — start it first')
         throw e
       }
       await new Promise(function(r) { setTimeout(r, 500) })
@@ -271,7 +271,7 @@ label.rec-replace span { font-size: 11px; color: #aaa }
     throw new Error('Timed out waiting for Portpass')
   }
 
-  // Decrypts the relay server blob using the ECDH key pair generated at startup.
+  // Decrypts the switchboard blob using the ECDH key pair generated at startup.
   // Blob format: { ephPub: base64(JSON-stringified JWK), iv: base64, ciphertext: base64 }
   // Or error format: { error: "message" }
   // Plaintext: JSON array of records, each with pre-decrypted fields.
