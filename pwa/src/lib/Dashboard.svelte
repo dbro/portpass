@@ -362,7 +362,7 @@
     for (const delegate of delegates) {
       try {
         const resp = await fetch(`${get(relayUrl)}/pick/` + delegate.id)
-        if (!resp.ok) continue  // 404 = nothing pending
+        if (resp.status === 204) continue  // 204 = nothing pending
         const req = await resp.json()
 
         const age = Date.now() - req.ts
