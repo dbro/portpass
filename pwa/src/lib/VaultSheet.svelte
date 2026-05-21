@@ -418,14 +418,16 @@
     </button>
     {#if advancedOpen}
       <div class="delegate-advanced-body">
-        <label class="vault-label muted" style="font-size:12px;display:block;margin-bottom:4px">Switchboard URL</label>
-        <input
-          class="input"
-          style="font-size:13px"
-          bind:value={editSwitchboardUrl}
-          oninput={() => { switchboardUrlDirty = editSwitchboardUrl !== get(switchboardUrl) }}
-          placeholder="ws://localhost:7577"
-        />
+        <label class="vault-label muted" style="font-size:12px;display:block;margin-bottom:4px">
+          Switchboard URL
+          <input
+            class="input"
+            style="font-size:13px;display:block;width:100%;margin-top:4px"
+            bind:value={editSwitchboardUrl}
+            oninput={() => { switchboardUrlDirty = editSwitchboardUrl !== get(switchboardUrl) }}
+            placeholder="ws://localhost:7577"
+          />
+        </label>
         {#if switchboardUrlDirty}
           <div class="switchboard-url-actions">
             <button class="btn btn-ghost" style="font-size:13px" onclick={cancelRelayUrlEdit}>Cancel</button>
