@@ -139,7 +139,7 @@ It is possible to autofill while running Portpass in a separate clean profile, f
 
 **Same-profile**: Portpass and the pages you fill are in the same browser profile. The bookmarklet opens a relay popup that talks to Portpass directly via a browser-internal channel. No extra software needed. This is the simpler approach, but it means that all your browser extensions could try to attack Portpass. If you trust your browser extensions, this is ok.
 
-**Cross-profile**: To protect against malicious browser extensions, you could choose to run Portpass in a separate browser profile with no extensions installed. This means that the browser has stronger isolation between Portpass and the websites that you visit, and the browser prevents the bookmarklet from communicating with Portpass to transfer information from your vault to the bookmarklet. In this scenario, a helper service provides a simple message switchboard between Portpass and the bookmarklet. This service is called **portpass-switchboard**, and it runs in the background acting as a very limited shared memory. No data leaves your machine. All messages sent between Portpass and the bookmarklet via portpass-switchboard are encrypted end-to-end using the key that is set up when the bookmarklet is installed. An eavesdropper would see only encrypted blobs.
+**Cross-profile**: To protect against malicious browser extensions, you could choose to run Portpass in a separate browser profile with no extensions installed. This means that the browser has stronger isolation between Portpass and the websites that you visit, and the browser prevents the bookmarklet from communicating with Portpass to transfer information from your vault to the bookmarklet. In this scenario, a helper service provides a simple message switchboard between Portpass and the bookmarklet. This service is called **[switchboard](https://github.com/dbro/switchboard)**, and it runs in the background acting as a very limited shared memory. No data leaves your machine. All messages sent between Portpass and the bookmarklet via the switchboard are encrypted end-to-end using the key that is set up when the bookmarklet is installed. An eavesdropper would see only encrypted blobs.
 
 Note that while Portpass should run in Chrome or Safari, the bookmarklet can run in Chrome, Safari, and Firefox. More than one bookmarklet can be created and used by Portpass, allowing fine-grained control for people who use multiple browsers and profiles.
 
@@ -150,7 +150,7 @@ Note that while Portpass should run in Chrome or Safari, the bookmarklet can run
 3. Under **Autofill**, click **+ New bookmarklet**. Give it a name (e.g. "Chrome — main profile") and click **Create**.
 4. Drag the chip to your browser's bookmarks bar. If the bar is hidden, click **Copy link** and add the bookmark manually.
 
-For cross-profile setup, start portpass-switchboard as a background service on your machine before using the bookmarklet. TODO: add instructions to make this helper app run automatically in the background whenever Portpass runs.
+For cross-profile setup, start the [switchboard](https://github.com/dbro/switchboard) as a background service on your machine before using the bookmarklet. See the repo README for instructions to run switchboard automatically in the background.
 
 ### Autofill form field configuration
 
