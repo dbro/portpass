@@ -352,33 +352,34 @@
   })
 
   let _checkInProgress = false
+  let _relayBackoffUntil = 0
 
   async function checkPendingAutofillRequests() {
-    if (_checkInProgress) return
+    if (_checkInProgress || Date.now() < _relayBackoffUntil) return
     _checkInProgress = true
     try {
-    const delegates = await getDelegates(dbKey)
-    if (!delegates.length) return
-    for (const delegate of delegates) {
-      try {
-        const resp = await fetch(`${get(relayUrl)}/pick/` + delegate.id)
-        if (resp.status === 204) continue  // 204 = nothing pending
-        const req = await resp.json()
+      const delegates = await getDelegates(dbKey)
+      if (!delegates.length) return
+      for (const delegate of delegates) {
+        try {
+          const resp = await fetch(`${get(relayUrl)}/pick/` + delegate.id)
+          if (resp.status === 204) continue  // 204 = nothing pending
+          const req = await resp.json()
 
-        const age = Date.now() - req.ts
-        if (age > 60000 || age < -5000) continue
+          const age = Date.now() - req.ts
+          if (age > 60000 || age < -5000) continue
 
-        const spkiBytes = Uint8Array.from(atob(req.pub), c => c.charCodeAt(0))
-        const sigBytes  = Uint8Array.from(atob(req.sig), c => c.charCodeAt(0))
-        const message   = new TextEncoder().encode(JSON.stringify({ url: req.url, nonce: req.nonce, ecdh: req.ecdh, ts: req.ts }))
-        const verified  = await verifyAndUpdate(dbKey, spkiBytes, message, sigBytes, 'relay')
-        if (!verified) continue
+          const spkiBytes = Uint8Array.from(atob(req.pub), c => c.charCodeAt(0))
+          const sigBytes  = Uint8Array.from(atob(req.sig), c => c.charCodeAt(0))
+          const message   = new TextEncoder().encode(JSON.stringify({ url: req.url, nonce: req.nonce, ecdh: req.ecdh, ts: req.ts }))
+          const verified  = await verifyAndUpdate(dbKey, spkiBytes, message, sigBytes, 'relay')
+          if (!verified) continue
 
-        await processAutofillIntent({ url: req.url, nonce: req.nonce, ecdhSpkiB64: req.ecdh })
-      } catch (e) {
-        // TypeError = relay server not running — silent
+          await processAutofillIntent({ url: req.url, nonce: req.nonce, ecdhSpkiB64: req.ecdh })
+        } catch (e) {
+          if (e instanceof TypeError) _relayBackoffUntil = Date.now() + 30000  // relay not running
+        }
       }
-    }
     } finally { _checkInProgress = false }
   }
 
