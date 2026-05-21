@@ -34,6 +34,28 @@ An extension with broad host permissions runs in the same process as every web p
 
 This applies to every browser-based password manager and it is not a flaw specific to Portpass. It is a fundamental property of how browser extensions work.
 
+### The supply-chain / auto-update risk — including Portpass itself
+
+Extensions update silently and automatically. An extension that was safe when you installed it can be bought, transferred to a new owner, or hacked, and a subsequent update can make it malicious — without any visible change and without any action on your part. This attack has occurred with popular, widely-reviewed Chrome extensions. Even careful upfront vetting only tells you the extension was safe at that moment; you are extending ongoing trust in the publisher and in anyone who might later acquire them.
+
+**Portpass is subject to the same risk.** It is a Progressive Web App served from GitHub Pages and it updates automatically when a new version is deployed. A compromised update — whether through the GitHub repository, the build pipeline, or a dependency in the npm or Go module graph — would run in the same browser context as your vault. The mitigations are real: Portpass is open-source and every change is publicly auditable; releases are tagged and deployed by the project maintainer; the encryption core is compiled from Go source whose history is visible. But these reduce risk rather than eliminating it. If you need higher assurance, treat Portpass the same way you would any critical piece of software: review updates before they apply, or use a dedicated profile that you update intentionally.
+
+### How to audit extensions in your regular profile
+
+Not all extensions are equally relevant to your vault. An extension that only has access to `reddit.com` cannot run on the Portpass page and cannot see your vault or your master password — it is simply not in scope. Only extensions with broad host permissions or specific access to the Portpass URL (`dbro.github.io`) matter for vault security.
+
+**In Chrome:** open `chrome://extensions`, click **Details** on each extension, then scroll to **Permissions**. An extension that says "Read and change all your data on all websites" (or similar) can run on the Portpass page. An extension with a narrower list of sites can only run on those sites.
+
+**In Firefox:** open `about:addons`, click an extension, then the **Permissions** tab. "Access your data for all websites" is the broad permission; narrower extensions will list specific domains.
+
+Neither browser provides a consolidated view — you must check each extension individually.
+
+Once you have identified which extensions have broad access, consider two distinct surfaces:
+
+1. **Extensions that can run on the Portpass URL** (`dbro.github.io`): highest impact. They can observe your master password as you type it, read any revealed password in the UI, and — during the brief window when the "New bookmarklet" modal is open — read the delegate private key from the chip's link attribute. If any extension you cannot fully trust has this access, use a dedicated profile for Portpass instead.
+
+2. **Extensions that can run on login pages**: they can read form field values after autofill. This is the same exposure that exists with every password manager, including native apps — an extension that runs on `bank.com` can read whatever was typed or filled into that page. Audit extensions on your sensitive login pages separately from the Portpass audit.
+
 ### Mitigation: use a dedicated browser profile
 
 The most effective defense is to use Portpass in a separate browser profile that has no extensions installed.
@@ -60,7 +82,7 @@ Extensions are installed per-profile. A profile with no extensions has no extens
 
 - **Same-profile autofill**: both Portpass and the page being filled are in the same browser profile. The bookmarklet opens a relay popup that communicates with Portpass via BroadcastChannel. This is more convenient but exposes Portpass to any extensions in that profile.
 
-- **Cross-profile autofill**: Portpass runs in a clean, extension-free profile; the bookmarklet runs in your main browsing profile. Credentials travel from Portpass to the login page via [portpass-relay](https://github.com/dbro/portpass), a tiny local HTTP dead-drop server (`localhost:7677`). This preserves full extension isolation — Portpass never touches the browsing profile. Requires portpass-relay to be running as a background service.
+- **Cross-profile autofill**: Portpass runs in a clean, extension-free profile; the bookmarklet runs in your main browsing profile. Credentials travel via [switchboard](https://github.com/dbro/switchboard), a tiny local WebSocket broker (`localhost:7577`). This preserves full extension isolation — Portpass never touches the browsing profile. Requires switchboard to be running as a background service.
 
 Both modes use the **delegate model**: each bookmarklet installation holds an ECDSA P-256 private key; the corresponding public key is registered in Portpass. Every autofill request is signed with the private key and verified by Portpass before any credentials are exchanged. This means a malicious extension on the page cannot impersonate a legitimate bookmarklet and trick Portpass into delivering credentials to an attacker's key.
 
