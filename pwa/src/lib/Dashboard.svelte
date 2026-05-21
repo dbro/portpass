@@ -278,7 +278,7 @@
   }
 
   async function processAutofillIntent({ url, nonce, ecdhSpkiB64 }) {
-    const DROP_URL = `http://localhost:7677/drop/${nonce}`
+    const DROP_URL = `http://localhost:7577/drop/${nonce}`
     const postError = msg =>
       fetch(DROP_URL, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -359,7 +359,7 @@
     if (!delegates.length) return
     for (const delegate of delegates) {
       try {
-        const resp = await fetch('http://localhost:7677/pick/' + delegate.id)
+        const resp = await fetch('http://localhost:7577/pick/' + delegate.id)
         if (!resp.ok) continue  // 404 = nothing pending
         const req = await resp.json()
 

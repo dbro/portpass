@@ -214,7 +214,7 @@ label.rec-replace span { font-size: 11px; color: #aaa }
       var requestBody = JSON.stringify({ url: currentUrl, nonce: nonce, ecdh: cpEcdhSpkiB64, ts: ts, sig: sigB64, pub: pubSpkiB64 })
       async function postRequest() {
         try {
-          var r = await fetch('http://localhost:7677/drop/' + delegateId, {
+          var r = await fetch('http://localhost:7577/drop/' + delegateId, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: requestBody,
@@ -246,7 +246,7 @@ label.rec-replace span { font-size: 11px; color: #aaa }
   // empty, whitespace, or unparseable — caller can re-post the request to recover.
   async function pollRelayServer(pollNonce, timeout, onBadBlob) {
     var deadline = Date.now() + timeout
-    var url = 'http://localhost:7677/pick/' + pollNonce
+    var url = 'http://localhost:7577/pick/' + pollNonce
     while (Date.now() < deadline) {
       try {
         var resp = await fetch(url)
