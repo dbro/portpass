@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import { get } from 'svelte/store'
   import { getDatabaseInfo, openDatabase, updateDBFields } from '../wasm.js'
-  import { selectedFile, dbItems, secondaryVaults, switchboardUrl, switchboardConnected, crossProfileEnabled } from '../store.js'
+  import { selectedFile, dbItems, secondaryVaults, switchboardUrl, switchboardConnected, crossProfileEnabled, delegatesVersion } from '../store.js'
   import { isBiometricSupported, isBiometricEnrolled, enrollBiometric, clearBiometric } from './biometric.js'
   import { makeDelegateBookmarkletUrl } from './bookmarklet.js'
   import { getDelegates, addDelegate, revokeDelegate, setSwitchboardUrl, setCrossProfileEnabled } from './delegates.js'
@@ -22,7 +22,11 @@
   onMount(async () => {
     biometricAvailable = await isBiometricSupported()
     biometricEnrolled  = await isBiometricEnrolled(info?.uuid)
-    delegates = await getDelegates(_vaultUuid)
+  })
+
+  $effect(() => {
+    void $delegatesVersion
+    getDelegates(_vaultUuid).then(d => delegates = d)
   })
 
   async function disableBiometric() {

@@ -9,3 +9,4 @@ export const clipboardContext = writable(null) // { token, field, uuid, hash: nu
 export const switchboardUrl        = writable('ws://localhost:7577')
 export const switchboardConnected  = writable(false)
 export const crossProfileEnabled   = writable(false)
+export const delegatesVersion      = writable(0)

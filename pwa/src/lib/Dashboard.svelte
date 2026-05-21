@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { get } from 'svelte/store'
-  import { selectedFile, dbItems, secondaryVaults, toast, clipboardSession, clipboardContext, switchboardUrl, switchboardConnected, crossProfileEnabled } from '../store.js'
+  import { selectedFile, dbItems, secondaryVaults, toast, clipboardSession, clipboardContext, switchboardUrl, switchboardConnected, crossProfileEnabled, delegatesVersion } from '../store.js'
   import {
     getRecordData, getDatabaseData, saveDatabase, getDatabaseInfo,
     updateRecordFields, updateDBFields, deleteRecord as wasmDeleteRecord,
@@ -381,6 +381,7 @@
         const message   = new TextEncoder().encode(JSON.stringify({ url: msg.url, nonce: msg.replyTo, ecdh: msg.ecdh, ts: msg.ts }))
         const verified  = await verifyAndUpdate(dbKey, spkiBytes, message, sigBytes, 'relay')
         if (!verified) return
+        delegatesVersion.update(v => v + 1)
         await processAutofillIntent({ url: msg.url, nonce: msg.replyTo, ecdhSpkiB64: msg.ecdh })
       } catch(e) {}
     }
@@ -559,6 +560,7 @@
             ch.postMessage({ type: 'relay-error', message: 'Autofill request not authorized', nonce: msg.nonce })
             return
           }
+          delegatesVersion.update(v => v + 1)
           const openerPub = await crypto.subtle.importKey(
             'jwk', msg.pubkey, { name: 'ECDH', namedCurve: 'P-256' }, false, []
           )
