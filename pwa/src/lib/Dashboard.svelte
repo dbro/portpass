@@ -282,7 +282,7 @@
 
   async function processAutofillIntent({ url, nonce, ecdhSpkiB64 }) {
     const wsSend = (msg) => { if (_sbWs) _sbWs.send(JSON.stringify(msg)) }
-    const wsError = (error) => wsSend({ type: 'response', nonce, error })
+    const wsError = (error) => wsSend({ type: 'reply', replyTo: nonce, error })
 
     const records = autofillFindRecords(url)
     if (!records.length) { wsError('No matching passwords found'); return }
@@ -321,7 +321,7 @@
       const ephPubJwk = await crypto.subtle.exportKey('jwk', ephPair.publicKey)
 
       wsSend({
-        type: 'response', nonce,
+        type: 'reply', replyTo: nonce,
         ephPub: btoa(JSON.stringify(ephPubJwk)),
         iv: btoa(String.fromCharCode(...iv)),
         ciphertext: btoa(String.fromCharCode(...new Uint8Array(ct))),
@@ -368,20 +368,20 @@
       switchboardConnected.set(true)
       const delegates = await getDelegates(dbKey)
       if (delegates.length && _sbWs === ws)
-        ws.send(JSON.stringify({ type: 'register', delegates: delegates.map(d => d.id) }))
+        ws.send(JSON.stringify({ type: 'subscribe', channels: delegates.map(d => d.id) }))
     }
     ws.onmessage = async (event) => {
       try {
         const msg = JSON.parse(event.data)
-        if (msg.type !== 'request') return
+        if (msg.type !== 'publish') return
         const age = Date.now() - msg.ts
         if (age > 60000 || age < -5000) return
         const spkiBytes = Uint8Array.from(atob(msg.pub), c => c.charCodeAt(0))
         const sigBytes  = Uint8Array.from(atob(msg.sig), c => c.charCodeAt(0))
-        const message   = new TextEncoder().encode(JSON.stringify({ url: msg.url, nonce: msg.nonce, ecdh: msg.ecdh, ts: msg.ts }))
+        const message   = new TextEncoder().encode(JSON.stringify({ url: msg.url, nonce: msg.replyTo, ecdh: msg.ecdh, ts: msg.ts }))
         const verified  = await verifyAndUpdate(dbKey, spkiBytes, message, sigBytes, 'relay')
         if (!verified) return
-        await processAutofillIntent({ url: msg.url, nonce: msg.nonce, ecdhSpkiB64: msg.ecdh })
+        await processAutofillIntent({ url: msg.url, nonce: msg.replyTo, ecdhSpkiB64: msg.ecdh })
       } catch(e) {}
     }
     let closed = false

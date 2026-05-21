@@ -215,7 +215,7 @@ label.rec-replace span { font-size: 11px; color: #aaa }
 
       $status.textContent = 'Waiting for Portpass…'
       var blob = await sendViaSwitchboard({
-        type: 'request', delegateId: delegateId, nonce: nonce,
+        type: 'publish', channel: delegateId, replyTo: nonce,
         url: currentUrl, ecdh: cpEcdhSpkiB64, ts: ts, sig: sigB64, pub: pubSpkiB64
       })
       await processRelayBlob(blob)
@@ -231,7 +231,7 @@ label.rec-replace span { font-size: 11px; color: #aaa }
     return new Promise(function(resolve, reject) {
       var ws
       try { ws = new WebSocket(switchboardWsUrl) } catch(e) {
-        reject(new Error('portpass-switchboard is not running — start it first')); return
+        reject(new Error('switchboard is not running — start it first')); return
       }
       var settled = false
       function done(fn, arg) { if (!settled) { settled = true; ws.close(); fn(arg) } }
@@ -240,17 +240,17 @@ label.rec-replace span { font-size: 11px; color: #aaa }
         try {
           var msg = JSON.parse(e.data)
           if (msg.type === 'error') done(reject, new Error(msg.message || 'Autofill failed'))
-          else if (msg.type === 'response') done(resolve, msg)
+          else if (msg.type === 'reply') done(resolve, msg)
         } catch(_) { done(reject, new Error('Invalid switchboard message')) }
       }
-      ws.onerror = function() { done(reject, new Error('portpass-switchboard is not running — start it first')) }
-      ws.onclose = function() { if (!settled) done(reject, new Error('portpass-switchboard closed unexpectedly')) }
+      ws.onerror = function() { done(reject, new Error('switchboard is not running — start it first')) }
+      ws.onclose = function() { if (!settled) done(reject, new Error('switchboard closed unexpectedly')) }
     })
   }
 
-  // Decrypts the switchboard response using the ECDH key pair generated at startup.
-  // Response format: { type:"response", nonce, ephPub, iv, ciphertext }
-  // Or error: { type:"response", nonce, error: "message" }
+  // Decrypts the switchboard reply using the ECDH key pair generated at startup.
+  // Reply format: { type:"reply", replyTo, ephPub, iv, ciphertext }
+  // Or error: { type:"reply", replyTo, error: "message" }
   // Plaintext: JSON array of records, each with pre-decrypted fields.
   async function processRelayBlob(blob) {
     if (blob.error) { sendError(blob.error); return }

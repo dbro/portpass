@@ -445,7 +445,7 @@
           <div class="switchboard-status-row">
             <span class="switchboard-status-dot" class:switchboard-ok={$switchboardConnected} class:switchboard-error={!$switchboardConnected}></span>
             <span class="muted" style="font-size:13px">
-              {$switchboardConnected ? 'Cross-profile autofill ready' : 'portpass-switchboard not connected'}
+              {$switchboardConnected ? 'Cross-profile autofill ready' : 'switchboard not connected'}
             </span>
           </div>
           <div class="muted" style="font-size:12px">
