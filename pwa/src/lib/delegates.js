@@ -1,6 +1,7 @@
 import { get, set, del } from 'idb-keyval'
 
 const STORAGE_KEY = 'delegates-v1'
+const RELAY_URL_DEFAULT = 'http://localhost:7577'
 
 async function load() {
   return (await get(STORAGE_KEY)) ?? {}
@@ -11,10 +12,18 @@ async function save(all) {
   else await set(STORAGE_KEY, all)
 }
 
+function migrate(d) {
+  if ('useCount' in d || 'lastUsed' in d) {
+    const { useCount, lastUsed, ...rest } = d
+    return { ...rest, bcCount: 0, bcLastUsed: null, relayCount: 0, relayLastUsed: null }
+  }
+  return d
+}
+
 export async function getDelegates(vaultUuid) {
   if (!vaultUuid) return []
   const all = await load()
-  return all[vaultUuid] ?? []
+  return (all[vaultUuid] ?? []).map(migrate)
 }
 
 export async function addDelegate(vaultUuid, name, publicKeySpki) {
@@ -24,8 +33,10 @@ export async function addDelegate(vaultUuid, name, publicKeySpki) {
     name,
     publicKey: Array.from(new Uint8Array(publicKeySpki)),
     created: Date.now(),
-    useCount: 0,
-    lastUsed: null,
+    bcCount: 0,
+    bcLastUsed: null,
+    relayCount: 0,
+    relayLastUsed: null,
   }
   all[vaultUuid] = [delegate, ...(all[vaultUuid] ?? [])]
   await save(all)
@@ -40,11 +51,12 @@ export async function revokeDelegate(vaultUuid, delegateId) {
   await save(all)
 }
 
-// Verify a signature against registered delegates. On success, increments useCount/lastUsed
-// and returns the matching delegate. Returns null if no delegate matches or signature is invalid.
-export async function verifyAndUpdate(vaultUuid, spkiBytes, message, signatureBytes) {
+// Verify a signature against registered delegates. On success, increments the
+// counter for the given channel ('bc' or 'relay') and returns the delegate.
+// Returns null if no delegate matches or signature is invalid.
+export async function verifyAndUpdate(vaultUuid, spkiBytes, message, signatureBytes, channel) {
   const all = await load()
-  const list = all[vaultUuid] ?? []
+  const list = (all[vaultUuid] ?? []).map(migrate)
   for (const d of list) {
     const stored = new Uint8Array(d.publicKey)
     const lenMatch = stored.length === spkiBytes.length
@@ -58,12 +70,30 @@ export async function verifyAndUpdate(vaultUuid, spkiBytes, message, signatureBy
         { name: 'ECDSA', hash: 'SHA-256' }, key, signatureBytes, message
       )
       if (valid) {
-        d.useCount++
-        d.lastUsed = Date.now()
+        if (channel === 'relay') {
+          d.relayCount = (d.relayCount ?? 0) + 1
+          d.relayLastUsed = Date.now()
+        } else {
+          d.bcCount = (d.bcCount ?? 0) + 1
+          d.bcLastUsed = Date.now()
+        }
+        all[vaultUuid] = list
         await save(all)
         return d
       }
     } catch { continue }
   }
   return null
+}
+
+export async function getRelayUrl(vaultUuid) {
+  if (!vaultUuid) return RELAY_URL_DEFAULT
+  const key = `relay-url-${vaultUuid}`
+  return (await get(key)) ?? RELAY_URL_DEFAULT
+}
+
+export async function setRelayUrl(vaultUuid, url) {
+  const key = `relay-url-${vaultUuid}`
+  if (!url || url === RELAY_URL_DEFAULT) await del(key)
+  else await set(key, url)
 }

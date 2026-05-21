@@ -113,39 +113,41 @@ test.describe('VaultSheet autofill installation UI', () => {
     await expect(page.locator('.vault-section-title', { hasText: 'AUTOFILL' })).toBeVisible()
   })
 
+  async function createBookmarklet(page) {
+    await page.locator('.vault-pill').click()
+    await page.getByRole('button', { name: '+ New bookmarklet' }).click()
+    await page.getByPlaceholder('e.g. Chrome — work profile').fill('Test')
+    await page.getByRole('button', { name: 'Create' }).click()
+    await expect(page.locator('.vs-bookmarklet-chip')).toBeVisible({ timeout: 5000 })
+  }
+
   test('bookmarklet chip has a javascript: href', async ({ page }) => {
     await openVault(page)
-    await page.locator('.vault-pill').click()
-    const chip = page.locator('.vs-bookmarklet-chip')
-    await expect(chip).toBeVisible()
-    const href = await chip.getAttribute('href')
+    await createBookmarklet(page)
+    const href = await page.locator('.vs-bookmarklet-chip').getAttribute('href')
     expect(href).toMatch(/^javascript:/)
   })
 
   test('bookmarklet href contains the Portpass origin', async ({ page }) => {
     await openVault(page)
-    await page.locator('.vault-pill').click()
+    await createBookmarklet(page)
     const href = await page.locator('.vs-bookmarklet-chip').getAttribute('href')
-    // The URL is encodeURIComponent'd inside the javascript: href; decode before asserting.
     expect(decodeURIComponent(href ?? '')).toContain('localhost:5173')
   })
 
   test('clicking the chip does not navigate away', async ({ page }) => {
     await openVault(page)
-    await page.locator('.vault-pill').click()
+    await createBookmarklet(page)
     await page.locator('.vs-bookmarklet-chip').click()
-    // Still on the vault sheet — settings section still visible
-    await expect(page.locator('.vault-section-title', { hasText: 'AUTOFILL' })).toBeVisible()
+    await expect(page.locator('.modal-title', { hasText: 'Install autofill bookmarklet' })).toBeVisible()
   })
 
   test('Copy link button copies the javascript: URL to clipboard', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write'])
     await openVault(page)
-    await page.locator('.vault-pill').click()
+    await createBookmarklet(page)
     await page.locator('.vs-copy-btn').click()
-    // Button shows "Copied!" feedback
     await expect(page.locator('.vs-copy-btn')).toHaveText('Copied!')
-    // Clipboard contains a javascript: URL
     const text = await page.evaluate(() => navigator.clipboard.readText())
     expect(text).toMatch(/^javascript:/)
   })
@@ -153,7 +155,7 @@ test.describe('VaultSheet autofill installation UI', () => {
   test('Copy link button reverts to "Copy link" after 2 seconds', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write'])
     await openVault(page)
-    await page.locator('.vault-pill').click()
+    await createBookmarklet(page)
     await page.locator('.vs-copy-btn').click()
     await expect(page.locator('.vs-copy-btn')).toHaveText('Copied!')
     await expect(page.locator('.vs-copy-btn')).toHaveText('Copy link', { timeout: 3000 })

@@ -1,11 +1,11 @@
 <script>
-  import { onMount } from 'svelte'
+  import { onMount, onDestroy } from 'svelte'
   import { get } from 'svelte/store'
   import { getDatabaseInfo, openDatabase, updateDBFields } from '../wasm.js'
-  import { selectedFile, dbItems, secondaryVaults } from '../store.js'
+  import { selectedFile, dbItems, secondaryVaults, relayUrl } from '../store.js'
   import { isBiometricSupported, isBiometricEnrolled, enrollBiometric, clearBiometric } from './biometric.js'
   import { makeDelegateBookmarkletUrl } from './bookmarklet.js'
-  import { getDelegates, addDelegate, revokeDelegate } from './delegates.js'
+  import { getDelegates, addDelegate, revokeDelegate, setRelayUrl } from './delegates.js'
   import Icon from './Icon.svelte'
 
   let { isDesktop, onback, onlock, onlockall, onlocksecondary, onunlockadditional, ondbsave, ondirtychange, theme, accent, ontheme, onaccent } = $props()
@@ -205,6 +205,55 @@
     delegates = delegates.filter(d => d.id !== delegateId)
   }
 
+  // ── Advanced / relay ───────────────────────────────────────────────────────
+  let advancedOpen       = $state(false)
+  let relayProbeStatus   = $state(null)   // null | 'ok' | 'error'
+  let editRelayUrl       = $state('')
+  let relayUrlDirty      = $state(false)
+  let advancedInterval   = null
+
+  let totalRelayCount = $derived(delegates.reduce((n, d) => n + (d.relayCount ?? 0), 0))
+  let lastRelayUsed   = $derived(
+    delegates.reduce((t, d) => d.relayLastUsed ? Math.max(t, d.relayLastUsed) : t, 0) || null
+  )
+
+  function toggleAdvanced() {
+    advancedOpen = !advancedOpen
+    if (advancedOpen) {
+      editRelayUrl  = get(relayUrl)
+      relayUrlDirty = false
+      probeRelay()
+      advancedInterval = setInterval(probeRelay, 5000)
+    } else {
+      clearInterval(advancedInterval)
+      advancedInterval   = null
+      relayProbeStatus   = null
+    }
+  }
+
+  async function probeRelay() {
+    try {
+      const r = await fetch(`${editRelayUrl}/status`, { signal: AbortSignal.timeout(500) })
+      relayProbeStatus = r.ok ? 'ok' : 'error'
+    } catch {
+      relayProbeStatus = 'error'
+    }
+  }
+
+  async function saveRelayUrl() {
+    await setRelayUrl(_vaultUuid, editRelayUrl)
+    relayUrl.set(editRelayUrl)
+    relayUrlDirty = false
+    probeRelay()
+  }
+
+  function cancelRelayUrlEdit() {
+    editRelayUrl  = get(relayUrl)
+    relayUrlDirty = false
+  }
+
+  onDestroy(() => clearInterval(advancedInterval))
+
   function copyChip() {
     navigator.clipboard.writeText(newDelegateUrl).then(() => {
       chipCopied = true
@@ -364,15 +413,17 @@
   <div class="vault-section">
     <div class="vault-section-title">AUTOFILL</div>
     <p class="muted" style="font-size:14px;margin:0 0 14px;line-height:1.5">
-      Create a uniquely keyed bookmarklet for each browser profile where you will run Autofill. If you will run Autofill from a different browser or browser profile, make sure portpass-relay is always running.
+      Create a uniquely keyed bookmarklet for each browser profile where you want autofill.
     </p>
     {#if delegates.length > 0}
       <div class="delegate-list">
         {#each delegates as d}
+          {@const total   = (d.bcCount ?? 0) + (d.relayCount ?? 0)}
+          {@const lastTs  = Math.max(d.bcLastUsed ?? 0, d.relayLastUsed ?? 0) || null}
           <div class="delegate-row">
             <div class="delegate-info">
               <span class="delegate-name">{d.name}</span>
-              <span class="delegate-meta muted">Created {fmtDate(d.created)} · {d.useCount} {d.useCount === 1 ? 'use' : 'uses'} · Last used {fmtRelative(d.lastUsed)}</span>
+              <span class="delegate-meta muted">Created {fmtDate(d.created)} · {total} {total === 1 ? 'use' : 'uses'} · Last used {fmtRelative(lastTs)}</span>
             </div>
             <button class="delegate-revoke" onclick={() => revokeOne(d.id)}>Revoke</button>
           </div>
@@ -380,6 +431,42 @@
       </div>
     {/if}
     <button class="vault-unlock-more" onclick={openNewDelegate}>+ New bookmarklet</button>
+
+    <!-- Advanced -->
+    <button class="delegate-advanced-toggle muted" onclick={toggleAdvanced}>
+      Advanced {advancedOpen ? '▲' : '▼'}
+    </button>
+    {#if advancedOpen}
+      <div class="delegate-advanced-body">
+        <label class="vault-label muted" style="font-size:12px;display:block;margin-bottom:4px">Relay URL</label>
+        <input
+          class="input"
+          style="font-size:13px"
+          bind:value={editRelayUrl}
+          oninput={() => { relayUrlDirty = editRelayUrl !== get(relayUrl) }}
+          placeholder="http://localhost:7577"
+        />
+        {#if relayUrlDirty}
+          <div class="relay-url-actions">
+            <button class="btn btn-ghost" style="font-size:13px" onclick={cancelRelayUrlEdit}>Cancel</button>
+            <button class="btn btn-primary" style="font-size:13px" onclick={saveRelayUrl}>Save</button>
+          </div>
+        {/if}
+        <div class="relay-status-row">
+          <span class="relay-status-dot" class:relay-ok={relayProbeStatus === 'ok'} class:relay-error={relayProbeStatus === 'error'}></span>
+          <span class="muted" style="font-size:13px">
+            {#if relayProbeStatus === 'ok'}
+              Cross-profile autofill ready
+            {:else if relayProbeStatus === 'error'}
+              portpass-relay not detected
+            {/if}
+          </span>
+        </div>
+        <div class="muted" style="font-size:12px">
+          Count of cross-profile autofill uses: {totalRelayCount}{#if lastRelayUsed} · Last {fmtRelative(lastRelayUsed)}{/if}
+        </div>
+      </div>
+    {/if}
   </div>
 
   <!-- Appearance -->
@@ -1081,6 +1168,50 @@
     flex-shrink: 0;
   }
   .delegate-revoke:hover { text-decoration: underline; }
+
+  .delegate-advanced-toggle {
+    display: block;
+    margin-top: 14px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 0;
+  }
+
+  .delegate-advanced-body {
+    margin-top: 12px;
+    padding: 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-card);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .relay-url-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+
+  .relay-status-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 20px;
+  }
+
+  .relay-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--border);
+    flex-shrink: 0;
+  }
+  .relay-status-dot.relay-ok    { background: #4caf50; }
+  .relay-status-dot.relay-error { background: var(--text-soft); }
 
   /* ── Bookmarklet chip (used in delegate install modal) ───────────────────── */
   .vs-bookmarklet-row {

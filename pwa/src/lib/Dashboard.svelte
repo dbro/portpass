@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { get } from 'svelte/store'
-  import { selectedFile, dbItems, secondaryVaults, toast, clipboardSession, clipboardContext } from '../store.js'
+  import { selectedFile, dbItems, secondaryVaults, toast, clipboardSession, clipboardContext, relayUrl } from '../store.js'
   import {
     getRecordData, getDatabaseData, saveDatabase, getDatabaseInfo,
     updateRecordFields, updateDBFields, deleteRecord as wasmDeleteRecord,
@@ -10,6 +10,7 @@
     getTOTP, getFieldValue, getCustomFieldValue,
   } from '../wasm.js'
   import { addSecondaryCredential, removeSecondaryCredential } from './secondaryVaults.js'
+  import { getRelayUrl } from './delegates.js'
   import { isBiometricEnrolledForFile, unlockWithBiometric } from './biometric.js'
   import { getDelegates, verifyAndUpdate } from './delegates.js'
   import Icon from './Icon.svelte'
@@ -76,6 +77,7 @@
       dbName   = info?.name ?? ''
       lastSave = info?.when ?? ''
     } catch (e) {}
+    getRelayUrl(dbKey).then(url => relayUrl.set(url)).catch(() => {})
     document.addEventListener('visibilitychange', onVisibilityChange)
     window.addEventListener('focus', onWindowFocus)
     return () => {
@@ -278,7 +280,7 @@
   }
 
   async function processAutofillIntent({ url, nonce, ecdhSpkiB64 }) {
-    const DROP_URL = `http://localhost:7577/drop/${nonce}`
+    const DROP_URL = `${get(relayUrl)}/drop/${nonce}`
     const postError = msg =>
       fetch(DROP_URL, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -359,7 +361,7 @@
     if (!delegates.length) return
     for (const delegate of delegates) {
       try {
-        const resp = await fetch('http://localhost:7577/pick/' + delegate.id)
+        const resp = await fetch(`${get(relayUrl)}/pick/` + delegate.id)
         if (!resp.ok) continue  // 404 = nothing pending
         const req = await resp.json()
 
@@ -369,7 +371,7 @@
         const spkiBytes = Uint8Array.from(atob(req.pub), c => c.charCodeAt(0))
         const sigBytes  = Uint8Array.from(atob(req.sig), c => c.charCodeAt(0))
         const message   = new TextEncoder().encode(JSON.stringify({ url: req.url, nonce: req.nonce, ecdh: req.ecdh, ts: req.ts }))
-        const verified  = await verifyAndUpdate(dbKey, spkiBytes, message, sigBytes)
+        const verified  = await verifyAndUpdate(dbKey, spkiBytes, message, sigBytes, 'relay')
         if (!verified) continue
 
         await processAutofillIntent({ url: req.url, nonce: req.nonce, ecdhSpkiB64: req.ecdh })
@@ -530,7 +532,7 @@
           const spkiBytes = Uint8Array.from(atob(msg.pub), c => c.charCodeAt(0))
           const sigBytes  = Uint8Array.from(atob(msg.sig),  c => c.charCodeAt(0))
           const sigMsg    = new TextEncoder().encode(JSON.stringify({ relayNonce: msg.nonce, ecdhSpki: msg.ecdhSpki }))
-          const verified  = await verifyAndUpdate(dbKey, spkiBytes, sigMsg, sigBytes)
+          const verified  = await verifyAndUpdate(dbKey, spkiBytes, sigMsg, sigBytes, 'bc')
           if (!verified) {
             ch.postMessage({ type: 'relay-error', message: 'Autofill request not authorized', nonce: msg.nonce })
             return
