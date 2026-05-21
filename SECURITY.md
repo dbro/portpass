@@ -163,12 +163,18 @@ After authentication, credentials are encrypted with ECDH P-256 + AES-256-GCM. T
 
 ### Cross-profile relay server
 
-portpass-relay (`localhost:7677`) is a dumb pipe — it stores and forwards encrypted blobs without inspecting content. It binds to `127.0.0.1` only and is not accessible over the network. An attacker who can read the relay server's memory has OS-level access and is outside the threat model.
+The switchboard (`localhost:7577`) is a dumb pipe — it stores and forwards encrypted blobs without inspecting content. It binds to `127.0.0.1` only and is not accessible over the network. An attacker who can read the relay server's memory has OS-level access and is outside the threat model.
 
 ### What autofill does not protect against
 
 - **Credential in the DOM**: after filling, the credential is in `input.value` and readable by any extension on the page. This is identical to manual typing or any other password manager and cannot be avoided without browser-level APIs.
-- **Bookmarklet theft**: the delegate's private key is in the bookmark store, which no web API or browser extension can read. Obtaining it requires physical access to the device (someone at the keyboard), a compromised OS, or full control of the browser process itself — not achievable by a malicious web page or extension. If you believe a device has been physically compromised, revoke the delegate in Portpass and drag a new bookmarklet to replace it.
+- **Delegate private key in the bookmark store**: the bookmark store is stored as a plaintext JSON file in the browser profile directory. Any process that can read that directory — including backup software, another user account with filesystem access, or malware with user-level permissions — can extract the private key. The key persists indefinitely, so an exfiltrated copy remains valid until the delegate is explicitly revoked in Portpass.
+
+  However, the key is an *authentication token*, not an encryption key. It does not contain or unlock any vault data on its own. An attacker who holds the key can only use it by making a signed request to a running, unlocked Portpass instance — and only via BroadcastChannel (same browser profile) or the local switchboard WebSocket (same machine). Both channels require the attacker to be active on the same machine at the same moment the user has Portpass open. At that point the attacker already has access to more direct attacks.
+
+  This makes the key fundamentally different from a password captured off the clipboard: a clipboard password is immediately and permanently usable anywhere; the delegate key requires an ongoing session to exploit and becomes worthless the moment the vault is locked.
+
+  The same property that protects the key — the bookmark store is inaccessible to web pages — also means Portpass cannot rotate it automatically. Periodic manual rotation (revoke the old delegate in VaultSheet, drag a new bookmarklet) is good hygiene, especially if you suspect a device may have been accessed by someone else. A future VaultSheet version may display key age to prompt rotation.
 - **Extension present at drag-install time**: an extension running in the **Portpass profile** (the clean profile where the bookmarklet is dragged *from*) could modify the bookmarklet's JavaScript or substitute a different key before the drag completes. This is why the clean profile must have no extensions — not just to protect the vault, but to ensure the bookmarklet delivered to the bookmarks bar is genuine. Extensions in the *destination* browsing profile cannot intercept the bookmarklet because it arrives already stored in the bookmark store, which extensions cannot read.
 
 ---
