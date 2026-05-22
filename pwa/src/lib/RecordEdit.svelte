@@ -307,6 +307,94 @@
 
   let autotypeError   = $derived(validateAutotype(draft.Autotype))
   let autotypeWarning = $derived(!autotypeError ? warnAutotype(draft.Autotype) : '')
+
+  // --- Visual chip builder ---
+  function parseTokens(seq, cf) {
+    if (!seq) return []
+    const toks = []
+    let lit = '', i = 0
+    const fl = () => { if (lit) { toks.push({ type: 'literal', value: lit }); lit = '' } }
+    while (i < seq.length) {
+      if (seq[i] !== '\\') { lit += seq[i++]; continue }
+      if (i + 1 >= seq.length) {
+        fl()
+        toks.push({ type: 'error', raw: '\\', label: 'trailing \\', message: 'Sequence ends with \\' })
+        break
+      }
+      const c = seq[i + 1]
+      if (c === '\\') { lit += '\\'; i += 2; continue }
+      fl()
+      if (c === 'u') { toks.push({ type: 'field', label: 'Username', raw: '\\u' }); i += 2 }
+      else if (c === 'p') { toks.push({ type: 'field', label: 'Password', raw: '\\p' }); i += 2 }
+      else if (c === 'm') { toks.push({ type: 'field', label: 'Email', raw: '\\m' }); i += 2 }
+      else if (c === '2') { toks.push({ type: 'field', label: 'One-time code', raw: '\\2' }); i += 2 }
+      else if (c === 't') { toks.push({ type: 'nav', label: 'Tab', suffix: '→', raw: '\\t' }); i += 2 }
+      else if (c === 's') { toks.push({ type: 'nav', label: 'Shift-Tab', suffix: '←', raw: '\\s' }); i += 2 }
+      else if (c === 'n') { toks.push({ type: 'nav', label: 'Enter', suffix: '↵', raw: '\\n' }); i += 2 }
+      else if (c === 'f') {
+        const d = seq[i + 2]
+        if (d !== undefined && /^[0-9]$/.test(d)) {
+          if (d === '0') {
+            toks.push({ type: 'error', raw: '\\f0', label: '\\f0 invalid', message: '\\f0 is not valid — field numbers start at 1' }); i += 3
+          } else {
+            const n = parseInt(d)
+            toks.push({ type: 'field', label: cf?.[n - 1]?.Name?.trim() || `Custom ${n}`, raw: `\\f${d}` }); i += 3
+          }
+        } else {
+          toks.push({ type: 'field', label: cf?.[0]?.Name?.trim() || 'Custom 1', raw: '\\f' }); i += 2
+        }
+      } else if (c === 'w' || c === 'W') {
+        let j = i + 2, cnt = 0
+        while (j < seq.length && cnt < 3 && /^[0-9]$/.test(seq[j])) { j++; cnt++ }
+        if (cnt === 0) {
+          toks.push({ type: 'error', raw: `\\${c}`, label: `\\${c} no digits`, message: `\\${c} must be followed by 1–3 digits` }); i += 2
+        } else {
+          const unit = c === 'w' ? 'ms' : 's'
+          toks.push({ type: 'wait', label: `Wait ${seq.slice(i + 2, j)}${unit}`, raw: seq.slice(i, j) }); i = j
+        }
+      } else {
+        toks.push({ type: 'unknown', label: `Unknown \\${c}`, raw: `\\${c}` }); i += 2
+      }
+    }
+    fl()
+    return toks
+  }
+
+  function tokensToRaw(toks) {
+    return toks.map(t => t.type === 'literal' ? t.value.replace(/\\/g, '\\\\') : t.raw).join('')
+  }
+
+  const savedAutotype = untrack(() => record?.Autotype ?? '')
+  let autofillMode = $state('visual')
+  let dragIdx = $state(-1), dropIdx = $state(-1)
+  let activeMiniForm = $state('')
+  let literalInput = $state(''), waitAmount = $state('500'), waitUnit = $state('ms')
+  let tokens = $derived(parseTokens(draft.Autotype, customFields))
+
+  function removeToken(idx) {
+    set('Autotype', tokensToRaw(tokens.filter((_, i) => i !== idx)))
+  }
+  function addRaw(raw) { set('Autotype', draft.Autotype + raw) }
+  function addLiteralToken() {
+    if (!literalInput) return
+    addRaw(literalInput.replace(/\\/g, '\\\\'))
+    literalInput = ''; activeMiniForm = ''
+  }
+  function addWaitToken() {
+    const n = parseInt(waitAmount)
+    if (!n || n < 1 || n > 999) return
+    addRaw(`\\${waitUnit === 'ms' ? 'w' : 'W'}${n}`)
+    waitAmount = '500'; activeMiniForm = ''
+  }
+  function onChipDrop() {
+    if (dragIdx === -1) return
+    const arr = tokens.slice()
+    const [moved] = arr.splice(dragIdx, 1)
+    arr.splice(dragIdx < dropIdx ? dropIdx - 1 : dropIdx, 0, moved)
+    set('Autotype', tokensToRaw(arr))
+    dragIdx = -1; dropIdx = -1
+  }
+  function resetAutotype() { set('Autotype', savedAutotype) }
 </script>
 
 {#if genOpen}
@@ -551,20 +639,160 @@
     </label>
 
     <div class="field">
-      <span class="field-label muted">Autofill sequence</span>
-      <input class="input mono autotype-input" value={draft.Autotype}
-        placeholder="\u\t\p\n"
-        oninput={e => set('Autotype', e.target.value)}
-        autocomplete="off" spellcheck="false"/>
-      {#if autotypeError}
-        <div class="autotype-error">{autotypeError}</div>
-      {:else if autotypeWarning}
-        <div class="autotype-warning">{autotypeWarning}</div>
-      {/if}
-      {#if draft.Autotype}
-        <div class="autotype-hint muted">\u username · \p password · \m email · \2 OTP · \fN custom field N · \t Tab · \s Shift-Tab · \n Enter · \wNNN wait NNNms · \WNNN wait NNNs · \\ = \</div>
+      <div class="autotype-header">
+        <span class="field-label muted">Autofill sequence</span>
+        <div class="autotype-header-right">
+          {#if draft.Autotype !== savedAutotype}
+            <button type="button" class="autotype-reset" onclick={resetAutotype}>↩ Reset</button>
+          {/if}
+          <div class="mode-toggle">
+            <button type="button" class:active={autofillMode === 'visual'} onclick={() => autofillMode = 'visual'}>Visual</button>
+            <button type="button" class:active={autofillMode === 'raw'} onclick={() => autofillMode = 'raw'}>Raw</button>
+          </div>
+        </div>
+      </div>
+
+      {#if autofillMode === 'visual'}
+        <div class="chip-area"
+          class:chip-area-error={autotypeError}
+          class:chip-area-warn={!autotypeError && autotypeWarning}
+          ondragover={e => { e.preventDefault(); dropIdx = tokens.length }}
+          ondrop={onChipDrop}>
+          {#if tokens.length === 0}
+            <span class="chip-placeholder">Add tokens from the palette below</span>
+          {/if}
+          {#each tokens as tok, i}
+            {#if dragIdx !== -1 && dropIdx === i}
+              <div class="drop-indicator"></div>
+            {/if}
+            <div class="chip chip-{tok.type}"
+              draggable={isDesktop}
+              ondragstart={() => { dragIdx = i; dropIdx = i }}
+              ondragover={e => { e.preventDefault(); e.stopPropagation(); dropIdx = i }}
+              ondrop={e => { e.stopPropagation(); onChipDrop() }}
+              ondragend={() => { dragIdx = -1; dropIdx = -1 }}>
+              {#if tok.type === 'error'}<span class="chip-pre chip-pre-error">✕</span>
+              {:else if tok.type === 'unknown'}<span class="chip-pre chip-pre-warn">⚠</span>{/if}
+              <span class="chip-label">{#if tok.type === 'literal'}<span class="mono">{tok.value}</span>{:else}{tok.label}{/if}</span>
+              {#if tok.suffix}<span class="chip-nav-suffix">{tok.suffix}</span>{/if}
+              <button type="button" class="chip-remove" onclick={() => removeToken(i)} aria-label="Remove">×</button>
+            </div>
+            {#if i < tokens.length - 1}
+              <span class="chip-sep"
+                ondragover={e => { e.preventDefault(); e.stopPropagation(); dropIdx = i + 1 }}>→</span>
+            {/if}
+          {/each}
+          {#if dragIdx !== -1 && dropIdx === tokens.length}
+            <div class="drop-indicator"></div>
+          {/if}
+        </div>
+
+        <div class="palette">
+          <div class="palette-row">
+            <span class="palette-label muted">Fields</span>
+            <div class="palette-chips">
+              <button type="button" class="palette-btn palette-field" onclick={() => addRaw('\\u')}>+ Username</button>
+              <button type="button" class="palette-btn palette-field" onclick={() => addRaw('\\p')}>+ Password</button>
+              <button type="button" class="palette-btn palette-field" onclick={() => addRaw('\\m')}>+ Email</button>
+              <button type="button" class="palette-btn palette-field" onclick={() => addRaw('\\2')}>+ One-time code</button>
+              {#each customFields as cf, cfi}
+                {#if cf.Name.trim()}
+                  <button type="button" class="palette-btn palette-field" onclick={() => addRaw(`\\f${cfi + 1}`)}>+ {cf.Name.trim()}</button>
+                {/if}
+              {/each}
+            </div>
+          </div>
+          <div class="palette-row">
+            <span class="palette-label muted">Navigate</span>
+            <div class="palette-chips">
+              <button type="button" class="palette-btn" onclick={() => addRaw('\\t')}>+ Tab</button>
+              <button type="button" class="palette-btn" onclick={() => addRaw('\\s')}>+ Shift-Tab</button>
+              <button type="button" class="palette-btn" onclick={() => addRaw('\\n')}>+ Enter</button>
+            </div>
+          </div>
+          <div class="palette-row">
+            <span class="palette-label muted">Other</span>
+            <div class="palette-chips">
+              <button type="button" class="palette-btn" class:palette-active={activeMiniForm === 'literal'}
+                onclick={() => activeMiniForm = activeMiniForm === 'literal' ? '' : 'literal'}>+ Text…</button>
+              <button type="button" class="palette-btn palette-wait" class:palette-active={activeMiniForm === 'wait'}
+                onclick={() => activeMiniForm = activeMiniForm === 'wait' ? '' : 'wait'}>+ Wait…</button>
+            </div>
+          </div>
+          {#if activeMiniForm === 'literal'}
+            <div class="mini-form">
+              <span class="muted" style="font-size:12px;white-space:nowrap">Text:</span>
+              <input class="input mini-input" bind:value={literalInput} placeholder="text to type"
+                onkeydown={e => e.key === 'Enter' && (e.preventDefault(), addLiteralToken())}
+                autocomplete="off" spellcheck="false"/>
+              <button type="button" class="btn btn-primary mini-add" onclick={addLiteralToken} disabled={!literalInput}>Add</button>
+              <button type="button" class="mini-close" onclick={() => activeMiniForm = ''}>×</button>
+            </div>
+          {/if}
+          {#if activeMiniForm === 'wait'}
+            <div class="mini-form">
+              <span class="muted" style="font-size:12px;white-space:nowrap">Wait</span>
+              <input class="input mini-input mini-number" type="number" min="1" max="999" bind:value={waitAmount}
+                onkeydown={e => e.key === 'Enter' && (e.preventDefault(), addWaitToken())}/>
+              <div class="unit-toggle">
+                <button type="button" class:active={waitUnit === 'ms'} onclick={() => waitUnit = 'ms'}>ms</button>
+                <button type="button" class:active={waitUnit === 's'} onclick={() => waitUnit = 's'}>s</button>
+              </div>
+              <button type="button" class="btn btn-primary mini-add" onclick={addWaitToken}>Add</button>
+              <button type="button" class="mini-close" onclick={() => activeMiniForm = ''}>×</button>
+            </div>
+          {/if}
+        </div>
+
+        {#if tokens.length > 0}
+          <div class="autotype-raw-equiv muted">Raw: <span class="mono">{draft.Autotype}</span></div>
+        {/if}
+
       {:else}
-        <div class="autotype-hint muted">Leave blank to use default: \u\t\p\n</div>
+        <input class="input mono" value={draft.Autotype}
+          placeholder="\u\t\p\n"
+          oninput={e => set('Autotype', e.target.value)}
+          autocomplete="off" spellcheck="false"/>
+        <div class="raw-legend">
+          <div class="raw-legend-row">
+            <span class="raw-legend-cat muted">Fields</span>
+            <span><span class="raw-code">\u</span> Username</span>
+            <span><span class="raw-code">\p</span> Password</span>
+            <span><span class="raw-code">\m</span> Email</span>
+            <span><span class="raw-code">\2</span> OTP</span>
+            <span><span class="raw-code">\fN</span> Custom N</span>
+          </div>
+          <div class="raw-legend-row">
+            <span class="raw-legend-cat muted">Navigate</span>
+            <span><span class="raw-code">\t</span> Tab</span>
+            <span><span class="raw-code">\s</span> Shift-Tab</span>
+            <span><span class="raw-code">\n</span> Enter</span>
+          </div>
+          <div class="raw-legend-row">
+            <span class="raw-legend-cat muted">Other</span>
+            <span><span class="raw-code">\wNNN</span> wait ms</span>
+            <span><span class="raw-code">\WNNN</span> wait s</span>
+            <span><span class="raw-code">\\</span> literal \</span>
+          </div>
+        </div>
+      {/if}
+
+      {#if autotypeError}
+        <div class="autotype-banner banner-error">
+          <span class="banner-icon">⚠</span>
+          <div>
+            <div class="banner-title">Cannot save — fix the error first</div>
+            <div class="banner-body muted">{autotypeError}</div>
+          </div>
+        </div>
+      {:else if autotypeWarning}
+        <div class="autotype-banner banner-warn">
+          <span class="banner-icon">⚠</span>
+          <div>
+            <div class="banner-title">Saved with warnings</div>
+            <div class="banner-body muted">{autotypeWarning}</div>
+          </div>
+        </div>
       {/if}
     </div>
 
@@ -764,23 +992,323 @@
   }
   .btn-delete:hover { opacity: 1; }
 
-  .autotype-error {
+  /* --- Autofill sequence header row --- */
+  .autotype-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .autotype-header .field-label { margin-bottom: 0; }
+  .autotype-header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .autotype-reset {
+    background: none;
+    border: none;
+    cursor: pointer;
     font-size: 12px;
+    color: var(--text-muted);
+    padding: 2px 6px;
+    border-radius: 6px;
+  }
+  .autotype-reset:hover { color: var(--text); background: var(--surface-2); }
+
+  /* Mode toggle pill */
+  .mode-toggle {
+    display: flex;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .mode-toggle button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+    padding: 4px 10px;
+    transition: background 0.1s, color 0.1s;
+  }
+  .mode-toggle button.active {
+    background: var(--surface-2);
+    color: var(--text);
+    font-weight: 700;
+  }
+
+  /* --- Chip display area --- */
+  .chip-area {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    border: 2px solid var(--border-strong);
+    border-radius: 9px;
+    background: var(--surface-2);
+    min-height: 52px;
+    padding: 10px 12px;
+  }
+  .chip-area-error {
+    border-color: var(--danger);
+    background: var(--red-bg-strong);
+  }
+  .chip-area-warn {
+    border-color: var(--orange);
+    background: var(--orange-bg-strong);
+  }
+  .chip-placeholder {
+    font-style: italic;
+    color: var(--text-soft);
+    font-size: 13px;
+  }
+
+  /* Drop indicator */
+  .drop-indicator {
+    width: 3px;
+    min-height: 24px;
+    align-self: stretch;
+    background: var(--accent);
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  /* Chip separator */
+  .chip-sep {
+    color: var(--text-soft);
+    font-size: 12px;
+    user-select: none;
+  }
+
+  /* Base chip */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: 100px;
+    padding: 4px 8px 4px 10px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: default;
+    user-select: none;
+  }
+  .chip[draggable=true] { cursor: grab; }
+  .chip[draggable=true]:active { cursor: grabbing; }
+
+  /* Chip type variants */
+  .chip-field {
+    background: var(--amber-bg);
+    color: var(--amber);
+    font-weight: 600;
+  }
+  .chip-nav {
+    background: var(--surface);
+    color: var(--text-muted);
+  }
+  .chip-literal {
+    background: transparent;
+    color: var(--text);
+    font-weight: 400;
+    border: 1px solid var(--border-strong);
+  }
+  .chip-wait {
+    background: var(--wait-blue-bg);
+    color: var(--wait-blue);
+  }
+  .chip-unknown {
+    background: transparent;
+    color: var(--orange);
+    font-weight: 600;
+    border: 1.5px solid var(--orange);
+  }
+  .chip-error {
+    background: transparent;
     color: var(--danger);
+    font-weight: 600;
+    border: 1.5px solid var(--danger);
+  }
+
+  .chip-pre { font-size: 11px; }
+  .chip-pre-error { color: var(--danger); }
+  .chip-pre-warn { color: var(--orange); }
+
+  .chip-nav-suffix {
+    font-size: 11px;
+    opacity: 0.55;
+    margin-left: 1px;
+  }
+  .chip-label { line-height: 1; }
+  .chip-remove {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    color: inherit;
+    opacity: 0.45;
+    padding: 0 0 0 2px;
+    margin-left: 2px;
+  }
+  .chip-remove:hover { opacity: 1; }
+
+  /* --- Palette --- */
+  .palette {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .palette-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .palette-label {
+    font-size: 12px;
+    font-weight: 600;
+    min-width: 58px;
+    padding-top: 5px;
+    flex-shrink: 0;
+  }
+  .palette-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  .palette-btn {
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 100px;
+    padding: 3px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    color: var(--text-muted);
+    transition: background 0.1s, border-color 0.1s;
+  }
+  .palette-btn:hover { background: var(--surface-2); border-color: var(--accent); }
+  .palette-field { color: var(--amber); }
+  .palette-wait  { color: var(--wait-blue); }
+  .palette-active { border-color: var(--accent); background: var(--surface-2); }
+
+  /* --- Inline mini-forms --- */
+  .mini-form {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    padding: 8px 10px;
+    background: var(--surface-2);
+    border-radius: 8px;
+  }
+  .mini-input {
+    padding: 5px 10px;
+    font-size: 13px;
+    height: auto;
+    flex: 1;
+    min-width: 0;
+  }
+  .mini-number {
+    flex: 0 0 70px;
+    -moz-appearance: textfield;
+  }
+  .mini-number::-webkit-inner-spin-button,
+  .mini-number::-webkit-outer-spin-button { display: none; }
+  .mini-add {
+    padding: 5px 12px;
+    font-size: 13px;
+    height: auto;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .mini-close {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    color: var(--text-soft);
+    padding: 0 2px;
+    flex-shrink: 0;
+  }
+  .mini-close:hover { color: var(--text); }
+
+  /* Unit toggle (ms / s) */
+  .unit-toggle {
+    display: flex;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .unit-toggle button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 4px 8px;
+  }
+  .unit-toggle button.active {
+    background: var(--surface);
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  /* Raw equivalence line */
+  .autotype-raw-equiv {
+    font-size: 11px;
     margin-top: 4px;
     padding: 0 2px;
   }
 
-  .autotype-warning {
+  /* --- Raw mode legend --- */
+  .raw-legend {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 6px;
     font-size: 12px;
-    color: var(--accent);
-    margin-top: 4px;
-    padding: 0 2px;
+    color: var(--text-muted);
+  }
+  .raw-legend-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 12px;
+  }
+  .raw-legend-cat {
+    font-weight: 600;
+    min-width: 64px;
+    flex-shrink: 0;
+  }
+  .raw-code {
+    font-family: var(--font-mono);
+    color: var(--amber);
+    font-size: 12px;
+    letter-spacing: -0.005em;
   }
 
-  .autotype-hint {
-    font-size: 12px;
-    margin-top: 4px;
-    padding: 0 2px;
+  /* --- Validation banners --- */
+  .autotype-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-top: 6px;
   }
+  .banner-error {
+    border: 1.5px solid var(--danger);
+    background: var(--red-bg-strong);
+  }
+  .banner-warn {
+    border: 1.5px solid var(--orange);
+    background: var(--orange-bg-strong);
+  }
+  .banner-icon { font-size: 16px; line-height: 1.4; flex-shrink: 0; }
+  .banner-title { font-size: 13px; font-weight: 700; }
+  .banner-body { font-size: 12px; margin-top: 2px; }
 </style>
