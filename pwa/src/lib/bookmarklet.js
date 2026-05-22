@@ -57,6 +57,9 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, PRIV_KEY_JWK, 
       var el = startEl || activeEl
       executeAutotype(el, msg.autotype, msg.fields).then(function() {
         try { pp.postMessage({ type: 'fill-done' }, PORTPASS_ORIGIN) } catch(_) {}
+        // Focus the relay popup from the main-window context so the done state is visible.
+        // (window.focus() from within relay.html is blocked; pp.focus() from the opener works.)
+        try { pp.focus() } catch(_) {}
         cleanup()
       })
     } else if (msg.type === 'cancel') {

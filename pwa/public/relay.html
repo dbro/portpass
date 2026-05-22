@@ -10,7 +10,7 @@
 :root {
   --bg: #14161a; --surface: #1c1f24; --surface-2: #262a31;
   --border: #2c3038; --text: #f1ede4; --text-muted: #a6a39b;
-  --text-soft: #757279; --amber: #d4953d; --amber-bg: #2e2010;
+  --text-soft: #757279; --amber: #d9a358; --amber-bg: #3a2e1a;
   --success: #6cba8a; --green-bg: #1a3025;
   --red: #e08673; --orange: #c47030;
 }
@@ -181,9 +181,11 @@ body {
 
   // ── Theme — read from localStorage (Portpass origin) ─────────────────────
   ;(function() {
-    var dark = (localStorage.getItem('theme') || 'dark') === 'dark'
+    var dark   = (localStorage.getItem('theme')  || 'dark')  === 'dark'
+    var accent = (localStorage.getItem('accent') || 'amber')
+    var r = document.documentElement.style
+
     if (!dark) {
-      var r = document.documentElement.style
       r.setProperty('--bg',        '#f6f3ee')
       r.setProperty('--surface',   '#fbfaf7')
       r.setProperty('--surface-2', '#efece5')
@@ -191,13 +193,22 @@ body {
       r.setProperty('--text',      '#1c1f24')
       r.setProperty('--text-muted','#5a5d65')
       r.setProperty('--text-soft', '#87898f')
-      r.setProperty('--amber',     '#a06415')
-      r.setProperty('--amber-bg',  '#f3e8d2')
       r.setProperty('--success',   '#2c7a4e')
       r.setProperty('--green-bg',  '#e8f5ee')
       r.setProperty('--red',       '#b3361f')
       r.setProperty('--orange',    '#8b5020')
     }
+
+    // Accent colors — match theme.css values exactly.
+    var accentMap = {
+      amber:    { light: ['#b07418', '#f3e6c9'], dark: ['#d9a358', '#3a2e1a'] },
+      sage:     { light: ['#5a7a4f', '#dde6d4'], dark: ['#97b386', '#2c3a26'] },
+      slate:    { light: ['#4a5d82', '#dee3ee'], dark: ['#8da3c8', '#25304a'] },
+      burgundy: { light: ['#8a3a3a', '#ead4d4'], dark: ['#c98a8a', '#3a2222'] },
+    }
+    var av = (accentMap[accent] || accentMap.amber)[dark ? 'dark' : 'light']
+    r.setProperty('--amber',    av[0])
+    r.setProperty('--amber-bg', av[1])
   }())
 
   // ── SVG icons ─────────────────────────────────────────────────────────────
@@ -590,6 +601,7 @@ body {
     center.appendChild(sub)
     $content.appendChild(center)
 
+    try { window.focus() } catch(_) {}
     setTimeout(function() { window.close() }, 1500)
   }
 
