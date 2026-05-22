@@ -14,7 +14,7 @@
   let hasBeenUnlocked = $state(false)
   let multipleInstances = $state(false)
   let isPopup = $state(false)
-  let relayMode = $state(false)
+  let bridgeMode = $state(false)
   let pendingIntent = $state(null)
 
   let theme  = $state(localStorage.getItem('theme')  || 'dark')
@@ -55,9 +55,9 @@
   }
 
   // Respond to autofill queries when vault is locked (Dashboard handles unlocked case).
-  // Suppressed in relay mode — the relay bridge handles all messaging instead.
+  // Suppressed in bridge mode — the autofill bridge handles all messaging instead.
   $effect(() => {
-    if (!isPopup || relayMode) return
+    if (!isPopup || bridgeMode) return
     function handleLockedQuery(event) {
       if (view !== 'start') return
       const t = event.data?.type
@@ -103,27 +103,27 @@
   })
 
   // Ping an already-open unlocked Portpass tab via BroadcastChannel.
-  // Returns true and sets up a relay bridge if found; false otherwise.
-  async function tryRelay() {
+  // Returns true and sets up a bridge to the main Portpass tab if found; false otherwise.
+  async function tryBridge() {
     const nonce = crypto.randomUUID()
     const ch = new BroadcastChannel('portpass-autofill')
 
     const found = await new Promise(resolve => {
       const t = setTimeout(() => { ch.close(); resolve(false) }, 300)
       ch.onmessage = e => {
-        if (e.data?.type === 'relay-pong' && e.data?.nonce === nonce) {
+        if (e.data?.type === 'pong' && e.data?.nonce === nonce) {
           clearTimeout(t)
           resolve(true)
         }
       }
-      ch.postMessage({ type: 'relay-ping', nonce })
+      ch.postMessage({ type: 'ping', nonce })
     })
 
     if (!found) return false
 
     let bookmarkletSource = null
     let bookmarkletOrigin = null
-    let relayNonce = null
+    let sessionNonce = null
 
     window.addEventListener('message', event => {
       if (!event.source) return
@@ -133,37 +133,37 @@
       if (msg.type === 'hello') {
         bookmarkletSource = event.source
         bookmarkletOrigin = event.origin
-        relayNonce = crypto.randomUUID()
-        ch.postMessage({ type: 'relay-hello', pubkey: msg.pubkey, nonce: relayNonce })
-      } else if (msg.type === 'query' && relayNonce) {
+        sessionNonce = crypto.randomUUID()
+        ch.postMessage({ type: 'hello', pubkey: msg.pubkey, nonce: sessionNonce })
+      } else if (msg.type === 'query' && sessionNonce) {
         // Cross-validate the sent URL's hostname against the browser-provided event.origin.
         if (msg.url !== undefined) {
           const sentHost = msg.url.split('/')[0]
           const evHost = new URL(event.origin).host.replace(/^www\./, '').toLowerCase()
           if (sentHost !== evHost) return
         }
-        ch.postMessage({ type: 'relay-query', url: msg.url, uuid: msg.uuid, vaultUuid: msg.vaultUuid, nonce: relayNonce })
-      } else if (msg.type === 'save-url' && relayNonce) {
-        ch.postMessage({ type: 'relay-save-url', uuid: msg.uuid, vaultUuid: msg.vaultUuid, url: msg.url, nonce: relayNonce })
+        ch.postMessage({ type: 'query', url: msg.url, uuid: msg.uuid, vaultUuid: msg.vaultUuid, nonce: sessionNonce })
+      } else if (msg.type === 'save-url' && sessionNonce) {
+        ch.postMessage({ type: 'save-url', uuid: msg.uuid, vaultUuid: msg.vaultUuid, url: msg.url, nonce: sessionNonce })
       }
     })
 
     ch.onmessage = e => {
       const msg = e.data
-      if (!bookmarkletSource || msg?.nonce !== relayNonce) return
-      if (msg.type === 'relay-hello-response') {
+      if (!bookmarkletSource || msg?.nonce !== sessionNonce) return
+      if (msg.type === 'hello-response') {
         bookmarkletSource.postMessage({ type: 'hello', pubkey: msg.pubkey }, bookmarkletOrigin)
-      } else if (msg.type === 'relay-records') {
+      } else if (msg.type === 'records') {
         bookmarkletSource.postMessage({ type: 'records', records: msg.records }, bookmarkletOrigin)
-      } else if (msg.type === 'relay-record') {
+      } else if (msg.type === 'record') {
         bookmarkletSource.postMessage({
           type: 'record', title: msg.title, autotype: msg.autotype,
           iv: msg.iv, ciphertext: msg.ciphertext,
         }, bookmarkletOrigin)
         setTimeout(() => window.close(), 100)
-      } else if (msg.type === 'relay-url-saved') {
+      } else if (msg.type === 'url-saved') {
         bookmarkletSource.postMessage({ type: 'url-saved' }, bookmarkletOrigin)
-      } else if (msg.type === 'relay-error') {
+      } else if (msg.type === 'error') {
         bookmarkletSource.postMessage({ type: 'error', message: msg.message }, bookmarkletOrigin)
         setTimeout(() => window.close(), 100)
       }
@@ -188,11 +188,11 @@
     isDesktop = mq.matches
     mq.addEventListener('change', e => { isDesktop = e.matches })
 
-    // In popup mode, try to relay through an already-open unlocked Portpass tab.
-    // If relay succeeds, skip WASM loading — the popup is just a bridge.
+    // In popup mode, try to bridge to an already-open unlocked Portpass tab.
+    // If bridge succeeds, skip WASM loading — the popup is just a bridge.
     if (isPopup) {
-      const relayed = await tryRelay()
-      if (relayed) { relayMode = true; return }
+      const bridged = await tryBridge()
+      if (bridged) { bridgeMode = true; return }
     }
 
     if (navigator.locks) {
@@ -219,7 +219,7 @@
   class="vault-app theme-{theme} accent-{accent}"
   class:is-desktop={isDesktop && view === 'dashboard'}
 >
-  {#if relayMode}
+  {#if bridgeMode}
     <div style="height:100%;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;opacity:0.5;font-size:14px;line-height:1.6">
       Portpass autofill in progress<br>This tab will close automatically
     </div>

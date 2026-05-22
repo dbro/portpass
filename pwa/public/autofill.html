@@ -228,12 +228,15 @@ body {
 ;(function() {
   'use strict'
 
-  // ── Theme — read from localStorage (Portpass origin) ─────────────────────
-  ;(function() {
-    var dark   = (localStorage.getItem('theme')  || 'dark')  === 'dark'
-    var accent = (localStorage.getItem('accent') || 'amber')
+  // ── Theme ─────────────────────────────────────────────────────────────────
+  var _accentMap = {
+    amber:    { light: ['#b07418', '#f3e6c9'], dark: ['#d9a358', '#3a2e1a'] },
+    sage:     { light: ['#5a7a4f', '#dde6d4'], dark: ['#97b386', '#2c3a26'] },
+    slate:    { light: ['#4a5d82', '#dee3ee'], dark: ['#8da3c8', '#25304a'] },
+    burgundy: { light: ['#8a3a3a', '#ead4d4'], dark: ['#c98a8a', '#3a2222'] },
+  }
+  function applyTheme(dark, accent) {
     var r = document.documentElement.style
-
     if (!dark) {
       r.setProperty('--bg',        '#f6f3ee')
       r.setProperty('--surface',   '#fbfaf7')
@@ -246,19 +249,24 @@ body {
       r.setProperty('--green-bg',  '#e8f5ee')
       r.setProperty('--red',       '#b3361f')
       r.setProperty('--orange',    '#8b5020')
+    } else {
+      r.setProperty('--bg',        '#14161a')
+      r.setProperty('--surface',   '#1c1f24')
+      r.setProperty('--surface-2', '#262a31')
+      r.setProperty('--border',    '#2c3038')
+      r.setProperty('--text',      '#f1ede4')
+      r.setProperty('--text-muted','#a6a39b')
+      r.setProperty('--text-soft', '#757279')
+      r.setProperty('--success',   '#6cba8a')
+      r.setProperty('--green-bg',  '#1a3025')
+      r.setProperty('--red',       '#e08673')
+      r.setProperty('--orange',    '#c47030')
     }
-
-    // Accent colors — match theme.css values exactly.
-    var accentMap = {
-      amber:    { light: ['#b07418', '#f3e6c9'], dark: ['#d9a358', '#3a2e1a'] },
-      sage:     { light: ['#5a7a4f', '#dde6d4'], dark: ['#97b386', '#2c3a26'] },
-      slate:    { light: ['#4a5d82', '#dee3ee'], dark: ['#8da3c8', '#25304a'] },
-      burgundy: { light: ['#8a3a3a', '#ead4d4'], dark: ['#c98a8a', '#3a2222'] },
-    }
-    var av = (accentMap[accent] || accentMap.amber)[dark ? 'dark' : 'light']
+    var av = (_accentMap[accent] || _accentMap.amber)[dark ? 'dark' : 'light']
     r.setProperty('--amber',    av[0])
     r.setProperty('--amber-bg', av[1])
-  }())
+  }
+  // Theme applied when first message arrives from Portpass via applyTheme().
 
   // ── SVG icons ─────────────────────────────────────────────────────────────
   var _S = ' viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"'
@@ -276,7 +284,7 @@ body {
   var SVG_WAITING  = '<svg width="90" height="70"' + _S.replace('currentColor','currentColor') + ' stroke-width="1.5"><rect x="4" y="4" width="66" height="46" rx="8" stroke-dasharray="5 3"/><line x1="14" y1="18" x2="50" y2="18" stroke-width="2" stroke-linecap="round"/><line x1="14" y1="28" x2="42" y2="28" stroke-width="2" stroke-linecap="round"/><circle cx="62" cy="46" r="15" style="fill:var(--amber-bg)" stroke="none"/><path d="m55 46 5 5 9-9" style="stroke:var(--amber)" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 
   // ── Shared state ───────────────────────────────────────────────────────────
-  var nonce = crypto.randomUUID()
+  var pingNonce = crypto.randomUUID()
   var ch = new BroadcastChannel('portpass-autofill')
   var bookmarkletOrigin = null
   var isSecure = false
@@ -289,21 +297,26 @@ body {
   var bcPongArrived = false
   var modeDecided = false
   var modeTimer = null
-  var isSameProfile = false
 
-  // Cross-profile crypto state
+  // WebSocket relay crypto state
   var cpEcdhKeyPair = null
   var cpEcdhSpkiB64 = null
-  var switchboardWsUrl = 'ws://localhost:7577/ws'
+  var wsRelayUrl = 'ws://localhost:7577/ws'
   var cpSigningKey = null
   var cpPubSpkiB64 = null
 
-  // Same-profile crypto state
-  var relayNonce = null
+  // BroadcastChannel crypto state
+  var nonce = null
   var sessionKey = null
   var keyPair = null
   var selectedUuid = null
   var selectedVaultUuid = null
+
+  // Transport abstraction — set once in onHelloResponse (BroadcastChannel) or startWsTransport (WebSocket relay).
+  // All business logic calls $transport.method() with no knowledge of which channel is active.
+  var $transport = null
+  var _pendingSearch = null  // resolve fn for an in-flight search
+  var _pendingFill = null    // resolve fn for an in-flight fill-uuid
 
   // Phase state
   var chosen = null           // the selected record object
@@ -325,7 +338,7 @@ body {
   $searchToggle.innerHTML = SVG_SEARCH_ICO
   $searchToggle.onclick = toggleSearch
 
-  // Set up the search input with debounced relay-search.
+  // Set up the search input with debounced search via transport.
   ;(function() {
     var deb = null
     $searchInput.oninput = function() {
@@ -333,7 +346,10 @@ body {
       var q = $searchInput.value.trim()
       if (!q) { showPickerSearchPlaceholder(); return }
       deb = setTimeout(function() {
-        ch.postMessage({ type: 'relay-search', query: q, nonce: relayNonce })
+        if (!$transport) return
+        $transport.search(q).then(function(results) {
+          showPickerSearchResults(results)
+        }).catch(function() { showPickerSearchPlaceholder() })
       }, 150)
     }
   }())
@@ -364,16 +380,16 @@ body {
 
   // ── Ping Dashboard via BroadcastChannel ───────────────────────────────────
   ch.onmessage = function(e) {
-    if (e.data && e.data.type === 'relay-pong' && e.data.nonce === nonce) {
-      if (e.data.switchboardUrl)
-        switchboardWsUrl = e.data.switchboardUrl.replace(/^http/, 'ws') + '/ws'
+    if (e.data && e.data.type === 'pong' && e.data.nonce === pingNonce) {
+      if (e.data.relayUrl)
+        wsRelayUrl = e.data.relayUrl.replace(/^http/, 'ws') + '/ws'
       bcPongArrived = true
       if (!modeDecided && cprivKey !== null) {
         modeDecided = true; clearTimeout(modeTimer); doHello()
       }
     }
   }
-  ch.postMessage({ type: 'relay-ping', nonce: nonce })
+  ch.postMessage({ type: 'ping', nonce: pingNonce })
 
   // ── Mode detection ────────────────────────────────────────────────────────
   function onOpenerMessage(event) {
@@ -405,7 +421,7 @@ body {
       modeTimer = setTimeout(function() {
         if (!modeDecided) {
           modeDecided = true
-          if (cprivKey) startCrossProfile(cprivKey)
+          if (cprivKey) startWsTransport(cprivKey)
           else sendError('Portpass is not open — open and unlock Portpass first')
         }
       }, 200)
@@ -427,9 +443,9 @@ body {
     }
   }
 
-  // ── Cross-profile path ────────────────────────────────────────────────────
+  // ── WebSocket relay path ──────────────────────────────────────────────────
 
-  async function startCrossProfile(privKeyJwk) {
+  async function startWsTransport(privKeyJwk) {
     setStatus('Requesting credentials…')
     try {
       cpSigningKey = await crypto.subtle.importKey(
@@ -442,8 +458,27 @@ body {
       var pubSpki = await crypto.subtle.exportKey('spki', pubKey)
       cpPubSpkiB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(pubSpki)))
 
+      $transport = {
+        search: async function(q) {
+          var blob = await cpSignAndSend('search', { url: q, query: q })
+          return decryptReply(blob)
+        },
+        fill: async function(uuid, vu) {
+          var blob = await cpSignAndSend('fill-uuid', { url: uuid, uuid: uuid, vaultUuid: vu || null })
+          var results = await decryptReply(blob)
+          if (!results || !results.length) throw new Error('Could not get credentials')
+          return results[0]
+        },
+        viewRecord: function(uuid, vu) {
+          return cpSignAndSend('view-record', { url: uuid, uuid: uuid, vaultUuid: vu || null })
+        },
+        saveUrl: function(uuid, vu) {
+          wsSaveUrl(uuid, vu)
+        }
+      }
+
       var ts = Date.now()
-      var signedPayload = JSON.stringify({ url: currentUrl, nonce: nonce, ecdh: cpEcdhSpkiB64, ts: ts })
+      var signedPayload = JSON.stringify({ url: currentUrl, nonce: pingNonce, ecdh: cpEcdhSpkiB64, ts: ts })
       var sigBytes = await crypto.subtle.sign(
         { name: 'ECDSA', hash: 'SHA-256' }, cpSigningKey, new TextEncoder().encode(signedPayload)
       )
@@ -451,19 +486,19 @@ body {
       if (!delegateId) throw new Error('No delegate ID — reinstall the bookmarklet')
 
       setStatus('Waiting for Portpass…')
-      var blob = await sendViaSwitchboard({
-        type: 'publish', channel: delegateId, replyTo: nonce,
+      var blob = await wsPost({
+        type: 'publish', channel: delegateId, replyTo: pingNonce,
         url: currentUrl, ecdh: cpEcdhSpkiB64, ts: ts, sig: sigB64, pub: cpPubSpkiB64
       })
       await processRelayBlob(blob)
     } catch(e) { sendError(e.message || 'Autofill failed') }
   }
 
-  function sendViaSwitchboard(requestMsg) {
+  function wsPost(requestMsg) {
     return new Promise(function(resolve, reject) {
       var ws
-      try { ws = new WebSocket(switchboardWsUrl) } catch(e) {
-        reject(new Error('Invalid switchboard URL — check settings')); return
+      try { ws = new WebSocket(wsRelayUrl) } catch(e) {
+        reject(new Error('Invalid relay server URL — check settings')); return
       }
       var settled = false
       function done(fn, arg) { if (!settled) { settled = true; ws.close(); fn(arg) } }
@@ -473,32 +508,69 @@ body {
           var msg = JSON.parse(e.data)
           if (msg.type === 'error') done(reject, new Error(msg.message || 'Autofill failed'))
           else if (msg.type === 'reply') done(resolve, msg)
-        } catch(_) { done(reject, new Error('Invalid switchboard message')) }
+        } catch(_) { done(reject, new Error('Invalid relay message')) }
       }
-      ws.onerror = function() { done(reject, new Error('Portpass is not open in this browser profile — open and unlock Portpass, or start the switchboard for cross-profile autofill')) }
-      ws.onclose = function() { if (!settled) done(reject, new Error('switchboard closed unexpectedly')) }
+      ws.onerror = function() { done(reject, new Error('Portpass is not open — open and unlock Portpass, or start the relay server')) }
+      ws.onclose = function() { if (!settled) done(reject, new Error('relay server closed unexpectedly')) }
     })
+  }
+
+  async function decryptReply(blob) {
+    var ephPubJwk = JSON.parse(atob(blob.ephPub))
+    var ephPubKey = await crypto.subtle.importKey('jwk', ephPubJwk, { name: 'ECDH', namedCurve: 'P-256' }, false, [])
+    var cpSessionKey = await crypto.subtle.deriveKey(
+      { name: 'ECDH', public: ephPubKey }, cpEcdhKeyPair.privateKey,
+      { name: 'AES-GCM', length: 256 }, false, ['decrypt']
+    )
+    var iv = Uint8Array.from(atob(blob.iv), function(c) { return c.charCodeAt(0) })
+    var ct = Uint8Array.from(atob(blob.ciphertext), function(c) { return c.charCodeAt(0) })
+    var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, cpSessionKey, ct)
+    return JSON.parse(new TextDecoder().decode(pt))
   }
 
   async function processRelayBlob(blob) {
     if (blob.error) { sendError(blob.error); return }
     try {
-      var ephPubJwk = JSON.parse(atob(blob.ephPub))
-      var ephPubKey = await crypto.subtle.importKey(
-        'jwk', ephPubJwk, { name: 'ECDH', namedCurve: 'P-256' }, false, []
-      )
-      var cpSessionKey = await crypto.subtle.deriveKey(
-        { name: 'ECDH', public: ephPubKey }, cpEcdhKeyPair.privateKey,
-        { name: 'AES-GCM', length: 256 }, false, ['decrypt']
-      )
-      var iv = Uint8Array.from(atob(blob.iv), function(c) { return c.charCodeAt(0) })
-      var ct = Uint8Array.from(atob(blob.ciphertext), function(c) { return c.charCodeAt(0) })
-      var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, cpSessionKey, ct)
-      showCrossProfilePicker(JSON.parse(new TextDecoder().decode(pt)))
+      var data = await decryptReply(blob)
+      if (data && data.records) {
+        applyTheme(data.theme === 'dark', data.accent || 'amber')
+        showPicker(data.records)
+      } else {
+        showPicker(data || [])
+      }
     } catch(e) { sendError('Decrypt failed: ' + e.message) }
   }
 
-  function saveUrlViaSwitchboard(uuid, vaultUuid) {
+  async function cpSignAndSend(msgType, extraFields) {
+    var ts = Date.now()
+    var reqNonce = crypto.randomUUID()
+    var signedPayload = JSON.stringify({ url: extraFields.url || '', nonce: reqNonce, ecdh: cpEcdhSpkiB64, ts: ts })
+    var sigBytes = await crypto.subtle.sign(
+      { name: 'ECDSA', hash: 'SHA-256' }, cpSigningKey, new TextEncoder().encode(signedPayload)
+    )
+    var sigB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(sigBytes)))
+    return wsPost(Object.assign({
+      type: 'publish', channel: delegateId, replyTo: reqNonce,
+      msgType: msgType, ecdh: cpEcdhSpkiB64, ts: ts, sig: sigB64, pub: cpPubSpkiB64
+    }, extraFields))
+  }
+
+  async function doSearch(query) {
+    var ph = $content.querySelector('.pp-placeholder')
+    if (ph) { ph.style.display = ''; ph.textContent = 'Searching…' }
+    try {
+      var results = await $transport.search(query)
+      showSearchResults(results)
+    } catch(e) {
+      if (ph) { ph.style.display = ''; ph.textContent = 'Search failed: ' + (e.message || 'unknown') }
+    }
+  }
+
+  function doSelectSearchResult(rec) {
+    selectRecord(rec, 'norecords')
+  }
+
+  function wsSaveUrl(uuid, vaultUuid) {
     if (!cpSigningKey || !cpPubSpkiB64 || !delegateId) return
     var saveNonce = crypto.randomUUID()
     var ts = Date.now()
@@ -508,7 +580,7 @@ body {
     ).then(function(sigBytes) {
       var sigB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(sigBytes)))
       var ws
-      try { ws = new WebSocket(switchboardWsUrl) } catch(e) { return }
+      try { ws = new WebSocket(wsRelayUrl) } catch(e) { return }
       ws.onopen = function() {
         ws.send(JSON.stringify({
           type: 'publish', channel: delegateId, replyTo: saveNonce,
@@ -522,11 +594,7 @@ body {
   }
 
   function doSaveUrl(uuid, vaultUuid) {
-    if (isSameProfile) {
-      ch.postMessage({ type: 'relay-save-url', uuid: uuid, vaultUuid: vaultUuid || null, url: saveUrl, nonce: relayNonce })
-    } else {
-      saveUrlViaSwitchboard(uuid, vaultUuid || null)
-    }
+    $transport.saveUrl(uuid, vaultUuid || null)
   }
 
   // ── Record selection — shared entry point ──────────────────────────────────
@@ -536,18 +604,13 @@ body {
     previousPhase = fromPhase   // null → no Back button
     fieldClicked = false
     pendingCredentials = null
-    showWaiting(rec.autotype || null)
-
-    if (isSameProfile) {
-      // Fetch credentials asynchronously; pendingFill() triggers when both are ready.
-      selectedUuid = rec.uuid
-      selectedVaultUuid = rec.vaultUuid || null
-      ch.postMessage({ type: 'relay-query', uuid: selectedUuid, vaultUuid: selectedVaultUuid, nonce: relayNonce })
-    } else {
-      // Cross-profile: credentials already decrypted in rec.
-      pendingCredentials = { autotype: rec.autotype, fields: rec.fields, sensitiveCodes: rec.sensitiveCodes || [] }
+    showWaiting(null)  // autotype chips shown once credentials arrive below
+    $transport.fill(rec.uuid, rec.vaultUuid).then(function(cred) {
+      if (!cred) { sendError('Could not get credentials'); return }
+      updateWaitingWithAutotype(cred.autotype)
+      pendingCredentials = cred
       pendingFill()
-    }
+    }).catch(function(e) { sendError(e.message || 'Autofill failed') })
   }
 
   // Triggers fill when credentials AND a field signal (hasActiveField or fieldClicked) are ready.
@@ -611,10 +674,9 @@ body {
     btn.className = 'pp-view-link'
     btn.textContent = 'Show in Portpass Tab'
     btn.onclick = function() {
-      if (chosen) {
-        ch.postMessage({ type: 'relay-view-record', uuid: chosen.uuid, vaultUuid: chosen.vaultUuid || null, nonce: relayNonce })
-      }
-      window.close()
+      var p = (chosen && $transport) ? $transport.viewRecord(chosen.uuid, chosen.vaultUuid || null) : null
+      if (p && p.then) p.catch(function(){}).then(function() { window.close() })
+      else window.close()
     }
     bar.appendChild(btn)
     return bar
@@ -771,7 +833,7 @@ body {
     if (prev === 'pick') {
       showPickerContent(lastRecords)  // also resets search state
     } else if (prev === 'norecords') {
-      showSearchFallback(isSameProfile)
+      showSearchFallback(true)
     } else {
       window.close()
     }
@@ -932,19 +994,8 @@ body {
     })
   }
 
-  function showCrossProfilePicker(records) {
-    if (!records || !records.length) { showSearchFallback(false); return }
-    // Single exact match → skip picker, go straight to waiting
-    if (records.length === 1 && records[0].matchType === 'exact') {
-      selectRecord(records[0], null); return
-    }
-    lastRecords = records
-    showPickerContent(records)
-  }
-
   function showPicker(records) {
     if (!records || !records.length) { showSearchFallback(true); return }
-    // Single exact match → auto-advance to waiting
     if (records.length === 1 && records[0].matchType === 'exact') {
       selectRecord(records[0], null); return
     }
@@ -1007,9 +1058,7 @@ body {
         for (var i = 0; i < rows.length; i++) rows[i].parentNode.removeChild(rows[i])
         return
       }
-      debounce = setTimeout(function() {
-        ch.postMessage({ type: 'relay-search', query: q, nonce: relayNonce })
-      }, 150)
+      debounce = setTimeout(function() { doSearch(q) }, 150)
     }
     setTimeout(function() { try { searchInput.focus() } catch(_) {} }, 50)
   }
@@ -1027,16 +1076,13 @@ body {
     if (hdr) hdr.style.display = ''
     if (placeholder) placeholder.style.display = 'none'
     records.forEach(function(rec) {
-      $content.appendChild(buildRecordRow(rec, function(r) {
-        selectRecord(r, 'norecords')
-      }))
+      $content.appendChild(buildRecordRow(rec, doSelectSearchResult))
     })
   }
 
-  // ── Same-profile BroadcastChannel path ────────────────────────────────────
+  // ── BroadcastChannel path ─────────────────────────────────────────────────
 
   async function doHello() {
-    isSameProfile = true
     try {
       keyPair = await crypto.subtle.generateKey(
         { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey']
@@ -1044,7 +1090,7 @@ body {
       var pubJwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey)
       var ecdhSpki = await crypto.subtle.exportKey('spki', keyPair.publicKey)
       var ecdhSpkiB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(ecdhSpki)))
-      relayNonce = crypto.randomUUID()
+      nonce = crypto.randomUUID()
 
       var sigB64 = null, pubSpkiB64 = null
       if (cprivKey) {
@@ -1060,7 +1106,7 @@ body {
           pubSpkiB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(ecdsaSpki)))
           var sigBytes = await crypto.subtle.sign(
             { name: 'ECDSA', hash: 'SHA-256' }, signingKey,
-            new TextEncoder().encode(JSON.stringify({ relayNonce: relayNonce, ecdhSpki: ecdhSpkiB64 }))
+            new TextEncoder().encode(JSON.stringify({ nonce: nonce, ecdhSpki: ecdhSpkiB64 }))
           )
           sigB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(sigBytes)))
         } catch(_) {}
@@ -1068,11 +1114,11 @@ body {
 
       ch.onmessage = function(e) {
         var msg = e.data
-        if (!msg || msg.nonce !== relayNonce) return
-        if (msg.type === 'relay-hello-response') onHelloResponse(msg)
-        else if (msg.type === 'relay-error') sendError(msg.message)
+        if (!msg || msg.nonce !== nonce) return
+        if (msg.type === 'hello-response') onHelloResponse(msg)
+        else if (msg.type === 'error') sendError(msg.message)
       }
-      var helloMsg = { type: 'relay-hello', pubkey: pubJwk, ecdhSpki: ecdhSpkiB64, nonce: relayNonce }
+      var helloMsg = { type: 'hello', pubkey: pubJwk, ecdhSpki: ecdhSpkiB64, nonce: nonce }
       if (sigB64 && pubSpkiB64) { helloMsg.sig = sigB64; helloMsg.pub = pubSpkiB64 }
       ch.postMessage(helloMsg)
     } catch(_) { sendError('Key exchange failed') }
@@ -1090,21 +1136,62 @@ body {
     } catch(_) { sendError('Key exchange failed'); return }
 
     ch.onmessage = onBCMessage
+    $transport = {
+      search: function(q) {
+        return new Promise(function(resolve) {
+          _pendingSearch = resolve
+          ch.postMessage({ type: 'search', query: q, nonce: nonce })
+        })
+      },
+      fill: function(uuid, vu) {
+        return new Promise(function(resolve) {
+          _pendingFill = resolve
+          ch.postMessage({ type: 'query', uuid: uuid, vaultUuid: vu || null, nonce: nonce })
+        })
+      },
+      viewRecord: function(uuid, vu) {
+        ch.postMessage({ type: 'view-record', uuid: uuid, vaultUuid: vu || null, nonce: nonce })
+      },
+      saveUrl: function(uuid, vu) {
+        ch.postMessage({ type: 'save-url', uuid: uuid, vaultUuid: vu || null, url: saveUrl, nonce: nonce })
+      }
+    }
     setStatus('Searching for matches…')
-    ch.postMessage({ type: 'relay-query', url: currentUrl, nonce: relayNonce })
+    ch.postMessage({ type: 'query', url: currentUrl, nonce: nonce })
   }
 
   function onBCMessage(e) {
     var msg = e.data
-    if (!msg || msg.nonce !== relayNonce) return
-    if      (msg.type === 'relay-records')           showPicker(msg.records)
-    else if (msg.type === 'relay-record')            deliverFill(msg)
-    else if (msg.type === 'relay-url-saved')         {}  // pencil save, no further action
-    else if (msg.type === 'relay-search-results') {
-      if (searchOpen) showPickerSearchResults(msg.records)
-      else showSearchResults(msg.records)
+    if (!msg || msg.nonce !== nonce) return
+    if (msg.type === 'records') {
+      applyTheme(msg.theme === 'dark', msg.accent || 'amber')
+      showPicker(msg.records)
+      return
     }
-    else if (msg.type === 'relay-error')             sendError(msg.message)
+    if (msg.type === 'record') {
+      if (_pendingFill) {
+        var res = _pendingFill; _pendingFill = null
+        ;(async function() {
+          try {
+            var iv = Uint8Array.from(atob(msg.iv), function(c) { return c.charCodeAt(0) })
+            var ct = Uint8Array.from(atob(msg.ciphertext), function(c) { return c.charCodeAt(0) })
+            var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, sessionKey, ct)
+            res({ autotype: msg.autotype, fields: JSON.parse(new TextDecoder().decode(pt)), sensitiveCodes: msg.sensitiveCodes || [] })
+          } catch(_) { res(null) }
+        })()
+      } else {
+        deliverFill(msg)
+      }
+      return
+    }
+    if (msg.type === 'url-saved') return
+    if (msg.type === 'search-results') {
+      if (_pendingSearch) { var res = _pendingSearch; _pendingSearch = null; res(msg.records) }
+      else if (searchOpen) showPickerSearchResults(msg.records)
+      else showSearchResults(msg.records)
+      return
+    }
+    if (msg.type === 'error') sendError(msg.message)
   }
 
   async function deliverFill(msg) {

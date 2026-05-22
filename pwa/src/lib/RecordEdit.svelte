@@ -653,7 +653,7 @@
       </div>
 
       {#if autofillMode === 'visual'}
-        <div class="chip-area"
+        <div class="chip-area" role="list"
           class:chip-area-error={autotypeError}
           class:chip-area-warn={!autotypeError && autotypeWarning}
           ondragover={e => { e.preventDefault(); dropIdx = tokens.length }}
@@ -665,7 +665,7 @@
             {#if dragIdx !== -1 && dropIdx === i}
               <div class="drop-indicator"></div>
             {/if}
-            <div class="chip chip-{tok.type}"
+            <div class="chip chip-{tok.type}" role="listitem"
               draggable={isDesktop}
               ondragstart={() => { dragIdx = i; dropIdx = i }}
               ondragover={e => { e.preventDefault(); e.stopPropagation(); dropIdx = i }}
@@ -678,7 +678,7 @@
               <button type="button" class="chip-remove" onclick={() => removeToken(i)} aria-label="Remove">×</button>
             </div>
             {#if i < tokens.length - 1}
-              <span class="chip-sep"
+              <span class="chip-sep" role="separator"
                 ondragover={e => { e.preventDefault(); e.stopPropagation(); dropIdx = i + 1 }}>→</span>
             {/if}
           {/each}

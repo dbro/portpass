@@ -324,7 +324,7 @@ test.describe('Autofill popup mode — UI', () => {
 
 })
 
-// NOTE: The relay mode tests that tested App.svelte's tryRelay() bridge have been removed.
+// NOTE: The autofill bridge mode tests that tested App.svelte's tryBridge() have been removed.
 // That path (Portpass opened as a popup bridging postMessage↔BC) is no longer exercised
-// by the bookmarklet — relay.html now handles the same-profile BC relay directly and
-// authenticates with ECDSA. The relay.html same-profile flow is covered by bookmarklet.spec.ts.
+// by the bookmarklet — autofill.html now handles the same-profile BC bridging directly and
+// authenticates with ECDSA. The autofill.html same-profile flow is covered by bookmarklet.spec.ts.

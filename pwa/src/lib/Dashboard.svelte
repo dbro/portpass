@@ -288,54 +288,37 @@
     return { autotype, sensitiveCodes, fields }
   }
 
+  // Encrypt data with the autofill popup's ECDH public key and send as a ws-relay reply.
+  async function sbEncryptReply(replyTo, ecdhSpkiB64Arg, data) {
+    const ephPair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey'])
+    const relayPub = await crypto.subtle.importKey('spki', Uint8Array.from(atob(ecdhSpkiB64Arg), c => c.charCodeAt(0)), { name: 'ECDH', namedCurve: 'P-256' }, false, [])
+    const sk = await crypto.subtle.deriveKey({ name: 'ECDH', public: relayPub }, ephPair.privateKey, { name: 'AES-GCM', length: 256 }, false, ['encrypt'])
+    const iv = crypto.getRandomValues(new Uint8Array(12))
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, sk, new TextEncoder().encode(JSON.stringify(data)))
+    const ephPubJwk = await crypto.subtle.exportKey('jwk', ephPair.publicKey)
+    if (_sbWs) _sbWs.send(JSON.stringify({
+      type: 'reply', replyTo,
+      ephPub: btoa(JSON.stringify(ephPubJwk)),
+      iv: btoa(String.fromCharCode(...iv)),
+      ciphertext: btoa(String.fromCharCode(...new Uint8Array(ct))),
+    }))
+  }
+
   async function processAutofillIntent({ url, nonce, ecdhSpkiB64 }) {
-    const wsSend = (msg) => { if (_sbWs) _sbWs.send(JSON.stringify(msg)) }
-    const wsError = (error) => wsSend({ type: 'reply', replyTo: nonce, error })
-
     const records = autofillFindRecords(url)
-    if (!records.length) { wsError('No matching passwords found'); return }
-
     try {
-      const ephPair = await crypto.subtle.generateKey(
-        { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey']
-      )
-      const relayPubKey = await crypto.subtle.importKey(
-        'spki', Uint8Array.from(atob(ecdhSpkiB64), c => c.charCodeAt(0)),
-        { name: 'ECDH', namedCurve: 'P-256' }, false, []
-      )
-      const sessionKey = await crypto.subtle.deriveKey(
-        { name: 'ECDH', public: relayPubKey }, ephPair.privateKey,
-        { name: 'AES-GCM', length: 256 }, false, ['encrypt']
-      )
-
-      const recordsWithFields = []
-      for (const rec of records) {
-        try {
-          const rf = buildRecordFields(rec.uuid, rec.vaultUuid)
-          recordsWithFields.push({
-            uuid: rec.uuid, vaultUuid: rec.vaultUuid, title: rec.title,
-            matchType: rec.matchType, isCurrent: rec.isCurrent, existingUrl: rec.existingUrl,
-            autotype: rf.autotype, sensitiveCodes: rf.sensitiveCodes, fields: rf.fields,
-          })
-        } catch { /* skip records with invalid autotype */ }
-      }
-      if (!recordsWithFields.length) { wsError('No matching passwords found'); return }
-
-      const iv = crypto.getRandomValues(new Uint8Array(12))
-      const ct = await crypto.subtle.encrypt(
-        { name: 'AES-GCM', iv }, sessionKey,
-        new TextEncoder().encode(JSON.stringify(recordsWithFields))
-      )
-      const ephPubJwk = await crypto.subtle.exportKey('jwk', ephPair.publicKey)
-
-      wsSend({
-        type: 'reply', replyTo: nonce,
-        ephPub: btoa(JSON.stringify(ephPubJwk)),
-        iv: btoa(String.fromCharCode(...iv)),
-        ciphertext: btoa(String.fromCharCode(...new Uint8Array(ct))),
+      // Return only metadata — credentials fetched separately via fill-uuid when user selects a record.
+      await sbEncryptReply(nonce, ecdhSpkiB64, {
+        records: records.map(r => ({
+          uuid: r.uuid, vaultUuid: r.vaultUuid, title: r.title,
+          matchType: r.matchType, isCurrent: r.isCurrent, existingUrl: r.existingUrl,
+          readonly: r.readonly,
+        })),
+        theme:  localStorage.getItem('theme')  || 'dark',
+        accent: localStorage.getItem('accent') || 'amber',
       })
-    } catch (e) {
-      wsError(e.message || 'Autofill failed')
+    } catch(e) {
+      if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: nonce, error: e.message || 'Autofill failed' }))
     }
   }
 
@@ -346,7 +329,7 @@
   })
 
   // ── Switchboard WebSocket (cross-profile autofill) ─────────────────────────
-  // relay.html connects to the switchboard and sends a signed request;
+  // autofill.html connects to the switchboard and sends a signed request;
   // the switchboard routes it here via WebSocket. No polling.
 
   let _sbWs = null
@@ -389,9 +372,46 @@
         const message   = new TextEncoder().encode(JSON.stringify({ url: msg.url, nonce: msg.replyTo, ecdh: msg.ecdh, ts: msg.ts }))
         const verified  = await verifyAndUpdate(dbKey, spkiBytes, message, sigBytes, 'relay')
         if (!verified) return
+        if (msg.msgType === 'view-record') {
+          if (msg.uuid) selectRecord(msg.uuid, msg.vaultUuid || null)
+          if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo }))
+          return
+        }
         if (msg.msgType === 'save-url') {
           try { await autofillSaveURL(msg.uuid, msg.vaultUuid || null, msg.url) } catch {}
           if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo }))
+          return
+        }
+        if (msg.msgType === 'search') {
+          const allVaults = [
+            { uuid: dbKey, readonly: get(selectedFile)?.readonly || false },
+            ...get(secondaryVaults).map(v => ({ uuid: v.uuid, readonly: v.readonly || false })),
+          ]
+          const results = []
+          for (const { uuid: vaultUuid, readonly } of allVaults) {
+            try {
+              for (const recUuid of searchRecords(vaultUuid, msg.query || '', 0)) {
+                const rec = getRecordData(vaultUuid, recUuid)
+                results.push({ uuid: recUuid, vaultUuid: vaultUuid === dbKey ? null : vaultUuid,
+                  title: rec.Title, existingUrl: rec.URL || '', matchType: 'search', readonly })
+              }
+            } catch {}
+          }
+          try { await sbEncryptReply(msg.replyTo, msg.ecdh, results) } catch {}
+          return
+        }
+        if (msg.msgType === 'fill-uuid') {
+          try {
+            const rec = getRecordData(msg.vaultUuid || dbKey, msg.uuid)
+            const rf = buildRecordFields(msg.uuid, msg.vaultUuid || null)
+            await sbEncryptReply(msg.replyTo, msg.ecdh, [{
+              uuid: msg.uuid, vaultUuid: msg.vaultUuid || null,
+              title: rec.Title, matchType: 'search', existingUrl: rec.URL || '',
+              autotype: rf.autotype, sensitiveCodes: rf.sensitiveCodes, fields: rf.fields,
+            }])
+          } catch(e) {
+            if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo, error: e.message || 'Could not get credentials' }))
+          }
           return
         }
         delegatesVersion.update(v => v + 1)
@@ -536,41 +556,41 @@
     return () => { window.removeEventListener('message', handleMessage); sessionKey = null }
   })
 
-  // BroadcastChannel relay — lets a relay popup (opened by the bookmarklet) reach this
+  // BroadcastChannel handler — lets the autofill popup (opened by the bookmarklet) reach this
   // unlocked tab across browsing-context-group boundaries. Only the main (non-popup) tab
-  // acts as relay source so the popup's own dashboard (when unlocked directly) is unaffected.
+  // handles these messages so the popup's own dashboard (when unlocked directly) is unaffected.
   $effect(() => {
     if (isPopup) return
 
     const ch = new BroadcastChannel('portpass-autofill')
-    let relaySessionKey = null
-    let relayHelloInProgress = false
+    let sessionKey = null
+    let helloInProgress = false
 
     ch.onmessage = async event => {
       const msg = event.data
       if (!msg?.type) return
 
-      if (msg.type === 'relay-ping') {
-        ch.postMessage({ type: 'relay-pong', nonce: msg.nonce, switchboardUrl: get(switchboardUrl) })
+      if (msg.type === 'ping') {
+        ch.postMessage({ type: 'pong', nonce: msg.nonce, relayUrl: get(switchboardUrl) })
         return
       }
 
-      if (msg.type === 'relay-hello') {
-        if (relayHelloInProgress) return
-        relayHelloInProgress = true
+      if (msg.type === 'hello') {
+        if (helloInProgress) return
+        helloInProgress = true
         try {
           // Verify ECDSA signature to authenticate the delegate bookmarklet.
           // Closes the masquerade attack: a content script cannot forge this.
           if (!msg.sig || !msg.pub || !msg.ecdhSpki) {
-            ch.postMessage({ type: 'relay-error', message: 'Autofill request not authorized — reinstall the bookmarklet', nonce: msg.nonce })
+            ch.postMessage({ type: 'error', message: 'Autofill request not authorized — reinstall the bookmarklet', nonce: msg.nonce })
             return
           }
           const spkiBytes = Uint8Array.from(atob(msg.pub), c => c.charCodeAt(0))
           const sigBytes  = Uint8Array.from(atob(msg.sig),  c => c.charCodeAt(0))
-          const sigMsg    = new TextEncoder().encode(JSON.stringify({ relayNonce: msg.nonce, ecdhSpki: msg.ecdhSpki }))
+          const sigMsg    = new TextEncoder().encode(JSON.stringify({ nonce: msg.nonce, ecdhSpki: msg.ecdhSpki }))
           const verified  = await verifyAndUpdate(dbKey, spkiBytes, sigMsg, sigBytes, 'bc')
           if (!verified) {
-            ch.postMessage({ type: 'relay-error', message: 'Autofill request not authorized', nonce: msg.nonce })
+            ch.postMessage({ type: 'error', message: 'Autofill request not authorized', nonce: msg.nonce })
             return
           }
           delegatesVersion.update(v => v + 1)
@@ -580,30 +600,30 @@
           const pair = await crypto.subtle.generateKey(
             { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey']
           )
-          relaySessionKey = await crypto.subtle.deriveKey(
+          sessionKey = await crypto.subtle.deriveKey(
             { name: 'ECDH', public: openerPub }, pair.privateKey,
             { name: 'AES-GCM', length: 256 }, false, ['encrypt']
           )
           const pubJwk = await crypto.subtle.exportKey('jwk', pair.publicKey)
-          ch.postMessage({ type: 'relay-hello-response', pubkey: pubJwk, nonce: msg.nonce })
+          ch.postMessage({ type: 'hello-response', pubkey: pubJwk, nonce: msg.nonce })
         } catch {
-          relaySessionKey = null
-          ch.postMessage({ type: 'relay-error', message: 'Key exchange failed', nonce: msg.nonce })
+          sessionKey = null
+          ch.postMessage({ type: 'error', message: 'Key exchange failed', nonce: msg.nonce })
         } finally {
-          relayHelloInProgress = false
+          helloInProgress = false
         }
         return
       }
 
-      if (msg.type === 'relay-query') {
-        if (!relaySessionKey) {
-          ch.postMessage({ type: 'relay-error', message: 'No secure session — click the bookmarklet again', nonce: msg.nonce })
+      if (msg.type === 'query') {
+        if (!sessionKey) {
+          ch.postMessage({ type: 'error', message: 'No secure session — click the bookmarklet again', nonce: msg.nonce })
           return
         }
 
         // URL search
         if (msg.url !== undefined) {
-          ch.postMessage({ type: 'relay-records', records: autofillFindRecords(msg.url), nonce: msg.nonce })
+          ch.postMessage({ type: 'records', records: autofillFindRecords(msg.url), nonce: msg.nonce, theme: localStorage.getItem('theme') || 'dark', accent: localStorage.getItem('accent') || 'amber' })
           return
         }
 
@@ -611,38 +631,38 @@
         const uuid = msg.uuid || selectedUUID
         const vaultUuid = msg.uuid ? (msg.vaultUuid || null) : selectedVaultUuid
         if (!uuid) {
-          ch.postMessage({ type: 'relay-error', message: 'Open a record in Portpass first', nonce: msg.nonce })
+          ch.postMessage({ type: 'error', message: 'Open a record in Portpass first', nonce: msg.nonce })
           return
         }
         try {
-          const result = await autofillEncryptRecord(relaySessionKey, uuid, vaultUuid)
-          ch.postMessage({ type: 'relay-record', ...result, nonce: msg.nonce })
+          const result = await autofillEncryptRecord(sessionKey, uuid, vaultUuid)
+          ch.postMessage({ type: 'record', ...result, nonce: msg.nonce })
         } catch (e) {
-          ch.postMessage({ type: 'relay-error', message: e.message, nonce: msg.nonce })
+          ch.postMessage({ type: 'error', message: e.message, nonce: msg.nonce })
         }
         return
       }
 
-      if (msg.type === 'relay-save-url') {
-        if (!relaySessionKey) {
-          ch.postMessage({ type: 'relay-error', message: 'No secure session', nonce: msg.nonce })
+      if (msg.type === 'save-url') {
+        if (!sessionKey) {
+          ch.postMessage({ type: 'error', message: 'No secure session', nonce: msg.nonce })
           return
         }
         try {
           await autofillSaveURL(msg.uuid, msg.vaultUuid || null, msg.url)
-          ch.postMessage({ type: 'relay-url-saved', nonce: msg.nonce })
+          ch.postMessage({ type: 'url-saved', nonce: msg.nonce })
         } catch (e) {
-          ch.postMessage({ type: 'relay-error', message: e.message, nonce: msg.nonce })
+          ch.postMessage({ type: 'error', message: e.message, nonce: msg.nonce })
         }
       }
 
-      if (msg.type === 'relay-view-record') {
+      if (msg.type === 'view-record') {
         if (msg.uuid) selectRecord(msg.uuid, msg.vaultUuid || null)
       }
 
-      if (msg.type === 'relay-search') {
-        if (!relaySessionKey) {
-          ch.postMessage({ type: 'relay-error', message: 'No secure session', nonce: msg.nonce })
+      if (msg.type === 'search') {
+        if (!sessionKey) {
+          ch.postMessage({ type: 'error', message: 'No secure session', nonce: msg.nonce })
           return
         }
         const allVaults = [
@@ -661,7 +681,7 @@
             }
           } catch {}
         }
-        ch.postMessage({ type: 'relay-search-results', records: results, nonce: msg.nonce })
+        ch.postMessage({ type: 'search-results', records: results, nonce: msg.nonce })
       }
     }
 

@@ -25,7 +25,7 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, PRIV_KEY_JWK, 
   var isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost'
   var currentCanonical = canonicalURL(window.location.href)
   var saveUrl = window.location.origin + window.location.pathname
-  var RELAY_URL = PORTPASS_URL + 'relay.html'
+  var AUTOFILL_URL = PORTPASS_URL + 'autofill.html'
   var pp = null
   var startEl = null   // element the user clicked in the host page during the waiting phase
   var cleanedUp = false
@@ -51,14 +51,14 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, PRIV_KEY_JWK, 
     var msg = e.data
     if (!msg) return
     if (msg.type === 'fill') {
-      // Relay has chosen a record and the user has clicked a field (or one was pre-focused).
+      // Autofill popup has chosen a record and the user has clicked a field (or one was pre-focused).
       // Remove the field-click listener so it doesn't fire again mid-fill.
       document.removeEventListener('click', onFieldClick, true)
       var el = startEl || activeEl
       executeAutotype(el, msg.autotype, msg.fields).then(function() {
         try { pp.postMessage({ type: 'fill-done' }, PORTPASS_ORIGIN) } catch(_) {}
-        // Focus the relay popup from the main-window context so the done state is visible.
-        // (window.focus() from within relay.html is blocked; pp.focus() from the opener works.)
+        // Focus the autofill popup from the main-window context so the done state is visible.
+        // (window.focus() from within autofill.html is blocked; pp.focus() from the opener works.)
         try { pp.focus() } catch(_) {}
         cleanup()
       })
@@ -71,7 +71,7 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, PRIV_KEY_JWK, 
     try {
       var ppW = 380, ppH = 480
       var ppLeft = screen.width - ppW - 24
-      pp = window.open(RELAY_URL, 'portpass_autofill',
+      pp = window.open(AUTOFILL_URL, 'portpass_autofill',
         'popup=yes,width=' + ppW + ',height=' + ppH + ',left=' + ppLeft + ',top=24')
       if (!pp) { cleanup(); return }
 

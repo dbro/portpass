@@ -1322,7 +1322,7 @@
     margin-bottom: 14px;
     line-height: 1.4;
   }
-  .vs-install-warning svg { flex-shrink: 0; margin-top: 1px; }
+  .vs-install-warning :global(svg) { flex-shrink: 0; margin-top: 1px; }
 
   .vs-install-grid {
     display: grid;

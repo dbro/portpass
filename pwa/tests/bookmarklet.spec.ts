@@ -78,14 +78,15 @@ async function createRecord(portpass: Page, opts: {
   if (opts.url) {
     await portpass.getByLabel('URL').fill(opts.url)
   }
+  await portpass.locator('.mode-toggle').getByText('Raw').click()
   await portpass.locator('.autotype-input').fill(opts.autotype)
   await portpass.getByRole('button', { name: 'Save' }).click()
   await portpass.locator('.record-row', { hasText: opts.title }).click()
 }
 
-// Opens the relay popup and optionally clicks the first record row (transitioning to
-// the waiting phase). Returns the relay Page for further assertions.
-// In the new flow the relay stays open (waiting phase) until the user clicks a form
+// Opens the autofill popup and optionally clicks the first record row (transitioning to
+// the waiting phase). Returns the autofill popup Page for further assertions.
+// In the new flow the popup stays open (waiting phase) until the user clicks a form
 // field; there is no page-level overlay injected into the host page.
 async function activateBookmarklet(
   login: Page, bookmarkletUrl: string, opts: { clickRow?: boolean } = {}
@@ -97,41 +98,41 @@ async function activateBookmarklet(
   const code = bookmarkletUrl.replace('javascript:', '')
   await login.evaluate(new Function(decodeURIComponent(code)) as any)
 
-  const relay = await popupPromise
-  await relay.waitForLoadState('domcontentloaded')
+  const popup = await popupPromise
+  await popup.waitForLoadState('domcontentloaded')
 
   // Wait for: picker rows, waiting phase (single exact match auto-advance),
   // no-match notice, or popup close.
   const which = await Promise.race([
-    relay.locator('.rec-row').first().waitFor({ timeout: 10000 }).then(() => 'picker').catch(() => 'timeout'),
-    relay.locator('.selected-record-row').first().waitFor({ timeout: 10000 }).then(() => 'waiting').catch(() => 'timeout'),
-    relay.locator('.pp-notice').first().waitFor({ timeout: 10000 }).then(() => 'no-match').catch(() => 'timeout'),
-    relay.waitForEvent('close', { timeout: 10000 }).then(() => 'closed').catch(() => 'timeout'),
+    popup.locator('.rec-row').first().waitFor({ timeout: 10000 }).then(() => 'picker').catch(() => 'timeout'),
+    popup.locator('.selected-record-row').first().waitFor({ timeout: 10000 }).then(() => 'waiting').catch(() => 'timeout'),
+    popup.locator('.pp-notice').first().waitFor({ timeout: 10000 }).then(() => 'no-match').catch(() => 'timeout'),
+    popup.waitForEvent('close', { timeout: 10000 }).then(() => 'closed').catch(() => 'timeout'),
   ])
 
   if (which === 'picker' && clickRow) {
-    await relay.locator('.rec-row').first().click()
-    // Relay transitions to waiting phase (stays open — fill fires only after field click).
-    await relay.locator('.selected-record-row').waitFor({ timeout: 5000 }).catch(() => {})
+    await popup.locator('.rec-row').first().click()
+    // Popup transitions to waiting phase (stays open — fill fires only after field click).
+    await popup.locator('.selected-record-row').waitFor({ timeout: 5000 }).catch(() => {})
   }
 
   await login.evaluate(() => new Promise(r => requestAnimationFrame(r)))
-  return relay
+  return popup
 }
 
 test.setTimeout(30000)
 
-test.describe('Bookmarklet — relay phases and autofill', () => {
+test.describe('Bookmarklet — autofill popup phases', () => {
 
   test('waiting phase shows selected record title', async ({ context }) => {
     const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
     await createRecord(portpass, { title: 'My Bank', autotype: '\\u\\t\\p\\n' })
 
-    // activateBookmarklet clicks the row — relay transitions to waiting phase.
-    const relay = await activateBookmarklet(login, bookmarkletUrl)
-    await expect(relay.locator('.selected-record-row')).toBeVisible({ timeout: 5000 })
-    await expect(relay.locator('.selected-record-row')).toContainText('My Bank')
-    await expect(relay.locator('.pp-waiting-title')).toContainText('Click a field to begin')
+    // activateBookmarklet clicks the row — popup transitions to waiting phase.
+    const popup = await activateBookmarklet(login, bookmarkletUrl)
+    await expect(popup.locator('.selected-record-row')).toBeVisible({ timeout: 5000 })
+    await expect(popup.locator('.selected-record-row')).toContainText('My Bank')
+    await expect(popup.locator('.pp-waiting-title')).toContainText('Click a field to begin')
   })
 
   test('\\u\\t\\p fills username, tabs to password, fills password', async ({ context }) => {
@@ -141,7 +142,7 @@ test.describe('Bookmarklet — relay phases and autofill', () => {
     })
 
     await activateBookmarklet(login, bookmarkletUrl)
-    // Relay is in waiting phase. Clicking a field triggers the fill chain.
+    // Popup is in waiting phase. Clicking a field triggers the fill chain.
     await login.locator('#user').click()
     await expect(login.locator('#user')).toHaveValue('alice', { timeout: 5000 })
     await expect(login.locator('#pass')).toHaveValue('hunter2')
@@ -219,41 +220,41 @@ test.describe('Bookmarklet — relay phases and autofill', () => {
     await expect(login.locator('#pass')).toHaveValue('secret')
   })
 
-  test('relay shows done phase after fill and auto-closes', async ({ context }) => {
+  test('popup shows done phase after fill and auto-closes', async ({ context }) => {
     const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
     await createRecord(portpass, { title: 'My Bank', username: 'alice', password: 'hunter2', autotype: '\\u' })
 
-    const relay = await activateBookmarklet(login, bookmarkletUrl)
+    const popup = await activateBookmarklet(login, bookmarkletUrl)
     await login.locator('#user').click()
-    await expect(relay.locator('.pp-phase-done')).toBeVisible({ timeout: 5000 })
-    await relay.waitForEvent('close', { timeout: 5000 })
+    await expect(popup.locator('.pp-phase-done')).toBeVisible({ timeout: 5000 })
+    await popup.waitForEvent('close', { timeout: 5000 })
   })
 
-  test('Cancel button in waiting phase closes the relay popup', async ({ context }) => {
+  test('Cancel button in waiting phase closes the autofill popup', async ({ context }) => {
     const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
     await createRecord(portpass, { title: 'Site', autotype: '\\u\\p' })
 
-    const relay = await activateBookmarklet(login, bookmarkletUrl)
-    await relay.getByRole('button', { name: 'Cancel' }).click()
-    await expect.poll(() => relay.isClosed(), { timeout: 8000 }).toBe(true)
+    const popup = await activateBookmarklet(login, bookmarkletUrl)
+    await popup.getByRole('button', { name: 'Cancel' }).click()
+    await expect.poll(() => popup.isClosed(), { timeout: 8000 }).toBe(true)
   })
 
   test('search fallback shown when no URL matches', async ({ context }) => {
     const { login, bookmarkletUrl } = await setupAutofillTest(context)
-    const relay = await activateBookmarklet(login, bookmarkletUrl)
-    await expect(relay.locator('.pp-notice')).toBeVisible({ timeout: 5000 })
-    await expect(relay.locator('.pp-search-wrap .pp-search')).toBeVisible()
+    const popup = await activateBookmarklet(login, bookmarkletUrl)
+    await expect(popup.locator('.pp-notice')).toBeVisible({ timeout: 5000 })
+    await expect(popup.locator('.pp-search-wrap .pp-search')).toBeVisible()
   })
 
   test('single exact match auto-advances to waiting phase', async ({ context }) => {
     const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
     await createRecord(portpass, { title: 'Login Site', autotype: '\\u\\t\\p', url: LOGIN_URL })
 
-    const relay = await activateBookmarklet(login, bookmarkletUrl)
-    // No picker shown — relay goes directly to waiting.
-    await expect(relay.locator('.rec-row')).toHaveCount(0)
-    await expect(relay.locator('.selected-record-row')).toBeVisible()
-    await expect(relay.locator('.rec-match-badge')).toBeVisible()  // in SelectedRecordRow
+    const popup = await activateBookmarklet(login, bookmarkletUrl)
+    // No picker shown — popup goes directly to waiting.
+    await expect(popup.locator('.rec-row')).toHaveCount(0)
+    await expect(popup.locator('.selected-record-row')).toBeVisible()
+    await expect(popup.locator('.rec-match-badge')).toBeVisible()  // in SelectedRecordRow
   })
 
   test('fuzzy match row shows URL text and pencil; clicking transitions to waiting', async ({ context }) => {
@@ -263,13 +264,13 @@ test.describe('Bookmarklet — relay phases and autofill', () => {
       url: 'http://localhost:5173/different-path',
     })
 
-    const relay = await activateBookmarklet(login, bookmarkletUrl, { clickRow: false })
-    await relay.locator('.rec-row').first().waitFor({ timeout: 5000 })
-    await expect(relay.locator('.rec-url').first()).toBeVisible()
-    await expect(relay.locator('.rec-pencil').first()).toBeVisible()
+    const popup = await activateBookmarklet(login, bookmarkletUrl, { clickRow: false })
+    await popup.locator('.rec-row').first().waitFor({ timeout: 5000 })
+    await expect(popup.locator('.rec-url').first()).toBeVisible()
+    await expect(popup.locator('.rec-pencil').first()).toBeVisible()
     // Clicking the row transitions to waiting.
-    await relay.locator('.rec-row').first().click()
-    await expect(relay.locator('.selected-record-row')).toBeVisible({ timeout: 5000 })
+    await popup.locator('.rec-row').first().click()
+    await expect(popup.locator('.selected-record-row')).toBeVisible({ timeout: 5000 })
   })
 
   test('record name and URL have title attributes for overflow tooltip', async ({ context }) => {
@@ -280,10 +281,10 @@ test.describe('Bookmarklet — relay phases and autofill', () => {
       url: 'http://localhost:5173/a-very-long-path-that-will-overflow',
     })
 
-    const relay = await activateBookmarklet(login, bookmarkletUrl, { clickRow: false })
-    await relay.locator('.rec-row').first().waitFor({ timeout: 5000 })
-    const nameTitle = await relay.locator('.rec-name').first().getAttribute('title')
-    const urlTitle  = await relay.locator('.rec-url').first().getAttribute('title')
+    const popup = await activateBookmarklet(login, bookmarkletUrl, { clickRow: false })
+    await popup.locator('.rec-row').first().waitFor({ timeout: 5000 })
+    const nameTitle = await popup.locator('.rec-name').first().getAttribute('title')
+    const urlTitle  = await popup.locator('.rec-url').first().getAttribute('title')
     expect(nameTitle).toBe('A Very Long Record Name That Will Overflow The Column')
     expect(urlTitle).toBeTruthy()
   })
@@ -297,8 +298,8 @@ test.describe('Bookmarklet — relay phases and autofill', () => {
     await portpass.getByRole('button', { name: 'Save' }).click()
     await portpass.locator('.record-row', { hasText: 'No Autotype' }).click()
 
-    const relay = await activateBookmarklet(login, bookmarkletUrl)
-    await expect(relay.locator('.selected-record-row')).toContainText('No Autotype', { timeout: 5000 })
+    const popup = await activateBookmarklet(login, bookmarkletUrl)
+    await expect(popup.locator('.selected-record-row')).toContainText('No Autotype', { timeout: 5000 })
   })
 
 })
