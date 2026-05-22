@@ -365,7 +365,8 @@ label.rec-replace span { font-size: 11px; color: #aaa }
           if (replaceCheck && replaceCheck.checked) saveUrlViaSwitchboard(r.uuid, r.vaultUuid || null)
           if (window.opener) {
             window.opener.postMessage(
-              { type: 'fill', title: r.title, autotype: r.autotype, fields: r.fields },
+              { type: 'fill', title: r.title, autotype: r.autotype, fields: r.fields,
+                theme: localStorage.getItem('theme') || 'dark' },
               bookmarkletOrigin || '*'
             )
           }
@@ -497,7 +498,8 @@ label.rec-replace span { font-size: 11px; color: #aaa }
       var fields = JSON.parse(new TextDecoder().decode(pt))
       if (window.opener) {
         window.opener.postMessage(
-          { type: 'fill', title: msg.title, autotype: msg.autotype, fields: fields },
+          { type: 'fill', title: msg.title, autotype: msg.autotype, fields: fields,
+            theme: localStorage.getItem('theme') || 'dark' },
           bookmarkletOrigin || '*'
         )
       }

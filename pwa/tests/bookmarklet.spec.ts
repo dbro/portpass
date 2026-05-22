@@ -135,8 +135,9 @@ test.describe('Bookmarklet — overlay and autofill', () => {
 
     await activateBookmarklet(login, bookmarkletUrl)
     await login.locator('#user').click()
-    // Overlay is removed by onFieldClick — its absence confirms autotype ran.
-    await expect(login.locator('#__pp')).not.toBeVisible({ timeout: 3000 })
+    // After autotype: success overlay appears, then auto-dismisses after 1.5s.
+    await expect(login.locator('#__pp')).toContainText('Filled successfully', { timeout: 3000 })
+    await expect(login.locator('#__pp')).toHaveCount(0, { timeout: 3000 })
 
     await expect(login.locator('#user')).toHaveValue('alice')
     await expect(login.locator('#pass')).toHaveValue('hunter2')
@@ -216,6 +217,30 @@ test.describe('Bookmarklet — overlay and autofill', () => {
 
     await expect(login.locator('#user')).toHaveValue('alice')
     await expect(login.locator('#pass')).toHaveValue('secret')
+  })
+
+  test('overlay is positioned at fixed top-right', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await createRecord(portpass, { title: 'Site', autotype: '\\u\\p' })
+
+    await activateBookmarklet(login, bookmarkletUrl)
+    const box = await login.locator('#__pp').boundingBox()
+    expect(box).not.toBeNull()
+    if (box) {
+      expect(box.y).toBeLessThan(30)  // near top (14px)
+      const vw = login.viewportSize()!.width
+      expect(box.x + box.width).toBeGreaterThan(vw - 30)  // near right edge (14px)
+    }
+  })
+
+  test('success overlay shown after fill and auto-dismisses', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await createRecord(portpass, { title: 'My Bank', username: 'alice', password: 'hunter2', autotype: '\\u' })
+
+    await activateBookmarklet(login, bookmarkletUrl)
+    await login.locator('#user').click()
+    await expect(login.locator('#__pp')).toContainText('Filled successfully', { timeout: 3000 })
+    await expect(login.locator('#__pp')).toHaveCount(0, { timeout: 3000 })
   })
 
   test('dismiss button removes the overlay', async ({ context }) => {

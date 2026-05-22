@@ -66,6 +66,7 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, PRIV_KEY_JWK, 
       } catch (_) { return }
       if (result.type === 'error') { showError(result.message); return }
 
+      if (result.theme) T = buildTheme(result.theme === 'dark')
       var startEl = isUsableInput(activeEl) ? activeEl : null
       showFillOverlay(result.title, result.autotype, result.fields, startEl)
 
@@ -78,105 +79,188 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, PRIV_KEY_JWK, 
 
   // ── Overlay helpers ──────────────────────────────────────────────────────
 
-  function mkOverlay() {
-    var div   = document.createElement('div')
-    div.id    = '__pp'
-    div.style.cssText = [
-      'position:fixed', 'top:16px', 'right:16px', 'z-index:2147483647',
-      'background:#1a1d21', 'color:#f1ede4', 'border-radius:8px',
-      'padding:12px 16px', 'font-family:system-ui,-apple-system,sans-serif',
-      'font-size:14px', 'max-width:320px',
-      'box-shadow:0 4px 20px rgba(0,0,0,.5)',
-    ].join(';')
-    var close = document.createElement('button')
-    close.textContent = '×'
-    close.style.cssText = 'position:absolute;top:6px;right:10px;background:none;border:none;color:#888;font-size:20px;cursor:pointer;padding:0;line-height:1'
-    close.onclick = removeOverlay
-    div.appendChild(close)
-    return div
+  // Theme: relay.html (Portpass origin) sends the current Portpass theme in the fill
+  // message. For early error overlays (before fill arrives) fall back to system preference.
+  function buildTheme(dark) {
+    return dark ? {
+      bg:     '#1c1f24', border: '#2c3038', text: '#f1ede4', muted: '#a6a39b',
+      amber:  '#d4953d', orange: '#c47030', red:  '#e08673', green: '#6cba8a',
+      shadow: '0 8px 30px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.35)',
+    } : {
+      bg:     '#fbfaf7', border: '#e3ddd1', text: '#1c1f24', muted: '#5a5d65',
+      amber:  '#a06415', orange: '#8b5020', red:  '#b3361f', green: '#2c7a4e',
+      shadow: '0 8px 30px rgba(0,0,0,.18),0 2px 8px rgba(0,0,0,.10)',
+    }
+  }
+  var T = buildTheme(window.matchMedia && window.matchMedia('(prefers-color-scheme:dark)').matches)
+
+  function icoSvg(name, color) {
+    var paths = {
+      lock:  '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+      warn:  '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+      check: '<path d="m5 12 5 5L20 7"/>',
+    }
+    return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="' + color +
+      '" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" ' +
+      'style="flex-shrink:0;margin-top:1px">' + paths[name] + '</svg>'
   }
 
-  function firstVisibleInput() {
-    var list = focusableList()
-    for (var i = 0; i < list.length; i++) {
-      var r = list[i].getBoundingClientRect()
-      if (r.bottom > 0 && r.top < window.innerHeight && r.right > 0 && r.left < window.innerWidth) return list[i]
-    }
-    return null
+  // Creates the overlay shell (header + appends to body). Returns the overlay element.
+  // noHdrBorder: omit the header bottom border (used in success state).
+  function mkOverlay(noHdrBorder) {
+    removeOverlay()
+    var ov = document.createElement('div')
+    ov.id = '__pp'
+    ov.style.cssText = 'position:fixed;top:14px;right:14px;z-index:2147483647;width:236px;' +
+      'background:' + T.bg + ';color:' + T.text + ';border-radius:12px;' +
+      'font-family:system-ui,-apple-system,sans-serif;font-size:13px;line-height:1.4;' +
+      'box-shadow:' + T.shadow
+
+    var hdr = document.createElement('div')
+    hdr.style.cssText = 'display:flex;align-items:center;gap:8px;padding:12px 14px 10px;' +
+      (noHdrBorder ? '' : 'border-bottom:1px solid ' + T.border)
+
+    var logo = document.createElement('img')
+    logo.src = PORTPASS_URL + 'icon.svg'
+    logo.style.cssText = 'width:18px;height:18px;border-radius:4px;flex-shrink:0'
+
+    var brand = document.createElement('span')
+    brand.textContent = 'Portpass'
+    brand.style.cssText = 'font-weight:600;font-size:13px;flex:1'
+
+    var xBtn = document.createElement('button')
+    xBtn.textContent = '×'
+    xBtn.title = 'Dismiss'
+    xBtn.style.cssText = 'background:none;border:none;cursor:pointer;padding:0;flex-shrink:0;' +
+      'width:22px;height:22px;display:flex;align-items:center;justify-content:center;' +
+      'font-size:18px;line-height:1;color:' + T.muted + ';border-radius:4px'
+    xBtn.onclick = removeOverlay
+
+    hdr.appendChild(logo)
+    hdr.appendChild(brand)
+    hdr.appendChild(xBtn)
+    ov.appendChild(hdr)
+    document.body.appendChild(ov)
+    return ov
+  }
+
+  // Appends and returns a body div inside the overlay.
+  function ovBody(ov, pad) {
+    var body = document.createElement('div')
+    body.style.cssText = 'padding:' + (pad || '8px 14px 12px')
+    ov.appendChild(body)
+    return body
+  }
+
+  // Returns an amber action link element that opens the Portpass tab.
+  function actionLink(text) {
+    var a = document.createElement('a')
+    a.textContent = text
+    a.href = PORTPASS_URL
+    a.target = '_blank'
+    a.rel = 'noopener'
+    a.style.cssText = 'display:block;color:' + T.amber + ';font-size:12px;font-weight:600;' +
+      'text-decoration:none;margin-top:6px'
+    a.onclick = function(e) { e.stopPropagation() }
+    return a
   }
 
   function showFillOverlay(title, autotype, fields, startEl) {
-    removeOverlay()
-    var div = mkOverlay()
-
-    if (!startEl) {
-      var nearEl = firstVisibleInput()
-      if (nearEl) {
-        var r = nearEl.getBoundingClientRect()
-        var top = window.innerHeight - r.bottom >= 100
-          ? Math.round(r.bottom + 8)
-          : Math.max(8, Math.round(r.top - 96))
-        div.style.top   = top + 'px'
-        div.style.left  = Math.max(8, Math.min(Math.round(r.left), window.innerWidth - 344)) + 'px'
-        div.style.right = 'auto'
-      } else {
-        div.style.top       = '50%'
-        div.style.left      = '50%'
-        div.style.right     = 'auto'
-        div.style.transform = 'translate(-50%,-50%)'
-      }
+    if (startEl) {
+      // Field already focused — skip ready state, execute immediately then show success.
+      executeAutotype(startEl, autotype, fields).then(showSuccess)
+      return
     }
 
-    var brand = document.createElement('div')
-    brand.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #2e3240'
-    var logo = document.createElement('img')
-    logo.src = PORTPASS_URL + 'icon.svg'
-    logo.style.cssText = 'width:16px;height:16px;flex-shrink:0'
-    var brandName = document.createElement('span')
-    brandName.style.cssText = 'font-size:12px;font-weight:600;letter-spacing:0.01em'
-    brandName.textContent = 'Portpass'
-    brand.appendChild(logo)
-    brand.appendChild(brandName)
+    var ov   = mkOverlay(false)
+    var body = ovBody(ov)
 
-    var titleEl = document.createElement('div')
-    titleEl.style.cssText = 'font-weight:600;padding-right:20px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px'
-    titleEl.textContent = title
+    var nameEl = document.createElement('div')
+    nameEl.textContent = title
+    nameEl.style.cssText = 'font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'
 
     var hint = document.createElement('div')
-    hint.style.cssText = 'font-size:12px;color:#aaa;margin-top:4px'
-    hint.textContent = startEl ? 'Autofilling…' : 'Click the field to start from'
+    hint.textContent = 'Click the field to start from'
+    hint.style.cssText = 'font-size:12px;color:' + T.muted + ';margin-top:4px'
 
-    div.appendChild(brand)
-    div.appendChild(titleEl)
-    div.appendChild(hint)
-    document.body.appendChild(div)
+    body.appendChild(nameEl)
+    body.appendChild(hint)
 
-    if (startEl) {
-      executeAutotype(startEl, autotype, fields).then(removeOverlay)
-    } else {
-      function onFieldClick(e) {
-        var el  = e.target
-        var tag = el && el.tagName
-        if (tag !== 'INPUT' && tag !== 'TEXTAREA') return
-        if (el.type === 'hidden') return
-        e.preventDefault()
-        document.removeEventListener('click', onFieldClick, true)
-        removeOverlay()
-        executeAutotype(el, autotype, fields)
-      }
-      document.addEventListener('click', onFieldClick, true)
+    function onFieldClick(e) {
+      var target = e.target
+      var tag = target && target.tagName
+      if (tag !== 'INPUT' && tag !== 'TEXTAREA') return
+      if (target.type === 'hidden') return
+      e.preventDefault()
+      document.removeEventListener('click', onFieldClick, true)
+      removeOverlay()
+      executeAutotype(target, autotype, fields).then(showSuccess)
     }
+    document.addEventListener('click', onFieldClick, true)
+  }
+
+  function showSuccess() {
+    var ov   = mkOverlay(true)
+    var body = ovBody(ov, '6px 14px 12px')
+    var row  = document.createElement('div')
+    row.style.cssText = 'display:flex;align-items:center;gap:8px'
+    row.innerHTML = icoSvg('check', T.green)
+    var msg = document.createElement('span')
+    msg.textContent = 'Filled successfully'
+    msg.style.cssText = 'color:' + T.green + ';font-weight:600'
+    row.appendChild(msg)
+    body.appendChild(row)
+    setTimeout(removeOverlay, 1500)
   }
 
   function showError(msg) {
-    removeOverlay()
-    var div = mkOverlay()
-    var err = document.createElement('div')
-    err.style.cssText = 'color:#e06c75;padding-right:20px'
-    err.textContent = msg
-    div.appendChild(err)
-    document.body.appendChild(div)
-    setTimeout(removeOverlay, 8000)
+    var lm    = (msg || '').toLowerCase()
+    var state = /lock/.test(lm) || /open a record/.test(lm)                           ? 'locked'
+              : /autofill sequence|no autofill|autotype|could not parse/.test(lm)      ? 'noseq'
+              : /non-https|insecure|sensitive.*http/.test(lm)                          ? 'http'
+              : 'other'
+
+    var ov   = mkOverlay(false)
+    var body = ovBody(ov)
+    var row  = document.createElement('div')
+    row.style.cssText = 'display:flex;align-items:flex-start;gap:8px'
+
+    var content = document.createElement('div')
+    var hd = document.createElement('div')
+
+    if (state === 'locked') {
+      row.innerHTML = icoSvg('lock', T.red)
+      hd.textContent = 'Vault is locked'
+      hd.style.cssText = 'font-weight:600;color:' + T.red
+      content.appendChild(hd)
+      content.appendChild(actionLink('Unlock Portpass →'))
+
+    } else if (state === 'noseq') {
+      row.innerHTML = icoSvg('warn', T.orange)
+      hd.textContent = 'No autofill sequence set'
+      hd.style.cssText = 'font-weight:600;color:' + T.orange
+      content.appendChild(hd)
+      content.appendChild(actionLink('Edit password in Portpass →'))
+
+    } else if (state === 'http') {
+      row.innerHTML = icoSvg('warn', T.red)
+      hd.textContent = 'Insecure page — blocked'
+      hd.style.cssText = 'font-weight:600;color:' + T.red
+      var sub = document.createElement('div')
+      sub.textContent = 'Passwords are only filled on HTTPS pages.'
+      sub.style.cssText = 'font-size:12px;color:' + T.muted + ';margin-top:4px'
+      content.appendChild(hd)
+      content.appendChild(sub)
+
+    } else {
+      hd.textContent = msg || 'Autofill failed'
+      hd.style.cssText = 'font-size:12px;color:' + T.red
+      content.appendChild(hd)
+      setTimeout(removeOverlay, 8000)
+    }
+
+    row.appendChild(content)
+    body.appendChild(row)
   }
 
   function removeOverlay() {
