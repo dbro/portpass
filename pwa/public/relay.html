@@ -29,6 +29,16 @@ body {
 }
 #pp-header img { width: 22px; height: 22px; border-radius: 5px }
 #pp-header .pp-brand { font-weight: 600; font-size: 15px }
+#pp-search-toggle {
+  margin-left: auto; background: none; border: none; cursor: pointer;
+  color: var(--text-muted); display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: 6px; flex-shrink: 0; padding: 0;
+}
+#pp-search-toggle:hover { color: var(--text); background: var(--surface-2) }
+#pp-search-toggle.active { color: var(--amber) }
+#pp-search-bar {
+  padding: 8px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
 
 /* ── Sub-header (pick phase only) ── */
 #pp-subheader {
@@ -166,6 +176,10 @@ body {
   <div id="pp-header">
     <img src="icon.svg" alt="">
     <span class="pp-brand">Portpass</span>
+    <button id="pp-search-toggle" style="display:none" title="Search all passwords"></button>
+  </div>
+  <div id="pp-search-bar" style="display:none">
+    <input id="pp-search-input" class="pp-search" type="text" placeholder="Search all passwords…">
   </div>
   <div id="pp-subheader">
     <span class="pp-action-label">CLICK TO AUTOFILL</span>
@@ -214,6 +228,8 @@ body {
   // ── SVG icons ─────────────────────────────────────────────────────────────
   var _S = ' viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"'
   var SVG_WARN   = '<svg width="13" height="13"' + _S + ' stroke-width="1.6"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>'
+  var SVG_SEARCH_ICO = '<svg width="16" height="16"' + _S + ' stroke-width="1.6"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.3-4.3"/></svg>'
+  var SVG_X_ICO      = '<svg width="16" height="16"' + _S + ' stroke-width="1.6"><path d="M6 6l12 12M18 6 6 18"/></svg>'
   var SVG_PENCIL = '<svg width="13" height="13"' + _S + ' stroke-width="1.6"><path d="M4 20h4l10-10-4-4L4 16v4Z"/><path d="m14 6 4 4"/></svg>'
   var SVG_UNDO   = '<svg width="13" height="13"' + _S + ' stroke-width="1.6"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>'
   var SVG_CHECK_SM = '<svg width="12" height="12"' + _S + ' stroke-width="2.2"><path d="m5 12 5 5L20 7"/></svg>'
@@ -262,11 +278,33 @@ body {
   var fieldClicked = false    // bookmarklet reported a field was clicked
   var hasActiveField = false  // bookmarklet had a pre-focused field at activation
 
-  var $content    = document.getElementById('pp-content')
-  var $subheader  = document.getElementById('pp-subheader')
-  var $urlDisplay = document.getElementById('pp-url-display')
+  var $content       = document.getElementById('pp-content')
+  var $subheader     = document.getElementById('pp-subheader')
+  var $urlDisplay    = document.getElementById('pp-url-display')
+  var $searchToggle  = document.getElementById('pp-search-toggle')
+  var $searchBar     = document.getElementById('pp-search-bar')
+  var $searchInput   = document.getElementById('pp-search-input')
+  var searchOpen     = false
+
+  // Set up the search toggle button icon and handler (once).
+  $searchToggle.innerHTML = SVG_SEARCH_ICO
+  $searchToggle.onclick = toggleSearch
+
+  // Set up the search input with debounced relay-search.
+  ;(function() {
+    var deb = null
+    $searchInput.oninput = function() {
+      clearTimeout(deb)
+      var q = $searchInput.value.trim()
+      if (!q) { showPickerSearchPlaceholder(); return }
+      deb = setTimeout(function() {
+        ch.postMessage({ type: 'relay-search', query: q, nonce: relayNonce })
+      }, 150)
+    }
+  }())
 
   function setStatus(msg) {
+    hideSearchUI()
     $subheader.style.display = 'none'
     $content.innerHTML = ''
     var el = document.createElement('div')
@@ -532,6 +570,7 @@ body {
   }
 
   function showWaiting() {
+    hideSearchUI()
     $subheader.style.display = 'none'
     $content.innerHTML = ''
     $content.appendChild(makeSelectedRecordRow(chosen))
@@ -577,6 +616,7 @@ body {
   }
 
   function showDone() {
+    hideSearchUI()
     $subheader.style.display = 'none'
     $content.innerHTML = ''
     if (chosen) $content.appendChild(makeSelectedRecordRow(chosen))
@@ -614,6 +654,7 @@ body {
   }
 
   function showErrorPhase(errorPhase, rawMsg) {
+    hideSearchUI()
     $subheader.style.display = 'none'
     $content.innerHTML = ''
     if (chosen) $content.appendChild(makeSelectedRecordRow(chosen))
@@ -672,11 +713,71 @@ body {
     var prev = previousPhase
     previousPhase = null
     if (prev === 'pick') {
-      showPickerContent(lastRecords)
+      showPickerContent(lastRecords)  // also resets search state
     } else if (prev === 'norecords') {
       showSearchFallback(isSameProfile)
     } else {
       window.close()
+    }
+  }
+
+  // ── Search toggle (picker search) ─────────────────────────────────────────
+
+  function hideSearchUI() {
+    searchOpen = false
+    $searchBar.style.display = 'none'
+    $searchToggle.style.display = 'none'
+    $searchToggle.classList.remove('active')
+    $searchToggle.innerHTML = SVG_SEARCH_ICO
+    $searchInput.value = ''
+  }
+
+  function showPickerSearchPlaceholder() {
+    $content.innerHTML = ''
+    var ph = document.createElement('div')
+    ph.className = 'pp-placeholder'
+    ph.textContent = 'Type to search all passwords'
+    $content.appendChild(ph)
+  }
+
+  function showPickerSearchResults(records) {
+    $content.innerHTML = ''
+    if (!records || !records.length) {
+      var ph = document.createElement('div')
+      ph.className = 'pp-placeholder'
+      ph.textContent = 'No matching passwords found'
+      $content.appendChild(ph)
+      return
+    }
+    records.forEach(function(rec) {
+      $content.appendChild(buildRecordRow(rec, function(r) {
+        selectRecord(r, 'pick')
+      }))
+    })
+  }
+
+  function toggleSearch() {
+    searchOpen = !searchOpen
+    if (searchOpen) {
+      $subheader.style.display = 'none'
+      $searchBar.style.display = ''
+      $searchToggle.classList.add('active')
+      $searchToggle.innerHTML = SVG_X_ICO
+      $searchToggle.title = 'Close search'
+      showPickerSearchPlaceholder()
+      setTimeout(function() { try { $searchInput.focus() } catch(_) {} }, 50)
+    } else {
+      $subheader.style.display = ''
+      $searchBar.style.display = 'none'
+      $searchToggle.classList.remove('active')
+      $searchToggle.innerHTML = SVG_SEARCH_ICO
+      $searchToggle.title = 'Search all passwords'
+      $searchInput.value = ''
+      // Restore original URL-matched rows without rebuilding from scratch.
+      $content.innerHTML = ''
+      lastRecords.forEach(function(rec) {
+        $content.appendChild(buildRecordRow(rec, function(r) { selectRecord(r, 'pick') }))
+      })
     }
   }
 
@@ -720,7 +821,7 @@ body {
     urlEl.title = storedCanonical
 
     var pencilEl = null
-    if (rec.matchType !== 'search' && !rec.readonly) {
+    if (!rec.readonly) {
       var urlSaved = false
       pencilEl = document.createElement('button')
       pencilEl.className = 'rec-pencil'
@@ -759,6 +860,13 @@ body {
   }
 
   function showPickerContent(records) {
+    searchOpen = false
+    $searchBar.style.display = 'none'
+    $searchInput.value = ''
+    $searchToggle.classList.remove('active')
+    $searchToggle.innerHTML = SVG_SEARCH_ICO
+    $searchToggle.title = 'Search all passwords'
+    $searchToggle.style.display = ''
     $subheader.style.display = ''
     $content.innerHTML = ''
     records.forEach(function(rec) {
@@ -791,6 +899,7 @@ body {
   // ── Search fallback ────────────────────────────────────────────────────────
 
   function showSearchFallback(canSearch) {
+    hideSearchUI()
     $subheader.style.display = 'none'
     $content.innerHTML = ''
 
@@ -822,7 +931,7 @@ body {
 
     var hdr = document.createElement('div')
     hdr.className = 'pp-section-hdr'
-    hdr.textContent = 'RESULTS — CLICK TO AUTOFILL'
+    hdr.textContent = 'RESULTS'
     hdr.style.display = 'none'
     $content.appendChild(hdr)
 
@@ -863,7 +972,6 @@ body {
     if (placeholder) placeholder.style.display = 'none'
     records.forEach(function(rec) {
       $content.appendChild(buildRecordRow(rec, function(r) {
-        doSaveUrl(r.uuid, r.vaultUuid || null)
         selectRecord(r, 'norecords')
       }))
     })
@@ -936,7 +1044,10 @@ body {
     if      (msg.type === 'relay-records')        showPicker(msg.records)
     else if (msg.type === 'relay-record')         deliverFill(msg)
     else if (msg.type === 'relay-url-saved')      {}  // pencil save, no further action
-    else if (msg.type === 'relay-search-results') showSearchResults(msg.records)
+    else if (msg.type === 'relay-search-results') {
+      if (searchOpen) showPickerSearchResults(msg.records)
+      else showSearchResults(msg.records)
+    }
     else if (msg.type === 'relay-error')          sendError(msg.message)
   }
 

@@ -242,7 +242,7 @@ test.describe('Bookmarklet — relay phases and autofill', () => {
     const { login, bookmarkletUrl } = await setupAutofillTest(context)
     const relay = await activateBookmarklet(login, bookmarkletUrl)
     await expect(relay.locator('.pp-notice')).toBeVisible({ timeout: 5000 })
-    await expect(relay.locator('.pp-search')).toBeVisible()
+    await expect(relay.locator('.pp-search-wrap .pp-search')).toBeVisible()
   })
 
   test('single exact match auto-advances to waiting phase', async ({ context }) => {
