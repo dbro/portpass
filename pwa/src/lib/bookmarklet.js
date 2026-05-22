@@ -28,7 +28,10 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, PRIV_KEY_JWK, 
 
   ;(async function run() {
     try {
-      var pp = window.open(RELAY_URL, '_blank', 'popup=yes,width=360,height=480')
+      var ppW = 380, ppH = 520
+      var ppLeft = screen.width - ppW - 24
+      var pp = window.open(RELAY_URL, 'portpass_autofill',
+        'popup=yes,width=' + ppW + ',height=' + ppH + ',left=' + ppLeft + ',top=24')
       if (!pp) { showError('Portpass could not open — allow popups for this site'); return }
 
       // Wait for relay.html to signal it is ready to receive the init message.
