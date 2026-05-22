@@ -162,52 +162,94 @@
 
   // ── Autofill delegates ─────────────────────────────────────────────────────
   let delegates = $state([])
-  let newDelegateStep = $state(null) // null | 'form' | 'install'
+  let newDelegateOpen = $state(false)
   let newDelegateName = $state('')
+  let newDelegatePrivKeyJwk = $state(null)
+  let newDelegatePubKeySpki = $state(null)
+  let newDelegateId   = $state(null)
   let newDelegateUrl  = $state('')
   let newDelegateError = $state('')
   let newDelegateBusy  = $state(false)
-  let chipCopied = $state(false)
+  let newDelegateBirthAt = $state(null)
+  let chipCopied  = $state(false)
   let chipCopyTimer = null
+  let chipDragged = $state(false)
+  let chipLinked  = $state(false)  // persistent: set on copy, not reset by the feedback timer
+  let globeTipOpen = $state(false)
 
-  function openNewDelegate() {
-    newDelegateStep  = 'form'
-    newDelegateName  = ''
-    newDelegateUrl   = ''
-    newDelegateError = ''
-    chipCopied = false
+  let chipUsed   = $derived(chipDragged || chipLinked)
+  let canUseChip = $derived(!!newDelegateName.trim() && !!newDelegatePrivKeyJwk)
+  let canCommit  = $derived((!!newDelegateName.trim() || chipUsed) && !!newDelegatePrivKeyJwk && !newDelegateBusy)
+
+  function defaultDelegateName() {
+    return 'Bookmarklet created ' + new Date(newDelegateBirthAt ?? Date.now()).toLocaleString(
+      undefined, { month: 'short', day: 'numeric', year: 'numeric',
+                   hour: '2-digit', minute: '2-digit', second: '2-digit' }
+    )
   }
 
-  function closeNewDelegate() {
-    newDelegateStep  = null
-    newDelegateName  = ''
-    newDelegateUrl   = ''
+  async function openNewDelegate() {
+    newDelegateOpen = true
+    newDelegateName = ''
+    newDelegatePrivKeyJwk = null
+    newDelegatePubKeySpki = null
+    newDelegateId   = null
+    newDelegateUrl  = ''
     newDelegateError = ''
+    newDelegateBusy = false
+    newDelegateBirthAt = Date.now()
     chipCopied = false
-    clearTimeout(chipCopyTimer)
-  }
-
-  async function createDelegate() {
-    if (!newDelegateName.trim() || !_vaultUuid) return
-    newDelegateBusy  = true
-    newDelegateError = ''
+    chipDragged = false
+    chipLinked  = false
+    globeTipOpen = false
     try {
       const keyPair = await crypto.subtle.generateKey(
         { name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']
       )
-      const privKeyJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey)
-      const pubKeySpki = await crypto.subtle.exportKey('spki', keyPair.publicKey)
-      const delegate   = await addDelegate(_vaultUuid, newDelegateName.trim(), pubKeySpki)
-      delegates = [delegate, ...delegates]
-      newDelegateUrl  = makeDelegateBookmarkletUrl(
-        window.location.origin + import.meta.env.BASE_URL, privKeyJwk, delegate.id
+      newDelegatePrivKeyJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey)
+      newDelegatePubKeySpki = await crypto.subtle.exportKey('spki', keyPair.publicKey)
+      newDelegateId  = crypto.randomUUID()
+      newDelegateUrl = makeDelegateBookmarkletUrl(
+        window.location.origin + import.meta.env.BASE_URL, newDelegatePrivKeyJwk, newDelegateId
       )
-      newDelegateStep = 'install'
     } catch (e) {
-      newDelegateError = e.message || 'Failed to create delegate'
-    } finally {
+      newDelegateError = 'Failed to generate key pair'
+    }
+  }
+
+  function closeNewDelegate() {
+    newDelegateOpen = false
+    newDelegateName = ''
+    newDelegatePrivKeyJwk = null
+    newDelegatePubKeySpki = null
+    newDelegateId   = null
+    newDelegateUrl  = ''
+    newDelegateError = ''
+    chipCopied = false
+    chipDragged = false
+    chipLinked  = false
+    globeTipOpen = false
+    clearTimeout(chipCopyTimer)
+  }
+
+  async function commitDelegate() {
+    if (!_vaultUuid || !newDelegatePubKeySpki || !newDelegateId) return
+    const name = newDelegateName.trim() || defaultDelegateName()
+    newDelegateBusy  = true
+    newDelegateError = ''
+    try {
+      const delegate = await addDelegate(_vaultUuid, name, newDelegatePubKeySpki, newDelegateId)
+      delegates = [delegate, ...delegates]
+      closeNewDelegate()
+    } catch (e) {
+      newDelegateError = e.message || 'Failed to save bookmarklet'
       newDelegateBusy = false
     }
+  }
+
+  async function cancelOrSave() {
+    if (chipUsed) await commitDelegate()
+    else closeNewDelegate()
   }
 
   async function revokeOne(delegateId) {
@@ -247,8 +289,9 @@
   function copyChip() {
     navigator.clipboard.writeText(newDelegateUrl).then(() => {
       chipCopied = true
+      chipLinked  = true
       clearTimeout(chipCopyTimer)
-      chipCopyTimer = setTimeout(() => { chipCopied = false }, 2000)
+      chipCopyTimer = setTimeout(() => { chipCopied = false }, 2200)
     })
   }
 
@@ -647,54 +690,74 @@
 {/if}
 
 <!-- ── New delegate modal ─────────────────────────────────────────────────── -->
-{#if newDelegateStep}
+{#if newDelegateOpen}
   <div class="modal-overlay" role="presentation"
-    onclick={e => { e.stopPropagation(); if (!newDelegateBusy) closeNewDelegate() }}
-    onkeydown={e => { if (e.key === 'Escape' && !newDelegateBusy) closeNewDelegate() }}>
-    <div class="modal" role="dialog" aria-modal="true" tabindex="-1" onclick={e => e.stopPropagation()} onkeydown={e => e.stopPropagation()}>
-      {#if newDelegateStep === 'form'}
+    onclick={e => { e.stopPropagation(); if (!newDelegateBusy) cancelOrSave() }}
+    onkeydown={e => { if (e.key === 'Escape' && !newDelegateBusy) cancelOrSave() }}>
+    <div class="modal modal-install" role="dialog" aria-modal="true" tabindex="-1" onclick={e => e.stopPropagation()} onkeydown={e => e.stopPropagation()}>
+      <div class="vs-modal-header">
         <div class="modal-title">New autofill bookmarklet</div>
-        <p class="modal-desc muted">Name this bookmarklet to identify which browser or profile it belongs to.</p>
-        <label class="vault-field" style="margin-bottom:12px">
-          <span class="vault-label muted">Name</span>
-          <input
-            class="input"
-            bind:value={newDelegateName}
-            placeholder="e.g. Chrome — work profile"
-            onkeydown={e => { if (e.key === 'Enter' && newDelegateName.trim() && !newDelegateBusy) createDelegate() }}
-            use:focusOnMount
-          />
-        </label>
-        {#if newDelegateError}<div class="unlock-error" style="font-size:13px">{newDelegateError}</div>{/if}
-        <div class="modal-actions">
-          <button class="btn btn-ghost" onclick={closeNewDelegate}>Cancel</button>
-          <button class="btn btn-primary" disabled={!newDelegateName.trim() || newDelegateBusy} onclick={createDelegate}>
-            {newDelegateBusy ? 'Creating…' : 'Create'}
-          </button>
-        </div>
-      {:else}
-        <div class="modal-title">Install autofill bookmarklet</div>
-        <p class="modal-desc muted">Drag to your bookmarks bar. The private key is in this link and won't be shown again.</p>
-        <div class="vs-bookmarklet-row" style="margin-bottom:8px">
+        <button class="vs-modal-x" onclick={() => { if (!newDelegateBusy) cancelOrSave() }} aria-label="Cancel">
+          <Icon name="x" size={18}/>
+        </button>
+      </div>
+      <label class="vault-field" style="margin-bottom:4px">
+        <span class="vault-label muted">Name</span>
+        <input
+          class="input"
+          bind:value={newDelegateName}
+          placeholder="e.g. Chrome — work profile"
+          onkeydown={e => { if (e.key === 'Enter' && canCommit) commitDelegate() }}
+          use:focusOnMount
+        />
+      </label>
+      {#if newDelegateError}<div class="unlock-error" style="font-size:13px">{newDelegateError}</div>{/if}
+      <div class="vs-install-grid">
+        <div class="vs-install-col vs-install-col-drag">
+          <span class="vs-install-col-label">BOOKMARKS BAR VISIBLE</span>
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <a
             class="vs-bookmarklet-chip"
-            href={newDelegateUrl}
-            draggable="true"
+            class:chip-inactive={!canUseChip}
+            href={newDelegateUrl || '#'}
+            draggable={canUseChip ? 'true' : 'false'}
             onclick={e => e.preventDefault()}
-            title="Drag to your bookmarks bar"
+            ondragstart={() => { chipDragged = true }}
+            title={canUseChip ? 'Drag to your bookmarks bar' : 'Enter a name first'}
             aria-label="Portpass autofill bookmarklet — drag to your bookmarks bar"
           >
             <img src="{import.meta.env.BASE_URL}icon.svg" width="16" height="16" alt="" aria-hidden="true" draggable="false">
-            {newDelegateName}
+            {newDelegateName || 'Enter a name above'}
           </a>
-          <button class="vs-copy-btn" onclick={copyChip}>{chipCopied ? 'Copied!' : 'Copy link'}</button>
+          <span class="vs-install-col-hint">Drag to your bookmarks bar</span>
         </div>
-        <p class="muted" style="font-size:12px;margin:0 0 16px">Drag to bookmarks bar · Copy if bar is hidden</p>
-        <div class="modal-actions">
-          <button class="btn btn-primary" onclick={closeNewDelegate}>Done</button>
+        <div class="vs-install-col vs-install-col-copy">
+          <span class="vs-install-col-label">BAR HIDDEN</span>
+          <button class="vs-copy-link-btn" class:copied={chipCopied} disabled={!canUseChip} onclick={copyChip}>
+            <Icon name={chipCopied ? 'check' : 'copy'} size={15}/>
+            {chipCopied ? 'Copied!' : 'Copy link'}
+          </button>
+          <span class="vs-install-col-hint">Add a bookmark manually and paste the link</span>
+        </div>
+      </div>
+      <button class="vs-globe-tip-toggle" onclick={() => globeTipOpen = !globeTipOpen}>
+        <span class="vs-globe-tip-arrow" class:open={globeTipOpen}>▶</span>
+        Bookmark showing a generic icon instead of the Portpass logo?
+      </button>
+      {#if globeTipOpen}
+        <div class="vs-globe-tip-body">
+          Bookmark this page normally first (⌘D / Ctrl+D), then right-click the bookmark → <strong>Edit bookmark</strong> → paste this link as the URL.
         </div>
       {/if}
+      <div class="vs-install-warning">
+        <Icon name="alert-triangle" size={28}/>
+        <span>The bookmarklet contains a unique private key that will not be shown again. Drag it to your bookmarks bar or copy the link before closing.</span>
+      </div>
+      <div style="margin-top:8px">
+        <button class="vs-close-btn" disabled={!canCommit} onclick={commitDelegate}>
+          {newDelegateBusy ? 'Saving…' : 'Save and Close'}
+        </button>
+      </div>
     </div>
   </div>
 {/if}
@@ -1212,12 +1275,87 @@
   .switchboard-status-dot.switchboard-ok    { background: #4caf50; }
   .switchboard-status-dot.switchboard-error { background: var(--text-soft); }
 
-  /* ── Bookmarklet chip (used in delegate install modal) ───────────────────── */
-  .vs-bookmarklet-row {
+  /* ── Bookmarklet install modal ───────────────────────────────────────────── */
+  :global(.modal.modal-install) { max-width: 425px; }
+
+  .vs-modal-header {
     display: flex;
     align-items: center;
+    justify-content: space-between;
+  }
+
+  .vs-modal-x {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    border-radius: 6px;
+    padding: 0;
+    flex-shrink: 0;
+    font-family: inherit;
+  }
+  .vs-modal-x:hover { color: var(--text); background: var(--surface-2); }
+
+  .vs-bookmarklet-chip.chip-inactive {
+    opacity: 0.4;
+    cursor: default;
+    pointer-events: none;
+  }
+
+  .vs-copy-link-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .vs-close-btn:disabled     { opacity: 0.45; cursor: not-allowed; }
+  .vs-install-warning {
+    display: flex;
+    gap: 9px;
+    align-items: flex-start;
+    background: var(--orange-bg-strong);
+    border: 1px solid var(--orange);
+    border-radius: 8px;
+    padding: 9px 12px;
+    font-size: 13px;
+    color: var(--orange);
+    margin-bottom: 14px;
+    line-height: 1.4;
+  }
+  .vs-install-warning svg { flex-shrink: 0; margin-top: 1px; }
+
+  .vs-install-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 10px;
-    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+
+  .vs-install-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    border-radius: 11px;
+    background: var(--surface);
+    padding: 16px 12px;
+  }
+  .vs-install-col-drag { border: 1.5px dashed var(--border-strong); }
+  .vs-install-col-copy { border: 1.5px solid var(--border-strong); }
+
+  .vs-install-col-label {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    color: var(--text-soft);
+    text-transform: uppercase;
+  }
+
+  .vs-install-col-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-align: center;
+    line-height: 1.4;
   }
 
   .vs-bookmarklet-chip {
@@ -1236,24 +1374,71 @@
     user-select: none;
     transition: border-color 0.15s, background 0.15s;
   }
-
   .vs-bookmarklet-chip:hover {
     border-color: var(--accent);
     background: var(--surface);
     color: var(--accent);
   }
-
   .vs-bookmarklet-chip:active { cursor: grabbing; }
 
-  .vs-copy-btn {
+  .vs-copy-link-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 18px;
+    border: 1.5px solid var(--amber);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--amber);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: border-color 0.2s, color 0.2s;
+  }
+  .vs-copy-link-btn:hover { opacity: 0.85; }
+  .vs-copy-link-btn.copied { border-color: var(--success); color: var(--success); }
+
+  .vs-globe-tip-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     background: none;
     border: none;
     cursor: pointer;
-    font-size: 14px;
-    color: var(--accent);
-    padding: 4px 2px;
-    font-weight: 500;
-    flex-shrink: 0;
+    font-size: 12px;
+    color: var(--text-soft);
+    padding: 4px 0;
+    font-family: inherit;
+    text-align: left;
+    width: 100%;
+    margin-bottom: 2px;
   }
-  .vs-copy-btn:hover { text-decoration: underline; }
+  .vs-globe-tip-arrow {
+    display: inline-block;
+    font-size: 10px;
+    transition: transform 0.15s;
+  }
+  .vs-globe-tip-arrow.open { transform: rotate(90deg); }
+
+  .vs-globe-tip-body {
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 4px 0 12px 16px;
+    line-height: 1.5;
+  }
+
+  .vs-close-btn {
+    width: 100%;
+    padding: 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .vs-close-btn:hover { background: var(--surface); }
 </style>

@@ -26,10 +26,10 @@ export async function getDelegates(vaultUuid) {
   return (all[vaultUuid] ?? []).map(migrate)
 }
 
-export async function addDelegate(vaultUuid, name, publicKeySpki) {
+export async function addDelegate(vaultUuid, name, publicKeySpki, id = crypto.randomUUID()) {
   const all = await load()
   const delegate = {
-    id: crypto.randomUUID(),
+    id,
     name,
     publicKey: Array.from(new Uint8Array(publicKeySpki)),
     created: Date.now(),

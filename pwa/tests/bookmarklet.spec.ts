@@ -23,12 +23,10 @@ async function createDelegateBookmarklet(portpass: Page): Promise<string> {
 
   await portpass.getByRole('button', { name: '+ New bookmarklet' }).click()
   await portpass.getByPlaceholder('e.g. Chrome — work profile').fill('test')
-  await portpass.getByRole('button', { name: 'Create' }).click()
-
-  await portpass.locator('.vs-bookmarklet-chip').waitFor({ timeout: 5000 })
+  await portpass.locator('.vs-bookmarklet-chip:not(.chip-inactive)').waitFor({ timeout: 5000 })
   const url = await portpass.locator('.vs-bookmarklet-chip').getAttribute('href') ?? ''
 
-  await portpass.getByRole('button', { name: 'Done' }).click()
+  await portpass.locator('.vs-close-btn').click()
   await portpass.keyboard.press('Escape')
   await expect(portpass.locator('.vault-settings-body')).not.toBeVisible({ timeout: 3000 })
 
