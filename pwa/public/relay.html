@@ -133,6 +133,41 @@ body {
 }
 .pp-error-action:hover { text-decoration: underline }
 
+/* ── Autotype chip display (waiting phase) ── */
+.pp-chips-row {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
+  gap: 5px; padding: 8px 12px; max-width: 100%;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.pp-chip {
+  display: inline-flex; align-items: center; gap: 2px;
+  border-radius: 100px; padding: 3px 8px;
+  font-size: 11px; font-weight: 500; white-space: nowrap;
+}
+.pp-chip-field   { background: var(--amber-bg); color: var(--amber); font-weight: 600 }
+.pp-chip-nav     { background: var(--surface);  color: var(--text-muted) }
+.pp-chip-literal { border: 1px solid var(--border); color: var(--text);
+                   font-family: ui-monospace, monospace; font-weight: 400 }
+.pp-chip-wait    { border: 1px solid var(--border); color: var(--text-muted) }
+.pp-chip-unknown { border: 1.5px solid var(--orange); color: var(--orange) }
+.pp-chip-error   { border: 1.5px solid var(--red);    color: var(--red) }
+.pp-chip-sep     { color: var(--text-soft); font-size: 11px; user-select: none }
+.pp-chip-suffix  { font-size: 9px; opacity: 0.55 }
+
+/* ── View-in-Portpass link (below amber banner) ── */
+.pp-view-link-bar {
+  display: flex; justify-content: flex-end;
+  padding: 5px 14px; flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+.pp-view-link {
+  font-size: 11px; color: var(--text-soft);
+  background: none; border: none; cursor: pointer;
+  font-family: inherit; padding: 0;
+}
+.pp-view-link:hover { color: var(--text-muted) }
+
 /* ── Footer (waiting phase) ── */
 .pp-footer {
   display: flex; justify-content: space-between; align-items: center;
@@ -501,7 +536,7 @@ body {
     previousPhase = fromPhase   // null → no Back button
     fieldClicked = false
     pendingCredentials = null
-    showWaiting()
+    showWaiting(rec.autotype || null)
 
     if (isSameProfile) {
       // Fetch credentials asynchronously; pendingFill() triggers when both are ready.
@@ -569,11 +604,28 @@ body {
     return row
   }
 
-  function showWaiting() {
+  function makeViewLinkBar() {
+    var bar = document.createElement('div')
+    bar.className = 'pp-view-link-bar'
+    var btn = document.createElement('button')
+    btn.className = 'pp-view-link'
+    btn.textContent = 'Show in Portpass Tab'
+    btn.onclick = function() {
+      if (chosen) {
+        ch.postMessage({ type: 'relay-view-record', uuid: chosen.uuid, vaultUuid: chosen.vaultUuid || null, nonce: relayNonce })
+      }
+      window.close()
+    }
+    bar.appendChild(btn)
+    return bar
+  }
+
+  function showWaiting(autotype) {
     hideSearchUI()
     $subheader.style.display = 'none'
     $content.innerHTML = ''
     $content.appendChild(makeSelectedRecordRow(chosen))
+    $content.appendChild(makeViewLinkBar())
 
     var center = document.createElement('div')
     center.className = 'pp-phase-center'
@@ -588,11 +640,15 @@ body {
 
     var sub = document.createElement('div')
     sub.className = 'pp-waiting-sub'
-    sub.textContent = 'Click any username or password field on the page'
+    sub.textContent = autotype ? waitingSubText(autotype) : 'Click any username or password field on the page'
 
     center.appendChild(illus)
     center.appendChild(title)
     center.appendChild(sub)
+    if (autotype) {
+      var chips = buildSequenceChips(autotype)
+      if (chips) center.appendChild(chips)
+    }
     $content.appendChild(center)
 
     // Footer with Back (if applicable) and Cancel
@@ -1041,14 +1097,14 @@ body {
   function onBCMessage(e) {
     var msg = e.data
     if (!msg || msg.nonce !== relayNonce) return
-    if      (msg.type === 'relay-records')        showPicker(msg.records)
-    else if (msg.type === 'relay-record')         deliverFill(msg)
-    else if (msg.type === 'relay-url-saved')      {}  // pencil save, no further action
+    if      (msg.type === 'relay-records')           showPicker(msg.records)
+    else if (msg.type === 'relay-record')            deliverFill(msg)
+    else if (msg.type === 'relay-url-saved')         {}  // pencil save, no further action
     else if (msg.type === 'relay-search-results') {
       if (searchOpen) showPickerSearchResults(msg.records)
       else showSearchResults(msg.records)
     }
-    else if (msg.type === 'relay-error')          sendError(msg.message)
+    else if (msg.type === 'relay-error')             sendError(msg.message)
   }
 
   async function deliverFill(msg) {
@@ -1058,6 +1114,7 @@ body {
       var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, sessionKey, ct)
       var fields = JSON.parse(new TextDecoder().decode(pt))
       pendingCredentials = { autotype: msg.autotype, fields: fields, sensitiveCodes: msg.sensitiveCodes || [] }
+      updateWaitingWithAutotype(msg.autotype)
       pendingFill()
     } catch(_) { sendError('Failed to decrypt credentials') }
   }
@@ -1103,6 +1160,95 @@ body {
       }
     }
     return false
+  }
+
+  function parseAutotypeTokens(seq) {
+    if (!seq) return []
+    var toks = [], lit = '', i = 0
+    function fl() { if (lit) { toks.push({ type: 'literal', label: lit }); lit = '' } }
+    while (i < seq.length) {
+      if (seq[i] !== '\\') { lit += seq[i++]; continue }
+      if (i + 1 >= seq.length) { fl(); toks.push({ type: 'error', label: 'trailing \\' }); break }
+      var c = seq[i + 1]
+      if (c === '\\') { lit += '\\'; i += 2; continue }
+      fl()
+      if      (c === 'u') { toks.push({ type: 'field', label: 'Username' }); i += 2 }
+      else if (c === 'p') { toks.push({ type: 'field', label: 'Password' }); i += 2 }
+      else if (c === 'm') { toks.push({ type: 'field', label: 'Email' }); i += 2 }
+      else if (c === '2') { toks.push({ type: 'field', label: 'One-time code' }); i += 2 }
+      else if (c === 't') { toks.push({ type: 'nav', label: 'Tab', suffix: '→' }); i += 2 }
+      else if (c === 's') { toks.push({ type: 'nav', label: 'Shift-Tab', suffix: '←' }); i += 2 }
+      else if (c === 'n') { toks.push({ type: 'nav', label: 'Enter', suffix: '↵' }); i += 2 }
+      else if (c === 'f') {
+        var d = seq[i + 2]
+        if (d !== undefined && /^[0-9]$/.test(d)) {
+          var n = parseInt(d)
+          if (n === 0) { toks.push({ type: 'error', label: '\\f0 invalid' }); i += 3 }
+          else { toks.push({ type: 'field', label: 'Custom ' + n }); i += 3 }
+        } else { toks.push({ type: 'field', label: 'Custom 1' }); i += 2 }
+      } else if (c === 'w' || c === 'W') {
+        var j = i + 2, cnt = 0
+        while (j < seq.length && cnt < 3 && /^[0-9]$/.test(seq[j])) { j++; cnt++ }
+        if (cnt === 0) { toks.push({ type: 'error', label: '\\' + c + ' no digits' }); i += 2 }
+        else { toks.push({ type: 'wait', label: 'Wait ' + seq.slice(i + 2, j) + (c === 'w' ? 'ms' : 's') }); i = j }
+      } else { toks.push({ type: 'unknown', label: 'Unknown \\' + c }); i += 2 }
+    }
+    fl()
+    return toks
+  }
+
+  function waitingSubText(seq) {
+    var toks = parseAutotypeTokens(seq)
+    if (!toks.length) return 'Click the field where the autofill will begin'
+    var first = toks[0]
+    if (first.type === 'field') {
+      var names = { 'Username': 'the username', 'Password': 'the password',
+                    'Email': 'the email address', 'One-time code': 'the one-time code' }
+      var name = names[first.label] || first.label.toLowerCase()
+      return 'Click the field to fill in ' + name
+    }
+    return 'Click the field where the autofill will begin'
+  }
+
+  function buildSequenceChips(seq) {
+    var toks = parseAutotypeTokens(seq)
+    if (!toks.length) return null
+    var wrap = document.createElement('div')
+    wrap.className = 'pp-chips-row'
+    toks.forEach(function(tok, idx) {
+      var chip = document.createElement('span')
+      chip.className = 'pp-chip pp-chip-' + tok.type
+      if (tok.type === 'error')   chip.textContent = '✕ ' + tok.label
+      else if (tok.type === 'unknown') chip.textContent = '⚠ ' + tok.label
+      else if (tok.suffix) {
+        chip.appendChild(document.createTextNode(tok.label + ' '))
+        var sfx = document.createElement('span')
+        sfx.className = 'pp-chip-suffix'
+        sfx.textContent = tok.suffix
+        chip.appendChild(sfx)
+      } else {
+        chip.textContent = tok.label
+      }
+      wrap.appendChild(chip)
+      if (idx < toks.length - 1) {
+        var sep = document.createElement('span')
+        sep.className = 'pp-chip-sep'
+        sep.textContent = '→'
+        wrap.appendChild(sep)
+      }
+    })
+    return wrap
+  }
+
+  function updateWaitingWithAutotype(autotype) {
+    var sub = $content.querySelector('.pp-waiting-sub')
+    if (!sub) return
+    sub.textContent = waitingSubText(autotype)
+    var center = $content.querySelector('.pp-phase-center')
+    if (center && !center.querySelector('.pp-chips-row')) {
+      var chips = buildSequenceChips(autotype)
+      if (chips) center.appendChild(chips)
+    }
   }
 
   function canonicalURL(href) {

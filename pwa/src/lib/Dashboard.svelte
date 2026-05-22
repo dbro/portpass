@@ -636,6 +636,10 @@
         }
       }
 
+      if (msg.type === 'relay-view-record') {
+        if (msg.uuid) selectRecord(msg.uuid, msg.vaultUuid || null)
+      }
+
       if (msg.type === 'relay-search') {
         if (!relaySessionKey) {
           ch.postMessage({ type: 'relay-error', message: 'No secure session', nonce: msg.nonce })

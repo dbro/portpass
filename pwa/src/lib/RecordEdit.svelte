@@ -749,7 +749,7 @@
         {/if}
 
       {:else}
-        <input class="input mono" value={draft.Autotype}
+        <input class="input mono autotype-input" value={draft.Autotype}
           placeholder="\u\t\p\n"
           oninput={e => set('Autotype', e.target.value)}
           autocomplete="off" spellcheck="false"/>
