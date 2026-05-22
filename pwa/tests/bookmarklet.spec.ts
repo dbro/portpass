@@ -67,13 +67,16 @@ async function setupAutofillTest(context: BrowserContext): Promise<{ login: Page
 
 // Create a record in portpass and open its detail view.
 async function createRecord(portpass: Page, opts: {
-  title: string, username?: string, password?: string, autotype: string
+  title: string, username?: string, password?: string, autotype: string, url?: string
 }) {
   await portpass.getByRole('button', { name: 'New', exact: true }).click()
   await portpass.getByPlaceholder('e.g. Bank of America').fill(opts.title)
   await portpass.locator('input.mono').first().fill(opts.password ?? 'secret')
   if (opts.username) {
     await portpass.locator('input.input').nth(2).fill(opts.username)
+  }
+  if (opts.url) {
+    await portpass.getByLabel('URL').fill(opts.url)
   }
   await portpass.locator('.autotype-input').fill(opts.autotype)
   await portpass.getByRole('button', { name: 'Save' }).click()
@@ -82,8 +85,11 @@ async function createRecord(portpass: Page, opts: {
 
 // Run the bookmarklet on the login page. Opens the relay popup, drives the picker
 // (selecting the first record), and waits for the popup to close.
-// For error cases the popup closes automatically; the caller then checks login page state.
-async function activateBookmarklet(login: Page, bookmarkletUrl: string) {
+// Returns the relay Page so callers can inspect its contents for no-match / error cases.
+async function activateBookmarklet(
+  login: Page, bookmarkletUrl: string, opts: { clickRow?: boolean } = {}
+): Promise<Page> {
+  const { clickRow = true } = opts
   const context = login.context()
   const popupPromise = context.waitForEvent('page')
 
@@ -93,16 +99,15 @@ async function activateBookmarklet(login: Page, bookmarkletUrl: string) {
   const relay = await popupPromise
   await relay.waitForLoadState('domcontentloaded')
 
-  // Wait for: picker rows, popup close, or error overlay on login page.
-  // The error overlay check covers the case where the popup stays open (debug close
-  // timeout) but the error message has already been forwarded to the login page.
+  // Wait for: picker rows, no-match notice, popup close, or error overlay on login page.
   const which = await Promise.race([
     relay.locator('.rec-row').first().waitFor({ timeout: 10000 }).then(() => 'picker').catch(() => 'timeout'),
+    relay.locator('.pp-notice').first().waitFor({ timeout: 10000 }).then(() => 'no-match').catch(() => 'timeout'),
     relay.waitForEvent('close', { timeout: 10000 }).then(() => 'closed').catch(() => 'timeout'),
     login.locator('#__pp').waitFor({ timeout: 10000 }).then(() => 'error').catch(() => 'timeout'),
   ])
 
-  if (which === 'picker') {
+  if (which === 'picker' && clickRow) {
     // Click the first record row — single click triggers autofill immediately.
     await relay.locator('.rec-row').first().click()
     // Wait for relay to close after delivering the fill command.
@@ -112,6 +117,7 @@ async function activateBookmarklet(login: Page, bookmarkletUrl: string) {
   // Give the browser one animation frame so any fill overlay or error overlay on the
   // login page is guaranteed to be mounted before the test makes assertions.
   await login.evaluate(() => new Promise(r => requestAnimationFrame(r)))
+  return relay
 }
 
 test.setTimeout(30000)
@@ -252,12 +258,55 @@ test.describe('Bookmarklet — overlay and autofill', () => {
     await expect(login.locator('#__pp')).toHaveCount(0)
   })
 
-  test('error shown when no record is selected in Portpass', async ({ context }) => {
+  test('search fallback shown when no URL matches in Portpass', async ({ context }) => {
     const { login, bookmarkletUrl } = await setupAutofillTest(context)
-    // Vault is open but no record is selected.
+    // Vault is open but no records match the login page URL.
 
-    await activateBookmarklet(login, bookmarkletUrl)
-    await expect(login.locator('#__pp')).toContainText('No matching passwords found')
+    const relay = await activateBookmarklet(login, bookmarkletUrl)
+    // New behaviour: relay shows the search fallback (notice bar + search input)
+    // instead of an error overlay on the login page.
+    await expect(relay.locator('.pp-notice')).toBeVisible({ timeout: 5000 })
+    await expect(relay.locator('.pp-search')).toBeVisible()
+  })
+
+  test('exact match row shows ✓ match badge and no pencil button', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await createRecord(portpass, {
+      title: 'Login Site', autotype: '\\u\\t\\p', url: LOGIN_URL,
+    })
+
+    const relay = await activateBookmarklet(login, bookmarkletUrl, { clickRow: false })
+    await expect(relay.locator('.rec-match-badge')).toBeVisible({ timeout: 5000 })
+    await expect(relay.locator('.rec-pencil')).not.toBeVisible()
+  })
+
+  test('fuzzy match row shows URL text and pencil button', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await createRecord(portpass, {
+      title: 'Other Page', autotype: '\\u\\t\\p',
+      url: 'http://localhost:5173/different-path',  // same host, different path → fuzzy
+    })
+
+    const relay = await activateBookmarklet(login, bookmarkletUrl, { clickRow: false })
+    await relay.locator('.rec-row').first().waitFor({ timeout: 5000 })
+    await expect(relay.locator('.rec-url').first()).toBeVisible()
+    await expect(relay.locator('.rec-pencil').first()).toBeVisible()
+  })
+
+  test('record name and URL have title attributes for overflow tooltip', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await createRecord(portpass, {
+      title: 'A Very Long Record Name That Will Overflow The Column',
+      autotype: '\\u\\t\\p',
+      url: 'http://localhost:5173/a-very-long-path-that-will-overflow',
+    })
+
+    const relay = await activateBookmarklet(login, bookmarkletUrl, { clickRow: false })
+    await relay.locator('.rec-row').first().waitFor({ timeout: 5000 })
+    const nameTitle = await relay.locator('.rec-name').first().getAttribute('title')
+    const urlTitle  = await relay.locator('.rec-url').first().getAttribute('title')
+    expect(nameTitle).toBe('A Very Long Record Name That Will Overflow The Column')
+    expect(urlTitle).toBeTruthy()
   })
 
   test('record without autotype sequence uses the default and shows overlay', async ({ context }) => {

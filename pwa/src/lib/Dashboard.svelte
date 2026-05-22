@@ -127,18 +127,23 @@
   function autofillFindRecords(queryUrl) {
     const canonical = canonicalURL(queryUrl)
     const allVaults = [
-      { uuid: dbKey, items: get(dbItems) },
-      ...get(secondaryVaults).map(v => ({ uuid: v.uuid, items: v.items || [] })),
+      { uuid: dbKey, items: get(dbItems), readonly: get(selectedFile)?.readonly || false },
+      ...get(secondaryVaults).map(v => ({ uuid: v.uuid, items: v.items || [], readonly: v.readonly || false })),
     ]
+
+    // Build a uuid→readonly lookup for the selected-record case below.
+    const roMap = {}
+    for (const v of allVaults) roMap[v.uuid] = v.readonly
 
     // Exact URL match (mode 2)
     const exact = []
-    for (const { uuid: vaultUuid } of allVaults) {
+    for (const { uuid: vaultUuid, readonly } of allVaults) {
       try {
         for (const uuid of searchRecords(vaultUuid, canonical, 2)) {
           const rec = getRecordData(vaultUuid, uuid)
           exact.push({ uuid, vaultUuid: vaultUuid === dbKey ? null : vaultUuid,
-            title: rec.Title, existingUrl: rec.URL, isCurrent: uuid === selectedUUID, matchType: 'exact' })
+            title: rec.Title, existingUrl: rec.URL, isCurrent: uuid === selectedUUID,
+            matchType: 'exact', readonly })
         }
       } catch {}
     }
@@ -149,11 +154,13 @@
     const candidates = []
 
     if (selectedUUID && record) {
+      const svUuid = selectedVaultUuid || dbKey
       candidates.push({ uuid: selectedUUID, vaultUuid: selectedVaultUuid,
-        title: record.Title, existingUrl: record.URL, isCurrent: true, matchType: 'current', _d: -1 })
+        title: record.Title, existingUrl: record.URL, isCurrent: true, matchType: 'current',
+        readonly: roMap[svUuid] || false, _d: -1 })
     }
 
-    for (const { uuid: vaultUuid, items } of allVaults) {
+    for (const { uuid: vaultUuid, items, readonly } of allVaults) {
       for (const item of items) {
         if (item.uuid === selectedUUID) continue
         const itemHost = canonicalURL(item.url || '').split('/')[0]
@@ -161,7 +168,8 @@
         const d = levenshtein(queryHost, itemHost)
         if (d <= 5)
           candidates.push({ uuid: item.uuid, vaultUuid: vaultUuid === dbKey ? null : vaultUuid,
-            title: item.title, existingUrl: item.url, isCurrent: false, matchType: 'fuzzy', _d: d })
+            title: item.title, existingUrl: item.url, isCurrent: false, matchType: 'fuzzy',
+            readonly, _d: d })
       }
     }
 
@@ -626,6 +634,30 @@
         } catch (e) {
           ch.postMessage({ type: 'relay-error', message: e.message, nonce: msg.nonce })
         }
+      }
+
+      if (msg.type === 'relay-search') {
+        if (!relaySessionKey) {
+          ch.postMessage({ type: 'relay-error', message: 'No secure session', nonce: msg.nonce })
+          return
+        }
+        const allVaults = [
+          { uuid: dbKey, readonly: get(selectedFile)?.readonly || false },
+          ...get(secondaryVaults).map(v => ({ uuid: v.uuid, readonly: v.readonly || false })),
+        ]
+        const results = []
+        for (const { uuid: vaultUuid, readonly } of allVaults) {
+          try {
+            for (const recUuid of searchRecords(vaultUuid, msg.query || '', 0)) {
+              const rec = getRecordData(vaultUuid, recUuid)
+              results.push({ uuid: recUuid,
+                vaultUuid: vaultUuid === dbKey ? null : vaultUuid,
+                title: rec.Title, existingUrl: rec.URL || '',
+                matchType: 'search', readonly })
+            }
+          } catch {}
+        }
+        ch.postMessage({ type: 'relay-search-results', records: results, nonce: msg.nonce })
       }
     }
 

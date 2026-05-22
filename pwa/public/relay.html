@@ -7,83 +7,144 @@
 <link rel="icon" href="icon.svg">
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0 }
+:root {
+  /* defaults — dark theme. overridden by JS from localStorage. */
+  --bg: #14161a; --surface: #1c1f24; --surface-2: #262a31;
+  --border: #2c3038; --text: #f1ede4; --text-muted: #a6a39b;
+  --text-soft: #757279; --amber: #d4953d; --amber-bg: #2e2010;
+  --success: #6cba8a; --green-bg: #1a3025;
+}
 body {
   font-family: system-ui, -apple-system, sans-serif;
-  font-size: 14px;
-  background: #1a1d21;
-  color: #f1ede4;
-  height: 100dvh;
+  font-size: 14px; background: var(--bg); color: var(--text);
+  height: 100dvh; overflow: hidden;
 }
-#app {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  padding: 14px;
-  gap: 8px;
+#app { height: 100%; display: flex; flex-direction: column; }
+#pp-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 14px; height: 46px; flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
 }
-#brand {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid #2e3240;
-  margin-bottom: 2px;
-  flex-shrink: 0;
+#pp-header img { width: 22px; height: 22px; border-radius: 5px }
+#pp-header .pp-brand { font-weight: 600; font-size: 15px }
+#pp-subheader {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 14px; height: 36px; flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
 }
-#brand img { width: 24px; height: 24px }
-#brand span { font-weight: 600; font-size: 15px; letter-spacing: 0.01em }
-#header { font-weight: 600; padding-bottom: 2px }
-#status { font-size: 13px; color: #888 }
-#records {
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.pp-action-label {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--text-muted); flex-shrink: 0;
 }
+.pp-current-url {
+  font-family: ui-monospace, monospace; font-size: 11px;
+  color: var(--text-soft); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; max-width: 200px;
+}
+#pp-content { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
 .rec-row {
-  padding: 8px 10px;
-  border-radius: 6px;
-  background: #252830;
-  cursor: pointer;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px 8px 10px; cursor: pointer;
+  border-bottom: 1px solid var(--border); min-height: 40px;
 }
-.rec-row:hover { background: #2e3240 }
-.rec-title-row {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
+.rec-row:hover { background: var(--surface-2) }
+.rec-marker { width: 16px; flex-shrink: 0; display: flex; align-items: center }
+.rec-name {
+  flex: 1; min-width: 0; font-weight: 600; font-size: 13px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.rec-title {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.rec-url {
+  width: 150px; flex-shrink: 0; font-family: ui-monospace, monospace;
+  font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-muted);
 }
-.rec-badge { font-size: 11px; color: #8db8ff; flex-shrink: 0 }
-label.rec-replace {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  cursor: pointer;
-  margin: 6px 0 0 0;
+.rec-url.url-saved { color: var(--text-muted) }
+.rec-match-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: 100px;
+  background: var(--amber-bg); color: var(--amber);
+  font-size: 12px; font-weight: 600; flex-shrink: 0; white-space: nowrap;
 }
-label.rec-replace span { font-size: 11px; color: #aaa }
-.err { color: #e06c75; font-size: 13px }
+.rec-pencil {
+  width: 22px; height: 22px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: 5px;
+  background: var(--surface-2); cursor: pointer; color: var(--text-muted);
+}
+.rec-pencil:hover { border-color: var(--text-muted) }
+.rec-pencil.pencil-saved {
+  border-color: var(--success); background: var(--green-bg); color: var(--success);
+}
+.pp-notice {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px; font-size: 11px; color: var(--text-muted);
+  background: var(--surface-2); border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.pp-search-wrap {
+  padding: 10px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.pp-search {
+  width: 100%; padding: 8px 10px; background: var(--surface);
+  border: 1.5px solid var(--border); border-radius: 8px;
+  color: var(--text); font-family: inherit; font-size: 13px; outline: none;
+}
+.pp-search:focus { border-color: var(--amber) }
+.pp-section-hdr {
+  padding: 5px 14px; font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
+  color: var(--text-soft); border-bottom: 1px solid var(--border);
+  text-transform: uppercase; flex-shrink: 0;
+}
+.pp-placeholder {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 6px; color: var(--text-muted);
+  font-size: 13px; padding: 24px; text-align: center;
+}
+.pp-status { padding: 12px 14px; font-size: 13px; color: var(--text-muted) }
+.pp-error  { padding: 12px 14px; font-size: 13px; color: #e06c75 }
 </style>
 </head>
 <body>
 <div id="app">
-  <div id="brand">
+  <div id="pp-header">
     <img src="icon.svg" alt="">
-    <span>Portpass</span>
+    <span class="pp-brand">Portpass</span>
   </div>
-  <div id="header" style="display:none">Select a record to autofill</div>
-  <div id="status">Connecting to Portpass…</div>
-  <div id="records" style="display:none"></div>
+  <div id="pp-subheader">
+    <span class="pp-action-label">CLICK TO AUTOFILL</span>
+    <span id="pp-url-display" class="pp-current-url"></span>
+  </div>
+  <div id="pp-content">
+    <div class="pp-status">Connecting to Portpass…</div>
+  </div>
 </div>
 <script>
 ;(function() {
   'use strict'
+
+  // ── Theme — read from localStorage (same origin as Portpass) ─────────────
+  ;(function() {
+    var dark = (localStorage.getItem('theme') || 'dark') === 'dark'
+    if (!dark) {
+      var r = document.documentElement.style
+      r.setProperty('--bg',        '#f6f3ee')
+      r.setProperty('--surface',   '#fbfaf7')
+      r.setProperty('--surface-2', '#efece5')
+      r.setProperty('--border',    '#e3ddd1')
+      r.setProperty('--text',      '#1c1f24')
+      r.setProperty('--text-muted','#5a5d65')
+      r.setProperty('--text-soft', '#87898f')
+      r.setProperty('--amber',     '#a06415')
+      r.setProperty('--amber-bg',  '#f3e8d2')
+      r.setProperty('--success',   '#2c7a4e')
+      r.setProperty('--green-bg',  '#e8f5ee')
+    }
+  }())
+
+  // ── SVG icons (hardcoded, no user content) ────────────────────────────────
+  var SVG_ATTR = ' width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"'
+  var SVG_WARN   = '<svg' + SVG_ATTR + '><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>'
+  var SVG_PENCIL = '<svg' + SVG_ATTR + '><path d="M4 20h4l10-10-4-4L4 16v4Z"/><path d="m14 6 4 4"/></svg>'
+  var SVG_UNDO   = '<svg' + SVG_ATTR + '><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>'
 
   // ── Shared state ──────────────────────────────────────────────────────────
   var nonce = crypto.randomUUID()
@@ -94,19 +155,17 @@ label.rec-replace span { font-size: 11px; color: #aaa }
   var saveUrl = ''
 
   // ── Mode detection state ──────────────────────────────────────────────────
-  var cprivKey = null       // private key from init message; used by cross-profile path
-  var delegateId = null     // delegate UUID; switchboard request endpoint
+  var cprivKey = null
+  var delegateId = null
   var bcPongArrived = false
   var modeDecided = false
   var modeTimer = null
+  var isSameProfile = false
 
   // ── Cross-profile state ───────────────────────────────────────────────────
-  // ECDH key pair generated at startup; public key sent to Portpass via the
-  // switchboard so Portpass can encrypt the credential blob for us.
   var cpEcdhKeyPair = null
   var cpEcdhSpkiB64 = null
-  var switchboardWsUrl = 'ws://localhost:7577/ws'  // updated from relay-pong if available
-  // Signing key retained after startCrossProfile so the picker can fire save-url requests.
+  var switchboardWsUrl = 'ws://localhost:7577/ws'
   var cpSigningKey = null
   var cpPubSpkiB64 = null
 
@@ -117,13 +176,18 @@ label.rec-replace span { font-size: 11px; color: #aaa }
   var selectedUuid = null
   var selectedVaultUuid = null
 
-  var $header  = document.getElementById('header')
-  var $status  = document.getElementById('status')
-  var $records = document.getElementById('records')
+  var $content    = document.getElementById('pp-content')
+  var $urlDisplay = document.getElementById('pp-url-display')
+
+  function setStatus(msg) {
+    $content.innerHTML = ''
+    var el = document.createElement('div')
+    el.className = 'pp-status'
+    el.textContent = msg
+    $content.appendChild(el)
+  }
 
   // ── Startup: generate ECDH key pair, signal ready ─────────────────────────
-  // 'ready' is sent as soon as the key pair is available, before the BC ping
-  // completes. Mode is decided in onOpenerMessage once both init and pong state are known.
   crypto.subtle.generateKey(
     { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey']
   ).then(function(kp) {
@@ -135,9 +199,7 @@ label.rec-replace span { font-size: 11px; color: #aaa }
     window.addEventListener('message', onOpenerMessage)
   }).catch(function() { sendError('Startup failed') })
 
-  // ── Ping Dashboard via BroadcastChannel (runs concurrently with ECDH above) ─
-  // If Portpass responds, same-profile mode is used; otherwise cross-profile.
-  // Mode is finalised in onOpenerMessage once init arrives.
+  // ── Ping Dashboard via BroadcastChannel ───────────────────────────────────
   ch.onmessage = function(e) {
     if (e.data && e.data.type === 'relay-pong' && e.data.nonce === nonce) {
       if (e.data.switchboardUrl) {
@@ -166,7 +228,8 @@ label.rec-replace span { font-size: 11px; color: #aaa }
     cprivKey = msg.privKey || null
     delegateId = msg.delegateId || null
 
-    // Validate URL hostname against browser-reported origin.
+    if ($urlDisplay) { $urlDisplay.textContent = currentUrl; $urlDisplay.title = currentUrl }
+
     if (currentUrl) {
       try {
         var sentHost = currentUrl.split('/')[0]
@@ -195,7 +258,7 @@ label.rec-replace span { font-size: 11px; color: #aaa }
   // ── Cross-profile path ────────────────────────────────────────────────────
 
   async function startCrossProfile(privKeyJwk) {
-    $status.textContent = 'Requesting credentials…'
+    setStatus('Requesting credentials…')
     try {
       cpSigningKey = await crypto.subtle.importKey(
         'jwk', privKeyJwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']
@@ -217,7 +280,7 @@ label.rec-replace span { font-size: 11px; color: #aaa }
 
       if (!delegateId) throw new Error('No delegate ID — reinstall the bookmarklet')
 
-      $status.textContent = 'Waiting for Portpass…'
+      setStatus('Waiting for Portpass…')
       var blob = await sendViaSwitchboard({
         type: 'publish', channel: delegateId, replyTo: nonce,
         url: currentUrl, ecdh: cpEcdhSpkiB64, ts: ts, sig: sigB64, pub: pubSpkiB64
@@ -229,8 +292,6 @@ label.rec-replace span { font-size: 11px; color: #aaa }
     }
   }
 
-  // Opens a WebSocket to the switchboard, sends the request, and waits for a response.
-  // Returns a promise that resolves with the response message or rejects on error.
   function sendViaSwitchboard(requestMsg) {
     return new Promise(function(resolve, reject) {
       var ws
@@ -252,10 +313,6 @@ label.rec-replace span { font-size: 11px; color: #aaa }
     })
   }
 
-  // Decrypts the switchboard reply using the ECDH key pair generated at startup.
-  // Reply format: { type:"reply", replyTo, ephPub, iv, ciphertext }
-  // Or error: { type:"reply", replyTo, error: "message" }
-  // Plaintext: JSON array of records, each with pre-decrypted fields.
   async function processRelayBlob(blob) {
     if (blob.error) { sendError(blob.error); return }
     try {
@@ -275,51 +332,6 @@ label.rec-replace span { font-size: 11px; color: #aaa }
     } catch(e) {
       sendError('Decrypt failed: ' + e.message)
     }
-  }
-
-  // Builds a record row with title, badges, and optional Replace URL checkbox.
-  // Returns { row, replaceCheck } — caller sets row.onclick and appends to $records.
-  function buildRecordRow(rec) {
-    var row = document.createElement('div')
-    row.className = 'rec-row'
-    var titleRow = document.createElement('div')
-    titleRow.className = 'rec-title-row'
-    var titleEl = document.createElement('span')
-    titleEl.className = 'rec-title'
-    titleEl.textContent = rec.title
-    titleRow.appendChild(titleEl)
-    if (rec.isCurrent) {
-      var badge = document.createElement('span')
-      badge.className = 'rec-badge'
-      badge.textContent = 'open'
-      titleRow.appendChild(badge)
-    }
-    if (rec.matchType === 'exact') {
-      var mb = document.createElement('span')
-      mb.style.cssText = 'font-size:11px;color:#7dbf8e;flex-shrink:0'
-      mb.textContent = 'URL match'
-      titleRow.appendChild(mb)
-    } else if (rec.matchType === 'fuzzy') {
-      var mb = document.createElement('span')
-      mb.style.cssText = 'font-size:11px;color:#888;flex-shrink:0'
-      mb.textContent = 'similar URL'
-      titleRow.appendChild(mb)
-    }
-    row.appendChild(titleRow)
-    var replaceCheck = null
-    if (rec.existingUrl && canonicalURL(rec.existingUrl) !== currentUrl) {
-      var replaceLabel = document.createElement('label')
-      replaceLabel.className = 'rec-replace'
-      replaceCheck = document.createElement('input')
-      replaceCheck.type = 'checkbox'
-      replaceCheck.onclick = function(e) { e.stopPropagation() }
-      var replaceText = document.createElement('span')
-      replaceText.textContent = 'Replace "' + rec.existingUrl + '" → "' + saveUrl + '"'
-      replaceLabel.appendChild(replaceCheck)
-      replaceLabel.appendChild(replaceText)
-      row.appendChild(replaceLabel)
-    }
-    return { row: row, replaceCheck: replaceCheck }
   }
 
   // Fire-and-forget: sends a signed save-url request to Dashboard via the switchboard.
@@ -346,40 +358,220 @@ label.rec-replace span { font-size: 11px; color: #aaa }
     }).catch(function() {})
   }
 
-  // Cross-profile picker: fields are already decrypted; clicking a row sends fill immediately.
+  function doSaveUrl(uuid, vaultUuid) {
+    if (isSameProfile) {
+      ch.postMessage({ type: 'relay-save-url', uuid: uuid, vaultUuid: vaultUuid || null, url: saveUrl, nonce: relayNonce })
+    } else {
+      saveUrlViaSwitchboard(uuid, vaultUuid || null)
+    }
+  }
+
+  // ── Record row builder ────────────────────────────────────────────────────
+
+  function buildRecordRow(rec, onFill) {
+    var row = document.createElement('div')
+    row.className = 'rec-row'
+
+    // Marker column (16px) — P logo for 'open' match type
+    var marker = document.createElement('div')
+    marker.className = 'rec-marker'
+    if (rec.isCurrent) {
+      var mlogo = document.createElement('img')
+      mlogo.src = 'icon.svg'
+      mlogo.style.cssText = 'width:14px;height:14px;border-radius:3px;opacity:0.65'
+      mlogo.title = 'Currently open in Portpass (not a URL match)'
+      marker.appendChild(mlogo)
+    }
+
+    // Name column (flex: 1)
+    var nameEl = document.createElement('div')
+    nameEl.className = 'rec-name'
+    nameEl.textContent = rec.title
+    nameEl.title = rec.title
+
+    var storedCanonical = rec.existingUrl ? canonicalURL(rec.existingUrl) : ''
+
+    // Exact match: amber pill badge, no pencil
+    if (rec.matchType === 'exact') {
+      var badge = document.createElement('div')
+      badge.className = 'rec-match-badge'
+      badge.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg> match'
+      row.onclick = function() { onFill(rec.uuid, rec.vaultUuid || null) }
+      row.appendChild(marker)
+      row.appendChild(nameEl)
+      row.appendChild(badge)
+      return row
+    }
+
+    // Non-exact: muted URL text + pencil (except search results which have no pencil)
+    var urlEl = document.createElement('div')
+    urlEl.className = 'rec-url'
+    urlEl.textContent = storedCanonical
+    urlEl.title = storedCanonical
+
+    var pencilEl = null
+    if (rec.matchType !== 'search' && !rec.readonly) {
+      var urlSaved = false
+      pencilEl = document.createElement('button')
+      pencilEl.className = 'rec-pencil'
+      pencilEl.title = 'Save ' + currentUrl + ' to this password'
+      pencilEl.innerHTML = SVG_PENCIL
+      pencilEl.onclick = function(e) {
+        e.stopPropagation()
+        if (!urlSaved) {
+          urlSaved = true
+          pencilEl.className = 'rec-pencil pencil-saved'
+          pencilEl.title = 'Undo URL change'
+          pencilEl.innerHTML = SVG_UNDO
+          urlEl.className = 'rec-url url-saved'
+          urlEl.textContent = currentUrl + ' ✓'
+          urlEl.title = currentUrl
+          doSaveUrl(rec.uuid, rec.vaultUuid || null)
+        } else {
+          urlSaved = false
+          pencilEl.className = 'rec-pencil'
+          pencilEl.title = 'Save ' + currentUrl + ' to this password'
+          pencilEl.innerHTML = SVG_PENCIL
+          urlEl.className = 'rec-url'
+          urlEl.textContent = storedCanonical
+          urlEl.title = storedCanonical
+        }
+      }
+    }
+
+    row.onclick = function(e) {
+      if (pencilEl && (e.target === pencilEl || pencilEl.contains(e.target))) return
+      onFill(rec.uuid, rec.vaultUuid || null)
+    }
+
+    row.appendChild(marker)
+    row.appendChild(nameEl)
+    row.appendChild(urlEl)
+    if (pencilEl) row.appendChild(pencilEl)
+    return row
+  }
+
+  // ── Pickers ───────────────────────────────────────────────────────────────
+
   function showCrossProfilePicker(records) {
-    if (!records || !records.length) { sendError('No matching passwords found'); return }
-    $status.style.display = 'none'
-    $header.style.display = ''
-    $records.style.display = ''
+    if (!records || !records.length) { showSearchFallback(false); return }
+    $content.innerHTML = ''
+    records.forEach(function(r) {
+      $content.appendChild(buildRecordRow(r, function(uuid, vaultUuid) {
+        if (!isSecure && sequenceHasSensitiveCode(r.autotype || '', r.sensitiveCodes || [])) {
+          sendError('Cannot autofill sensitive fields on a non-HTTPS page')
+          return
+        }
+        if (window.opener) {
+          window.opener.postMessage(
+            { type: 'fill', title: r.title, autotype: r.autotype, fields: r.fields,
+              theme: localStorage.getItem('theme') || 'dark' },
+            bookmarkletOrigin || '*'
+          )
+        }
+        setTimeout(function() { window.close() }, 100)
+      }))
+    })
+  }
+
+  function showPicker(records) {
+    if (!records || !records.length) { showSearchFallback(true); return }
+    $content.innerHTML = ''
+    records.forEach(function(rec) {
+      $content.appendChild(buildRecordRow(rec, function(uuid, vaultUuid) {
+        fillRecord(uuid, vaultUuid)
+      }))
+    })
+  }
+
+  // ── Search fallback (shown when no URL matches) ───────────────────────────
+
+  function showSearchFallback(canSearch) {
+    $content.innerHTML = ''
+
+    var notice = document.createElement('div')
+    notice.className = 'pp-notice'
+    notice.innerHTML = SVG_WARN + ' No passwords match '
+    var em = document.createElement('strong')
+    em.textContent = currentUrl
+    em.style.color = 'var(--text)'
+    notice.appendChild(em)
+    $content.appendChild(notice)
+
+    if (!canSearch) {
+      var hint = document.createElement('div')
+      hint.className = 'pp-placeholder'
+      hint.textContent = 'Open the matching password in Portpass to autofill'
+      $content.appendChild(hint)
+      return
+    }
+
+    var searchWrap = document.createElement('div')
+    searchWrap.className = 'pp-search-wrap'
+    var searchInput = document.createElement('input')
+    searchInput.className = 'pp-search'
+    searchInput.type = 'text'
+    searchInput.placeholder = 'Search all passwords…'
+    searchWrap.appendChild(searchInput)
+    $content.appendChild(searchWrap)
+
+    var hdr = document.createElement('div')
+    hdr.className = 'pp-section-hdr'
+    hdr.textContent = 'RESULTS — CLICK TO AUTOFILL + SAVE URL'
+    hdr.style.display = 'none'
+    $content.appendChild(hdr)
+
+    var placeholder = document.createElement('div')
+    placeholder.className = 'pp-placeholder'
+    placeholder.textContent = 'Type to search all passwords'
+    $content.appendChild(placeholder)
+
+    var debounce = null
+    searchInput.oninput = function() {
+      clearTimeout(debounce)
+      var q = searchInput.value.trim()
+      if (!q) {
+        hdr.style.display = 'none'
+        placeholder.style.display = ''
+        placeholder.textContent = 'Type to search all passwords'
+        var rows = $content.querySelectorAll('.rec-row')
+        for (var i = 0; i < rows.length; i++) rows[i].parentNode.removeChild(rows[i])
+        return
+      }
+      debounce = setTimeout(function() {
+        ch.postMessage({ type: 'relay-search', query: q, nonce: relayNonce })
+      }, 150)
+    }
+    setTimeout(function() { try { searchInput.focus() } catch(_) {} }, 50)
+  }
+
+  function showSearchResults(records) {
+    var hdr = $content.querySelector('.pp-section-hdr')
+    var placeholder = $content.querySelector('.pp-placeholder')
+    var rows = $content.querySelectorAll('.rec-row')
+    for (var i = 0; i < rows.length; i++) rows[i].parentNode.removeChild(rows[i])
+
+    if (!records || !records.length) {
+      if (hdr) hdr.style.display = 'none'
+      if (placeholder) { placeholder.style.display = ''; placeholder.textContent = 'No matching passwords found' }
+      return
+    }
+
+    if (hdr) hdr.style.display = ''
+    if (placeholder) placeholder.style.display = 'none'
 
     records.forEach(function(rec) {
-      var built = buildRecordRow(rec)
-      var row = built.row, replaceCheck = built.replaceCheck
-      ;(function(r) {
-        row.onclick = function() {
-          if (!isSecure && sequenceHasSensitiveCode(r.autotype || '', r.sensitiveCodes || [])) {
-            sendError('Cannot autofill sensitive fields on a non-HTTPS page')
-            return
-          }
-          if (replaceCheck && replaceCheck.checked) saveUrlViaSwitchboard(r.uuid, r.vaultUuid || null)
-          if (window.opener) {
-            window.opener.postMessage(
-              { type: 'fill', title: r.title, autotype: r.autotype, fields: r.fields,
-                theme: localStorage.getItem('theme') || 'dark' },
-              bookmarkletOrigin || '*'
-            )
-          }
-          setTimeout(function() { window.close() }, 100)
-        }
-      })(rec)
-      $records.appendChild(row)
+      $content.appendChild(buildRecordRow(rec, function(uuid, vaultUuid) {
+        doSaveUrl(uuid, vaultUuid)
+        fillRecord(uuid, vaultUuid)
+      }))
     })
   }
 
   // ── Same-profile path ─────────────────────────────────────────────────────
 
   async function doHello() {
+    isSameProfile = true
     try {
       keyPair = await crypto.subtle.generateKey(
         { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey']
@@ -389,8 +581,6 @@ label.rec-replace span { font-size: 11px; color: #aaa }
       var ecdhSpkiB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(ecdhSpki)))
       relayNonce = crypto.randomUUID()
 
-      // Sign {relayNonce, ecdhSpki} with the ECDSA private key so Dashboard can
-      // verify this relay-hello came from a registered delegate bookmarklet.
       var sigB64 = null, pubSpkiB64 = null
       if (cprivKey) {
         try {
@@ -408,7 +598,7 @@ label.rec-replace span { font-size: 11px; color: #aaa }
             new TextEncoder().encode(JSON.stringify({ relayNonce: relayNonce, ecdhSpki: ecdhSpkiB64 }))
           )
           sigB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(sigBytes)))
-        } catch(_) { /* signing unavailable */ }
+        } catch(_) {}
       }
 
       ch.onmessage = function(e) {
@@ -437,52 +627,24 @@ label.rec-replace span { font-size: 11px; color: #aaa }
     } catch(_) { sendError('Key exchange failed'); return }
 
     ch.onmessage = onBCMessage
-
-    // currentUrl is set from init before doHello() was called.
-    $status.textContent = 'Searching for matches…'
+    setStatus('Searching for matches…')
     ch.postMessage({ type: 'relay-query', url: currentUrl, nonce: relayNonce })
   }
 
   function onBCMessage(e) {
     var msg = e.data
     if (!msg || msg.nonce !== relayNonce) return
-    if (msg.type === 'relay-records')    showPicker(msg.records)
-    else if (msg.type === 'relay-record')    deliverFill(msg)
-    else if (msg.type === 'relay-url-saved') fetchCredentials()
-    else if (msg.type === 'relay-error')     sendError(msg.message)
+    if      (msg.type === 'relay-records')        showPicker(msg.records)
+    else if (msg.type === 'relay-record')         deliverFill(msg)
+    else if (msg.type === 'relay-url-saved')      {} // pencil save — no further action needed
+    else if (msg.type === 'relay-search-results') showSearchResults(msg.records)
+    else if (msg.type === 'relay-error')          sendError(msg.message)
   }
 
-  function showPicker(records) {
-    if (!records || !records.length) { sendError('No matching passwords found'); return }
-    $status.style.display = 'none'
-    $header.style.display = ''
-    $records.style.display = ''
-
-    records.forEach(function(rec) {
-      var built = buildRecordRow(rec)
-      var row = built.row, replaceCheck = built.replaceCheck
-      row.onclick = function() {
-        doAutofill(rec.uuid, rec.vaultUuid, replaceCheck ? replaceCheck.checked : false)
-      }
-      $records.appendChild(row)
-    })
-  }
-
-  function doAutofill(uuid, vaultUuid, replaceUrl) {
+  function fillRecord(uuid, vaultUuid) {
     selectedUuid = uuid
     selectedVaultUuid = vaultUuid
-    $header.style.display = 'none'
-    $records.style.display = 'none'
-    $status.style.display = ''
-    $status.textContent = 'Fetching credentials…'
-    if (replaceUrl) {
-      ch.postMessage({ type: 'relay-save-url', uuid: uuid, vaultUuid: vaultUuid, url: saveUrl, nonce: relayNonce })
-    } else {
-      fetchCredentials()
-    }
-  }
-
-  function fetchCredentials() {
+    setStatus('Fetching credentials…')
     ch.postMessage({ type: 'relay-query', uuid: selectedUuid, vaultUuid: selectedVaultUuid, nonce: relayNonce })
   }
 
@@ -511,8 +673,6 @@ label.rec-replace span { font-size: 11px; color: #aaa }
 
   // ── Shared helpers ────────────────────────────────────────────────────────
 
-  // Returns true if the autotype sequence references any of the given sensitive field codes.
-  // Parses properly so \\ (literal backslash) does not cause false positives.
   function sequenceHasSensitiveCode(seq, sensitiveCodes) {
     if (!sensitiveCodes || !sensitiveCodes.length) return false
     var i = 0
@@ -539,13 +699,11 @@ label.rec-replace span { font-size: 11px; color: #aaa }
   }
 
   function sendError(message) {
-    $header.style.display = 'none'
-    $records.style.display = 'none'
-    $status.textContent = ''
-    var errEl = document.createElement('div')
-    errEl.className = 'err'
-    errEl.textContent = message
-    document.getElementById('app').appendChild(errEl)
+    $content.innerHTML = ''
+    var el = document.createElement('div')
+    el.className = 'pp-error'
+    el.textContent = message
+    $content.appendChild(el)
     if (window.opener) window.opener.postMessage({ type: 'error', message: message }, '*')
     setTimeout(function() { window.close() }, 3000)
   }
