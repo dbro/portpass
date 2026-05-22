@@ -83,9 +83,10 @@ async function createRecord(portpass: Page, opts: {
   await portpass.locator('.record-row', { hasText: opts.title }).click()
 }
 
-// Run the bookmarklet on the login page. Opens the relay popup, drives the picker
-// (selecting the first record), and waits for the popup to close.
-// Returns the relay Page so callers can inspect its contents for no-match / error cases.
+// Opens the relay popup and optionally clicks the first record row (transitioning to
+// the waiting phase). Returns the relay Page for further assertions.
+// In the new flow the relay stays open (waiting phase) until the user clicks a form
+// field; there is no page-level overlay injected into the host page.
 async function activateBookmarklet(
   login: Page, bookmarkletUrl: string, opts: { clickRow?: boolean } = {}
 ): Promise<Page> {
@@ -99,38 +100,38 @@ async function activateBookmarklet(
   const relay = await popupPromise
   await relay.waitForLoadState('domcontentloaded')
 
-  // Wait for: picker rows, no-match notice, popup close, or error overlay on login page.
+  // Wait for: picker rows, waiting phase (single exact match auto-advance),
+  // no-match notice, or popup close.
   const which = await Promise.race([
     relay.locator('.rec-row').first().waitFor({ timeout: 10000 }).then(() => 'picker').catch(() => 'timeout'),
+    relay.locator('.selected-record-row').first().waitFor({ timeout: 10000 }).then(() => 'waiting').catch(() => 'timeout'),
     relay.locator('.pp-notice').first().waitFor({ timeout: 10000 }).then(() => 'no-match').catch(() => 'timeout'),
     relay.waitForEvent('close', { timeout: 10000 }).then(() => 'closed').catch(() => 'timeout'),
-    login.locator('#__pp').waitFor({ timeout: 10000 }).then(() => 'error').catch(() => 'timeout'),
   ])
 
   if (which === 'picker' && clickRow) {
-    // Click the first record row — single click triggers autofill immediately.
     await relay.locator('.rec-row').first().click()
-    // Wait for relay to close after delivering the fill command.
-    await relay.waitForEvent('close', { timeout: 12000 }).catch(() => {})
+    // Relay transitions to waiting phase (stays open — fill fires only after field click).
+    await relay.locator('.selected-record-row').waitFor({ timeout: 5000 }).catch(() => {})
   }
 
-  // Give the browser one animation frame so any fill overlay or error overlay on the
-  // login page is guaranteed to be mounted before the test makes assertions.
   await login.evaluate(() => new Promise(r => requestAnimationFrame(r)))
   return relay
 }
 
 test.setTimeout(30000)
 
-test.describe('Bookmarklet — overlay and autofill', () => {
+test.describe('Bookmarklet — relay phases and autofill', () => {
 
-  test('overlay shows record title and "Click the field to start from"', async ({ context }) => {
+  test('waiting phase shows selected record title', async ({ context }) => {
     const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
     await createRecord(portpass, { title: 'My Bank', autotype: '\\u\\t\\p\\n' })
 
-    await activateBookmarklet(login, bookmarkletUrl)
-    await expect(login.locator('#__pp')).toContainText('My Bank')
-    await expect(login.locator('#__pp')).toContainText('Click the field to start from')
+    // activateBookmarklet clicks the row — relay transitions to waiting phase.
+    const relay = await activateBookmarklet(login, bookmarkletUrl)
+    await expect(relay.locator('.selected-record-row')).toBeVisible({ timeout: 5000 })
+    await expect(relay.locator('.selected-record-row')).toContainText('My Bank')
+    await expect(relay.locator('.pp-waiting-title')).toContainText('Click a field to begin')
   })
 
   test('\\u\\t\\p fills username, tabs to password, fills password', async ({ context }) => {
@@ -140,12 +141,9 @@ test.describe('Bookmarklet — overlay and autofill', () => {
     })
 
     await activateBookmarklet(login, bookmarkletUrl)
+    // Relay is in waiting phase. Clicking a field triggers the fill chain.
     await login.locator('#user').click()
-    // After autotype: success overlay appears, then auto-dismisses after 1.5s.
-    await expect(login.locator('#__pp')).toContainText('Filled successfully', { timeout: 3000 })
-    await expect(login.locator('#__pp')).toHaveCount(0, { timeout: 3000 })
-
-    await expect(login.locator('#user')).toHaveValue('alice')
+    await expect(login.locator('#user')).toHaveValue('alice', { timeout: 5000 })
     await expect(login.locator('#pass')).toHaveValue('hunter2')
   })
 
@@ -164,7 +162,7 @@ test.describe('Bookmarklet — overlay and autofill', () => {
     await activateBookmarklet(login, bookmarkletUrl)
     await login.locator('#user').click()
 
-    await expect(login.locator('#user')).toHaveValue('alice')
+    await expect(login.locator('#user')).toHaveValue('alice', { timeout: 5000 })
     await expect(login.locator('#pass')).toHaveValue('hunter2')
     expect(submitted).toBe(true)
   })
@@ -177,8 +175,7 @@ test.describe('Bookmarklet — overlay and autofill', () => {
 
     await activateBookmarklet(login, bookmarkletUrl)
     await login.locator('#user').click()
-
-    await expect(login.locator('#user')).toHaveValue('bob')
+    await expect(login.locator('#user')).toHaveValue('bob', { timeout: 5000 })
     await expect(login.locator('#pass')).toHaveValue('')
   })
 
@@ -190,8 +187,7 @@ test.describe('Bookmarklet — overlay and autofill', () => {
 
     await activateBookmarklet(login, bookmarkletUrl)
     await login.locator('#pass').click()
-
-    await expect(login.locator('#pass')).toHaveValue('mypassword')
+    await expect(login.locator('#pass')).toHaveValue('mypassword', { timeout: 5000 })
     await expect(login.locator('#user')).toHaveValue('')
   })
 
@@ -207,7 +203,6 @@ test.describe('Bookmarklet — overlay and autofill', () => {
 </body></html>`
 
     const { login: _login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
-
     const login = _login
     await login.route('/login-button-test', route =>
       route.fulfill({ contentType: 'text/html', body: formWithButton })
@@ -220,77 +215,61 @@ test.describe('Bookmarklet — overlay and autofill', () => {
 
     await activateBookmarklet(login, bookmarkletUrl)
     await login.locator('#user').click()
-
-    await expect(login.locator('#user')).toHaveValue('alice')
+    await expect(login.locator('#user')).toHaveValue('alice', { timeout: 5000 })
     await expect(login.locator('#pass')).toHaveValue('secret')
   })
 
-  test('overlay is positioned at fixed top-right', async ({ context }) => {
-    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
-    await createRecord(portpass, { title: 'Site', autotype: '\\u\\p' })
-
-    await activateBookmarklet(login, bookmarkletUrl)
-    const box = await login.locator('#__pp').boundingBox()
-    expect(box).not.toBeNull()
-    if (box) {
-      expect(box.y).toBeLessThan(30)  // near top (14px)
-      const vw = login.viewportSize()!.width
-      expect(box.x + box.width).toBeGreaterThan(vw - 30)  // near right edge (14px)
-    }
-  })
-
-  test('success overlay shown after fill and auto-dismisses', async ({ context }) => {
+  test('relay shows done phase after fill and auto-closes', async ({ context }) => {
     const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
     await createRecord(portpass, { title: 'My Bank', username: 'alice', password: 'hunter2', autotype: '\\u' })
 
-    await activateBookmarklet(login, bookmarkletUrl)
+    const relay = await activateBookmarklet(login, bookmarkletUrl)
     await login.locator('#user').click()
-    await expect(login.locator('#__pp')).toContainText('Filled successfully', { timeout: 3000 })
-    await expect(login.locator('#__pp')).toHaveCount(0, { timeout: 3000 })
+    await expect(relay.locator('.pp-phase-done')).toBeVisible({ timeout: 5000 })
+    await relay.waitForEvent('close', { timeout: 5000 })
   })
 
-  test('dismiss button removes the overlay', async ({ context }) => {
+  test('Cancel button in waiting phase closes the relay popup', async ({ context }) => {
     const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
     await createRecord(portpass, { title: 'Site', autotype: '\\u\\p' })
 
-    await activateBookmarklet(login, bookmarkletUrl)
-    await login.locator('#__pp button').click()
-    await expect(login.locator('#__pp')).toHaveCount(0)
+    const relay = await activateBookmarklet(login, bookmarkletUrl)
+    await relay.getByRole('button', { name: 'Cancel' }).click()
+    await expect.poll(() => relay.isClosed(), { timeout: 8000 }).toBe(true)
   })
 
-  test('search fallback shown when no URL matches in Portpass', async ({ context }) => {
+  test('search fallback shown when no URL matches', async ({ context }) => {
     const { login, bookmarkletUrl } = await setupAutofillTest(context)
-    // Vault is open but no records match the login page URL.
-
     const relay = await activateBookmarklet(login, bookmarkletUrl)
-    // New behaviour: relay shows the search fallback (notice bar + search input)
-    // instead of an error overlay on the login page.
     await expect(relay.locator('.pp-notice')).toBeVisible({ timeout: 5000 })
     await expect(relay.locator('.pp-search')).toBeVisible()
   })
 
-  test('exact match row shows ✓ match badge and no pencil button', async ({ context }) => {
+  test('single exact match auto-advances to waiting phase', async ({ context }) => {
     const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
-    await createRecord(portpass, {
-      title: 'Login Site', autotype: '\\u\\t\\p', url: LOGIN_URL,
-    })
+    await createRecord(portpass, { title: 'Login Site', autotype: '\\u\\t\\p', url: LOGIN_URL })
 
-    const relay = await activateBookmarklet(login, bookmarkletUrl, { clickRow: false })
-    await expect(relay.locator('.rec-match-badge')).toBeVisible({ timeout: 5000 })
-    await expect(relay.locator('.rec-pencil')).not.toBeVisible()
+    const relay = await activateBookmarklet(login, bookmarkletUrl)
+    // No picker shown — relay goes directly to waiting.
+    await expect(relay.locator('.rec-row')).toHaveCount(0)
+    await expect(relay.locator('.selected-record-row')).toBeVisible()
+    await expect(relay.locator('.rec-match-badge')).toBeVisible()  // in SelectedRecordRow
   })
 
-  test('fuzzy match row shows URL text and pencil button', async ({ context }) => {
+  test('fuzzy match row shows URL text and pencil; clicking transitions to waiting', async ({ context }) => {
     const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
     await createRecord(portpass, {
       title: 'Other Page', autotype: '\\u\\t\\p',
-      url: 'http://localhost:5173/different-path',  // same host, different path → fuzzy
+      url: 'http://localhost:5173/different-path',
     })
 
     const relay = await activateBookmarklet(login, bookmarkletUrl, { clickRow: false })
     await relay.locator('.rec-row').first().waitFor({ timeout: 5000 })
     await expect(relay.locator('.rec-url').first()).toBeVisible()
     await expect(relay.locator('.rec-pencil').first()).toBeVisible()
+    // Clicking the row transitions to waiting.
+    await relay.locator('.rec-row').first().click()
+    await expect(relay.locator('.selected-record-row')).toBeVisible({ timeout: 5000 })
   })
 
   test('record name and URL have title attributes for overflow tooltip', async ({ context }) => {
@@ -309,7 +288,7 @@ test.describe('Bookmarklet — overlay and autofill', () => {
     expect(urlTitle).toBeTruthy()
   })
 
-  test('record without autotype sequence uses the default and shows overlay', async ({ context }) => {
+  test('record without autotype sequence still reaches waiting phase with default sequence', async ({ context }) => {
     const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
     await portpass.getByRole('button', { name: 'New', exact: true }).click()
     await portpass.getByPlaceholder('e.g. Bank of America').fill('No Autotype')
@@ -318,9 +297,8 @@ test.describe('Bookmarklet — overlay and autofill', () => {
     await portpass.getByRole('button', { name: 'Save' }).click()
     await portpass.locator('.record-row', { hasText: 'No Autotype' }).click()
 
-    await activateBookmarklet(login, bookmarkletUrl)
-    await expect(login.locator('#__pp')).toContainText('No Autotype')
-    await expect(login.locator('#__pp')).toContainText('Click the field to start from')
+    const relay = await activateBookmarklet(login, bookmarkletUrl)
+    await expect(relay.locator('.selected-record-row')).toContainText('No Autotype', { timeout: 5000 })
   })
 
 })

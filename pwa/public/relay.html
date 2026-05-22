@@ -8,11 +8,11 @@
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0 }
 :root {
-  /* defaults — dark theme. overridden by JS from localStorage. */
   --bg: #14161a; --surface: #1c1f24; --surface-2: #262a31;
   --border: #2c3038; --text: #f1ede4; --text-muted: #a6a39b;
   --text-soft: #757279; --amber: #d4953d; --amber-bg: #2e2010;
   --success: #6cba8a; --green-bg: #1a3025;
+  --red: #e08673; --orange: #c47030;
 }
 body {
   font-family: system-ui, -apple-system, sans-serif;
@@ -20,6 +20,8 @@ body {
   height: 100dvh; overflow: hidden;
 }
 #app { height: 100%; display: flex; flex-direction: column; }
+
+/* ── Header ── */
 #pp-header {
   display: flex; align-items: center; gap: 8px;
   padding: 0 14px; height: 46px; flex-shrink: 0;
@@ -27,6 +29,8 @@ body {
 }
 #pp-header img { width: 22px; height: 22px; border-radius: 5px }
 #pp-header .pp-brand { font-weight: 600; font-size: 15px }
+
+/* ── Sub-header (pick phase only) ── */
 #pp-subheader {
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 14px; height: 36px; flex-shrink: 0;
@@ -41,13 +45,18 @@ body {
   color: var(--text-soft); overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; max-width: 200px;
 }
+
+/* ── Content area ── */
 #pp-content { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+
+/* ── Picker rows ── */
 .rec-row {
   display: flex; align-items: center; gap: 8px;
   padding: 8px 14px 8px 10px; cursor: pointer;
   border-bottom: 1px solid var(--border); min-height: 40px;
+  border-left: 3px solid transparent; transition: background 0.1s;
 }
-.rec-row:hover { background: var(--surface-2) }
+.rec-row:hover { background: var(--amber-bg); border-left-color: var(--amber) }
 .rec-marker { width: 16px; flex-shrink: 0; display: flex; align-items: center }
 .rec-name {
   flex: 1; min-width: 0; font-weight: 600; font-size: 13px;
@@ -72,17 +81,66 @@ body {
   background: var(--surface-2); cursor: pointer; color: var(--text-muted);
 }
 .rec-pencil:hover { border-color: var(--text-muted) }
-.rec-pencil.pencil-saved {
-  border-color: var(--success); background: var(--green-bg); color: var(--success);
+.rec-pencil.pencil-saved { border-color: var(--success); background: var(--green-bg); color: var(--success) }
+
+/* ── SelectedRecordRow (waiting / done / error phases) ── */
+.selected-record-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; background: var(--amber-bg);
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
 }
+
+/* ── Phase center (waiting / done / error content) ── */
+.pp-phase-center {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 12px; padding: 24px; text-align: center;
+}
+
+/* Waiting illustration */
+.pp-waiting-illus { opacity: 0.35; color: var(--text-muted) }
+
+/* Done circle */
+.pp-done-circle {
+  width: 56px; height: 56px; border-radius: 50%;
+  background: var(--green-bg);
+  display: flex; align-items: center; justify-content: center;
+}
+.pp-done-title { font-size: 18px; font-weight: 700; color: var(--success) }
+.pp-done-sub   { font-size: 13px; color: var(--text-muted) }
+
+/* Waiting text */
+.pp-waiting-title { font-size: 16px; font-weight: 700 }
+.pp-waiting-sub   { font-size: 13px; color: var(--text-muted); line-height: 1.5 }
+
+/* Error */
+.pp-error-icon-wrap { display: flex; align-items: center; justify-content: center }
+.pp-error-title { font-size: 15px; font-weight: 700 }
+.pp-error-body  { font-size: 13px; color: var(--text-muted) }
+.pp-error-action {
+  font-size: 13px; font-weight: 600; color: var(--amber);
+  text-decoration: none; display: inline-block; margin-top: 4px;
+}
+.pp-error-action:hover { text-decoration: underline }
+
+/* ── Footer (waiting phase) ── */
+.pp-footer {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 14px; border-top: 1px solid var(--border); flex-shrink: 0;
+}
+.pp-footer-btn {
+  background: none; border: none; cursor: pointer;
+  font-size: 14px; color: var(--text-muted); font-family: inherit; padding: 4px 0;
+}
+.pp-footer-btn:hover { color: var(--text) }
+
+/* ── Search / no-match ── */
 .pp-notice {
   display: flex; align-items: center; gap: 8px;
   padding: 8px 14px; font-size: 11px; color: var(--text-muted);
   background: var(--surface-2); border-bottom: 1px solid var(--border); flex-shrink: 0;
 }
-.pp-search-wrap {
-  padding: 10px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;
-}
+.pp-search-wrap { padding: 10px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0 }
 .pp-search {
   width: 100%; padding: 8px 10px; background: var(--surface);
   border: 1.5px solid var(--border); border-radius: 8px;
@@ -100,7 +158,7 @@ body {
   font-size: 13px; padding: 24px; text-align: center;
 }
 .pp-status { padding: 12px 14px; font-size: 13px; color: var(--text-muted) }
-.pp-error  { padding: 12px 14px; font-size: 13px; color: #e06c75 }
+.pp-error-inline { padding: 12px 14px; font-size: 13px; color: var(--red) }
 </style>
 </head>
 <body>
@@ -121,7 +179,7 @@ body {
 ;(function() {
   'use strict'
 
-  // ── Theme — read from localStorage (same origin as Portpass) ─────────────
+  // ── Theme — read from localStorage (Portpass origin) ─────────────────────
   ;(function() {
     var dark = (localStorage.getItem('theme') || 'dark') === 'dark'
     if (!dark) {
@@ -137,16 +195,25 @@ body {
       r.setProperty('--amber-bg',  '#f3e8d2')
       r.setProperty('--success',   '#2c7a4e')
       r.setProperty('--green-bg',  '#e8f5ee')
+      r.setProperty('--red',       '#b3361f')
+      r.setProperty('--orange',    '#8b5020')
     }
   }())
 
-  // ── SVG icons (hardcoded, no user content) ────────────────────────────────
-  var SVG_ATTR = ' width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"'
-  var SVG_WARN   = '<svg' + SVG_ATTR + '><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>'
-  var SVG_PENCIL = '<svg' + SVG_ATTR + '><path d="M4 20h4l10-10-4-4L4 16v4Z"/><path d="m14 6 4 4"/></svg>'
-  var SVG_UNDO   = '<svg' + SVG_ATTR + '><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>'
+  // ── SVG icons ─────────────────────────────────────────────────────────────
+  var _S = ' viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"'
+  var SVG_WARN   = '<svg width="13" height="13"' + _S + ' stroke-width="1.6"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>'
+  var SVG_PENCIL = '<svg width="13" height="13"' + _S + ' stroke-width="1.6"><path d="M4 20h4l10-10-4-4L4 16v4Z"/><path d="m14 6 4 4"/></svg>'
+  var SVG_UNDO   = '<svg width="13" height="13"' + _S + ' stroke-width="1.6"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>'
+  var SVG_CHECK_SM = '<svg width="12" height="12"' + _S + ' stroke-width="2.2"><path d="m5 12 5 5L20 7"/></svg>'
+  var SVG_CHECK_MD = '<svg width="24" height="24"' + _S + ' stroke-width="2"><path d="m5 12 5 5L20 7"/></svg>'
+  // Large error icons (40px)
+  var SVG_LOCK_LG  = '<svg width="40" height="40"' + _S + ' stroke-width="1.3"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>'
+  var SVG_WARN_LG  = '<svg width="40" height="40"' + _S + ' stroke-width="1.3"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>'
+  // Waiting illustration: dashed card with amber checkmark circle
+  var SVG_WAITING  = '<svg width="90" height="70"' + _S.replace('currentColor','currentColor') + ' stroke-width="1.5"><rect x="4" y="4" width="66" height="46" rx="8" stroke-dasharray="5 3"/><line x1="14" y1="18" x2="50" y2="18" stroke-width="2" stroke-linecap="round"/><line x1="14" y1="28" x2="42" y2="28" stroke-width="2" stroke-linecap="round"/><circle cx="62" cy="46" r="15" style="fill:var(--amber-bg)" stroke="none"/><path d="m55 46 5 5 9-9" style="stroke:var(--amber)" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 
-  // ── Shared state ──────────────────────────────────────────────────────────
+  // ── Shared state ───────────────────────────────────────────────────────────
   var nonce = crypto.randomUUID()
   var ch = new BroadcastChannel('portpass-autofill')
   var bookmarkletOrigin = null
@@ -154,7 +221,7 @@ body {
   var currentUrl = ''
   var saveUrl = ''
 
-  // ── Mode detection state ──────────────────────────────────────────────────
+  // Mode detection
   var cprivKey = null
   var delegateId = null
   var bcPongArrived = false
@@ -162,24 +229,34 @@ body {
   var modeTimer = null
   var isSameProfile = false
 
-  // ── Cross-profile state ───────────────────────────────────────────────────
+  // Cross-profile crypto state
   var cpEcdhKeyPair = null
   var cpEcdhSpkiB64 = null
   var switchboardWsUrl = 'ws://localhost:7577/ws'
   var cpSigningKey = null
   var cpPubSpkiB64 = null
 
-  // ── Same-profile state ────────────────────────────────────────────────────
+  // Same-profile crypto state
   var relayNonce = null
   var sessionKey = null
   var keyPair = null
   var selectedUuid = null
   var selectedVaultUuid = null
 
+  // Phase state
+  var chosen = null           // the selected record object
+  var previousPhase = null    // 'pick' or 'norecords' — for Back button
+  var lastRecords = []        // saved for Back navigation
+  var pendingCredentials = null  // {autotype, fields, sensitiveCodes} waiting to be sent
+  var fieldClicked = false    // bookmarklet reported a field was clicked
+  var hasActiveField = false  // bookmarklet had a pre-focused field at activation
+
   var $content    = document.getElementById('pp-content')
+  var $subheader  = document.getElementById('pp-subheader')
   var $urlDisplay = document.getElementById('pp-url-display')
 
   function setStatus(msg) {
+    $subheader.style.display = 'none'
     $content.innerHTML = ''
     var el = document.createElement('div')
     el.className = 'pp-status'
@@ -197,25 +274,24 @@ body {
     cpEcdhSpkiB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(spki)))
     if (window.opener) window.opener.postMessage({ type: 'ready' }, '*')
     window.addEventListener('message', onOpenerMessage)
+    // Also listen for fill-related messages from bookmarklet (field-clicked, fill-done, fill-error)
+    window.addEventListener('message', onBookmarkletMessage)
   }).catch(function() { sendError('Startup failed') })
 
   // ── Ping Dashboard via BroadcastChannel ───────────────────────────────────
   ch.onmessage = function(e) {
     if (e.data && e.data.type === 'relay-pong' && e.data.nonce === nonce) {
-      if (e.data.switchboardUrl) {
+      if (e.data.switchboardUrl)
         switchboardWsUrl = e.data.switchboardUrl.replace(/^http/, 'ws') + '/ws'
-      }
       bcPongArrived = true
       if (!modeDecided && cprivKey !== null) {
-        modeDecided = true
-        clearTimeout(modeTimer)
-        doHello()
+        modeDecided = true; clearTimeout(modeTimer); doHello()
       }
     }
   }
   ch.postMessage({ type: 'relay-ping', nonce: nonce })
 
-  // ── Mode detection: init message from bookmarklet ─────────────────────────
+  // ── Mode detection ────────────────────────────────────────────────────────
   function onOpenerMessage(event) {
     var msg = event.data
     if (!msg || msg.type !== 'init') return
@@ -227,6 +303,7 @@ body {
     isSecure = !!msg.isSecure
     cprivKey = msg.privKey || null
     delegateId = msg.delegateId || null
+    hasActiveField = !!msg.hasActiveField
 
     if ($urlDisplay) { $urlDisplay.textContent = currentUrl; $urlDisplay.title = currentUrl }
 
@@ -239,19 +316,30 @@ body {
     }
 
     if (bcPongArrived) {
-      modeDecided = true
-      doHello()
+      modeDecided = true; doHello()
     } else {
       modeTimer = setTimeout(function() {
         if (!modeDecided) {
           modeDecided = true
-          if (cprivKey) {
-            startCrossProfile(cprivKey)
-          } else {
-            sendError('Portpass is not open — open and unlock Portpass first')
-          }
+          if (cprivKey) startCrossProfile(cprivKey)
+          else sendError('Portpass is not open — open and unlock Portpass first')
         }
       }, 200)
+    }
+  }
+
+  // ── Messages from bookmarklet (field-clicked, fill-done, fill-error) ──────
+  function onBookmarkletMessage(event) {
+    if (!window.opener || event.source !== window.opener) return
+    var msg = event.data
+    if (!msg) return
+    if (msg.type === 'field-clicked') {
+      fieldClicked = true
+      pendingFill()
+    } else if (msg.type === 'fill-done') {
+      showDone()
+    } else if (msg.type === 'fill-error') {
+      showErrorPhase(detectErrorPhase(msg.error || ''))
     }
   }
 
@@ -269,7 +357,6 @@ body {
       )
       var pubSpki = await crypto.subtle.exportKey('spki', pubKey)
       cpPubSpkiB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(pubSpki)))
-      var pubSpkiB64 = cpPubSpkiB64
 
       var ts = Date.now()
       var signedPayload = JSON.stringify({ url: currentUrl, nonce: nonce, ecdh: cpEcdhSpkiB64, ts: ts })
@@ -277,30 +364,26 @@ body {
         { name: 'ECDSA', hash: 'SHA-256' }, cpSigningKey, new TextEncoder().encode(signedPayload)
       )
       var sigB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(sigBytes)))
-
       if (!delegateId) throw new Error('No delegate ID — reinstall the bookmarklet')
 
       setStatus('Waiting for Portpass…')
       var blob = await sendViaSwitchboard({
         type: 'publish', channel: delegateId, replyTo: nonce,
-        url: currentUrl, ecdh: cpEcdhSpkiB64, ts: ts, sig: sigB64, pub: pubSpkiB64
+        url: currentUrl, ecdh: cpEcdhSpkiB64, ts: ts, sig: sigB64, pub: cpPubSpkiB64
       })
       await processRelayBlob(blob)
-
-    } catch(e) {
-      sendError(e.message || 'Autofill failed')
-    }
+    } catch(e) { sendError(e.message || 'Autofill failed') }
   }
 
   function sendViaSwitchboard(requestMsg) {
     return new Promise(function(resolve, reject) {
       var ws
       try { ws = new WebSocket(switchboardWsUrl) } catch(e) {
-        reject(new Error('Invalid switchboard URL — check the switchboard URL in VaultSheet settings')); return
+        reject(new Error('Invalid switchboard URL — check settings')); return
       }
       var settled = false
       function done(fn, arg) { if (!settled) { settled = true; ws.close(); fn(arg) } }
-      ws.onopen = function() { ws.send(JSON.stringify(requestMsg)) }
+      ws.onopen    = function() { ws.send(JSON.stringify(requestMsg)) }
       ws.onmessage = function(e) {
         try {
           var msg = JSON.parse(e.data)
@@ -327,14 +410,10 @@ body {
       var iv = Uint8Array.from(atob(blob.iv), function(c) { return c.charCodeAt(0) })
       var ct = Uint8Array.from(atob(blob.ciphertext), function(c) { return c.charCodeAt(0) })
       var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, cpSessionKey, ct)
-      var records = JSON.parse(new TextDecoder().decode(pt))
-      showCrossProfilePicker(records)
-    } catch(e) {
-      sendError('Decrypt failed: ' + e.message)
-    }
+      showCrossProfilePicker(JSON.parse(new TextDecoder().decode(pt)))
+    } catch(e) { sendError('Decrypt failed: ' + e.message) }
   }
 
-  // Fire-and-forget: sends a signed save-url request to Dashboard via the switchboard.
   function saveUrlViaSwitchboard(uuid, vaultUuid) {
     if (!cpSigningKey || !cpPubSpkiB64 || !delegateId) return
     var saveNonce = crypto.randomUUID()
@@ -366,13 +445,235 @@ body {
     }
   }
 
-  // ── Record row builder ────────────────────────────────────────────────────
+  // ── Record selection — shared entry point ──────────────────────────────────
+  // Called when a picker row is clicked (or auto-advanced for single exact match).
+  function selectRecord(rec, fromPhase) {
+    chosen = rec
+    previousPhase = fromPhase   // null → no Back button
+    fieldClicked = false
+    pendingCredentials = null
+    showWaiting()
+
+    if (isSameProfile) {
+      // Fetch credentials asynchronously; pendingFill() triggers when both are ready.
+      selectedUuid = rec.uuid
+      selectedVaultUuid = rec.vaultUuid || null
+      ch.postMessage({ type: 'relay-query', uuid: selectedUuid, vaultUuid: selectedVaultUuid, nonce: relayNonce })
+    } else {
+      // Cross-profile: credentials already decrypted in rec.
+      pendingCredentials = { autotype: rec.autotype, fields: rec.fields, sensitiveCodes: rec.sensitiveCodes || [] }
+      pendingFill()
+    }
+  }
+
+  // Triggers fill when credentials AND a field signal (hasActiveField or fieldClicked) are ready.
+  function pendingFill() {
+    if (!pendingCredentials) return
+    if (!hasActiveField && !fieldClicked) return
+
+    var cred = pendingCredentials
+    pendingCredentials = null
+
+    // HTTP security check
+    if (!isSecure && sequenceHasSensitiveCode(cred.autotype || '', cred.sensitiveCodes || [])) {
+      showErrorPhase('http')
+      return
+    }
+
+    if (window.opener) {
+      window.opener.postMessage(
+        { type: 'fill', autotype: cred.autotype, fields: cred.fields },
+        bookmarkletOrigin || '*'
+      )
+    }
+  }
+
+  // ── Phase rendering ────────────────────────────────────────────────────────
+
+  function makeSelectedRecordRow(rec) {
+    var row = document.createElement('div')
+    row.className = 'selected-record-row'
+    var spacer1 = document.createElement('div')
+    spacer1.style.cssText = 'width:16px;flex-shrink:0'
+    var nameEl = document.createElement('div')
+    nameEl.className = 'rec-name'
+    nameEl.textContent = rec.title
+    nameEl.title = rec.title
+    var indicator
+    if (rec.matchType === 'exact') {
+      indicator = document.createElement('div')
+      indicator.className = 'rec-match-badge'
+      indicator.innerHTML = SVG_CHECK_SM + ' match'
+    } else {
+      indicator = document.createElement('div')
+      indicator.className = 'rec-url'
+      var u = rec.existingUrl ? canonicalURL(rec.existingUrl) : ''
+      indicator.textContent = u
+      indicator.title = u
+    }
+    var spacer2 = document.createElement('div')
+    spacer2.style.cssText = 'width:22px;flex-shrink:0'
+    row.appendChild(spacer1)
+    row.appendChild(nameEl)
+    row.appendChild(indicator)
+    row.appendChild(spacer2)
+    return row
+  }
+
+  function showWaiting() {
+    $subheader.style.display = 'none'
+    $content.innerHTML = ''
+    $content.appendChild(makeSelectedRecordRow(chosen))
+
+    var center = document.createElement('div')
+    center.className = 'pp-phase-center'
+
+    var illus = document.createElement('div')
+    illus.className = 'pp-waiting-illus'
+    illus.innerHTML = SVG_WAITING
+
+    var title = document.createElement('div')
+    title.className = 'pp-waiting-title'
+    title.textContent = 'Click a field to begin'
+
+    var sub = document.createElement('div')
+    sub.className = 'pp-waiting-sub'
+    sub.textContent = 'Click any username or password field on the page'
+
+    center.appendChild(illus)
+    center.appendChild(title)
+    center.appendChild(sub)
+    $content.appendChild(center)
+
+    // Footer with Back (if applicable) and Cancel
+    var footer = document.createElement('div')
+    footer.className = 'pp-footer'
+    if (previousPhase !== null) {
+      var backBtn = document.createElement('button')
+      backBtn.className = 'pp-footer-btn'
+      backBtn.textContent = '← Back'
+      backBtn.onclick = goBack
+      footer.appendChild(backBtn)
+    } else {
+      footer.appendChild(document.createElement('span'))  // spacer
+    }
+    var cancelBtn = document.createElement('button')
+    cancelBtn.className = 'pp-footer-btn'
+    cancelBtn.textContent = 'Cancel'
+    cancelBtn.onclick = function() { window.close() }
+    footer.appendChild(cancelBtn)
+    $content.appendChild(footer)
+  }
+
+  function showDone() {
+    $subheader.style.display = 'none'
+    $content.innerHTML = ''
+    if (chosen) $content.appendChild(makeSelectedRecordRow(chosen))
+
+    var center = document.createElement('div')
+    center.className = 'pp-phase-center pp-phase-done'
+
+    var circle = document.createElement('div')
+    circle.className = 'pp-done-circle'
+    circle.innerHTML = SVG_CHECK_MD
+
+    var title = document.createElement('div')
+    title.className = 'pp-done-title'
+    title.textContent = 'Filled'
+
+    var sub = document.createElement('div')
+    sub.className = 'pp-done-sub'
+    sub.textContent = 'This window will close'
+
+    center.appendChild(circle)
+    center.appendChild(title)
+    center.appendChild(sub)
+    $content.appendChild(center)
+
+    setTimeout(function() { window.close() }, 1500)
+  }
+
+  function detectErrorPhase(msg) {
+    var lm = (msg || '').toLowerCase()
+    if (/lock/.test(lm) || /open a record/.test(lm))                         return 'locked'
+    if (/autofill sequence|no autofill|autotype|could not parse/.test(lm))   return 'noseq'
+    if (/non-https|insecure|sensitive.*http/.test(lm))                       return 'http'
+    return 'other'
+  }
+
+  function showErrorPhase(errorPhase, rawMsg) {
+    $subheader.style.display = 'none'
+    $content.innerHTML = ''
+    if (chosen) $content.appendChild(makeSelectedRecordRow(chosen))
+
+    var configs = {
+      locked: { icon: SVG_LOCK_LG, color: 'var(--red)',    title: 'Vault is locked',
+                body: 'Unlock Portpass to use autofill.', action: 'Unlock Portpass →' },
+      noseq:  { icon: SVG_WARN_LG, color: 'var(--orange)', title: 'No autofill sequence set',
+                body: 'This password has no autofill sequence configured.', action: 'Edit in Portpass →' },
+      http:   { icon: SVG_WARN_LG, color: 'var(--red)',    title: 'Insecure page — blocked',
+                body: 'Passwords are only autofilled on HTTPS pages.', action: null },
+      other:  { icon: SVG_WARN_LG, color: 'var(--red)',    title: 'Autofill failed',
+                body: rawMsg || '', action: null },
+    }
+    var cfg = configs[errorPhase] || configs.other
+
+    var center = document.createElement('div')
+    center.className = 'pp-phase-center'
+
+    var iconWrap = document.createElement('div')
+    iconWrap.className = 'pp-error-icon-wrap'
+    iconWrap.style.color = cfg.color
+    iconWrap.innerHTML = cfg.icon
+
+    var titleEl = document.createElement('div')
+    titleEl.className = 'pp-error-title'
+    titleEl.style.color = cfg.color
+    titleEl.textContent = cfg.title
+
+    var bodyEl = document.createElement('div')
+    bodyEl.className = 'pp-error-body'
+    bodyEl.textContent = cfg.body
+
+    center.appendChild(iconWrap)
+    center.appendChild(titleEl)
+    if (cfg.body) center.appendChild(bodyEl)
+
+    if (cfg.action) {
+      var link = document.createElement('a')
+      link.className = 'pp-error-action'
+      link.textContent = cfg.action
+      link.href = PORTPASS_URL || '#'
+      link.target = '_blank'
+      link.rel = 'noopener'
+      center.appendChild(link)
+    }
+
+    $content.appendChild(center)
+  }
+
+  // Back button: return to previous phase, clear chosen record and pending state.
+  function goBack() {
+    chosen = null
+    pendingCredentials = null
+    fieldClicked = false
+    var prev = previousPhase
+    previousPhase = null
+    if (prev === 'pick') {
+      showPickerContent(lastRecords)
+    } else if (prev === 'norecords') {
+      showSearchFallback(isSameProfile)
+    } else {
+      window.close()
+    }
+  }
+
+  // ── Picker rendering ───────────────────────────────────────────────────────
 
   function buildRecordRow(rec, onFill) {
     var row = document.createElement('div')
     row.className = 'rec-row'
 
-    // Marker column (16px) — P logo for 'open' match type
     var marker = document.createElement('div')
     marker.className = 'rec-marker'
     if (rec.isCurrent) {
@@ -383,7 +684,6 @@ body {
       marker.appendChild(mlogo)
     }
 
-    // Name column (flex: 1)
     var nameEl = document.createElement('div')
     nameEl.className = 'rec-name'
     nameEl.textContent = rec.title
@@ -391,19 +691,17 @@ body {
 
     var storedCanonical = rec.existingUrl ? canonicalURL(rec.existingUrl) : ''
 
-    // Exact match: amber pill badge, no pencil
+    // Exact match: amber badge, no pencil
     if (rec.matchType === 'exact') {
       var badge = document.createElement('div')
       badge.className = 'rec-match-badge'
-      badge.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg> match'
-      row.onclick = function() { onFill(rec.uuid, rec.vaultUuid || null) }
-      row.appendChild(marker)
-      row.appendChild(nameEl)
-      row.appendChild(badge)
+      badge.innerHTML = SVG_CHECK_SM + ' match'
+      row.onclick = function() { onFill(rec) }
+      row.appendChild(marker); row.appendChild(nameEl); row.appendChild(badge)
       return row
     }
 
-    // Non-exact: muted URL text + pencil (except search results which have no pencil)
+    // Non-exact: muted URL + optional pencil
     var urlEl = document.createElement('div')
     urlEl.className = 'rec-url'
     urlEl.textContent = storedCanonical
@@ -441,57 +739,52 @@ body {
 
     row.onclick = function(e) {
       if (pencilEl && (e.target === pencilEl || pencilEl.contains(e.target))) return
-      onFill(rec.uuid, rec.vaultUuid || null)
+      onFill(rec)
     }
-
-    row.appendChild(marker)
-    row.appendChild(nameEl)
-    row.appendChild(urlEl)
+    row.appendChild(marker); row.appendChild(nameEl); row.appendChild(urlEl)
     if (pencilEl) row.appendChild(pencilEl)
     return row
   }
 
-  // ── Pickers ───────────────────────────────────────────────────────────────
+  function showPickerContent(records) {
+    $subheader.style.display = ''
+    $content.innerHTML = ''
+    records.forEach(function(rec) {
+      $content.appendChild(buildRecordRow(rec, function(r) {
+        selectRecord(r, 'pick')
+      }))
+    })
+  }
 
   function showCrossProfilePicker(records) {
     if (!records || !records.length) { showSearchFallback(false); return }
-    $content.innerHTML = ''
-    records.forEach(function(r) {
-      $content.appendChild(buildRecordRow(r, function(uuid, vaultUuid) {
-        if (!isSecure && sequenceHasSensitiveCode(r.autotype || '', r.sensitiveCodes || [])) {
-          sendError('Cannot autofill sensitive fields on a non-HTTPS page')
-          return
-        }
-        if (window.opener) {
-          window.opener.postMessage(
-            { type: 'fill', title: r.title, autotype: r.autotype, fields: r.fields,
-              theme: localStorage.getItem('theme') || 'dark' },
-            bookmarkletOrigin || '*'
-          )
-        }
-        setTimeout(function() { window.close() }, 100)
-      }))
-    })
+    // Single exact match → skip picker, go straight to waiting
+    if (records.length === 1 && records[0].matchType === 'exact') {
+      selectRecord(records[0], null); return
+    }
+    lastRecords = records
+    showPickerContent(records)
   }
 
   function showPicker(records) {
     if (!records || !records.length) { showSearchFallback(true); return }
-    $content.innerHTML = ''
-    records.forEach(function(rec) {
-      $content.appendChild(buildRecordRow(rec, function(uuid, vaultUuid) {
-        fillRecord(uuid, vaultUuid)
-      }))
-    })
+    // Single exact match → auto-advance to waiting
+    if (records.length === 1 && records[0].matchType === 'exact') {
+      selectRecord(records[0], null); return
+    }
+    lastRecords = records
+    showPickerContent(records)
   }
 
-  // ── Search fallback (shown when no URL matches) ───────────────────────────
+  // ── Search fallback ────────────────────────────────────────────────────────
 
   function showSearchFallback(canSearch) {
+    $subheader.style.display = 'none'
     $content.innerHTML = ''
 
     var notice = document.createElement('div')
     notice.className = 'pp-notice'
-    notice.innerHTML = SVG_WARN + ' No passwords match '
+    notice.innerHTML = SVG_WARN + ' No passwords match '
     var em = document.createElement('strong')
     em.textContent = currentUrl
     em.style.color = 'var(--text)'
@@ -517,7 +810,7 @@ body {
 
     var hdr = document.createElement('div')
     hdr.className = 'pp-section-hdr'
-    hdr.textContent = 'RESULTS — CLICK TO AUTOFILL + SAVE URL'
+    hdr.textContent = 'RESULTS — CLICK TO AUTOFILL'
     hdr.style.display = 'none'
     $content.appendChild(hdr)
 
@@ -531,8 +824,7 @@ body {
       clearTimeout(debounce)
       var q = searchInput.value.trim()
       if (!q) {
-        hdr.style.display = 'none'
-        placeholder.style.display = ''
+        hdr.style.display = 'none'; placeholder.style.display = ''
         placeholder.textContent = 'Type to search all passwords'
         var rows = $content.querySelectorAll('.rec-row')
         for (var i = 0; i < rows.length; i++) rows[i].parentNode.removeChild(rows[i])
@@ -550,25 +842,22 @@ body {
     var placeholder = $content.querySelector('.pp-placeholder')
     var rows = $content.querySelectorAll('.rec-row')
     for (var i = 0; i < rows.length; i++) rows[i].parentNode.removeChild(rows[i])
-
     if (!records || !records.length) {
       if (hdr) hdr.style.display = 'none'
       if (placeholder) { placeholder.style.display = ''; placeholder.textContent = 'No matching passwords found' }
       return
     }
-
     if (hdr) hdr.style.display = ''
     if (placeholder) placeholder.style.display = 'none'
-
     records.forEach(function(rec) {
-      $content.appendChild(buildRecordRow(rec, function(uuid, vaultUuid) {
-        doSaveUrl(uuid, vaultUuid)
-        fillRecord(uuid, vaultUuid)
+      $content.appendChild(buildRecordRow(rec, function(r) {
+        doSaveUrl(r.uuid, r.vaultUuid || null)
+        selectRecord(r, 'norecords')
       }))
     })
   }
 
-  // ── Same-profile path ─────────────────────────────────────────────────────
+  // ── Same-profile BroadcastChannel path ────────────────────────────────────
 
   async function doHello() {
     isSameProfile = true
@@ -610,9 +899,7 @@ body {
       var helloMsg = { type: 'relay-hello', pubkey: pubJwk, ecdhSpki: ecdhSpkiB64, nonce: relayNonce }
       if (sigB64 && pubSpkiB64) { helloMsg.sig = sigB64; helloMsg.pub = pubSpkiB64 }
       ch.postMessage(helloMsg)
-    } catch(_) {
-      sendError('Key exchange failed')
-    }
+    } catch(_) { sendError('Key exchange failed') }
   }
 
   async function onHelloResponse(msg) {
@@ -636,42 +923,39 @@ body {
     if (!msg || msg.nonce !== relayNonce) return
     if      (msg.type === 'relay-records')        showPicker(msg.records)
     else if (msg.type === 'relay-record')         deliverFill(msg)
-    else if (msg.type === 'relay-url-saved')      {} // pencil save — no further action needed
+    else if (msg.type === 'relay-url-saved')      {}  // pencil save, no further action
     else if (msg.type === 'relay-search-results') showSearchResults(msg.records)
     else if (msg.type === 'relay-error')          sendError(msg.message)
   }
 
-  function fillRecord(uuid, vaultUuid) {
-    selectedUuid = uuid
-    selectedVaultUuid = vaultUuid
-    setStatus('Fetching credentials…')
-    ch.postMessage({ type: 'relay-query', uuid: selectedUuid, vaultUuid: selectedVaultUuid, nonce: relayNonce })
-  }
-
   async function deliverFill(msg) {
     try {
-      if (!isSecure && sequenceHasSensitiveCode(msg.autotype || '', msg.sensitiveCodes || [])) {
-        sendError('Cannot autofill sensitive fields on a non-HTTPS page')
-        return
-      }
       var iv = Uint8Array.from(atob(msg.iv), function(c) { return c.charCodeAt(0) })
       var ct = Uint8Array.from(atob(msg.ciphertext), function(c) { return c.charCodeAt(0) })
       var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, sessionKey, ct)
       var fields = JSON.parse(new TextDecoder().decode(pt))
-      if (window.opener) {
-        window.opener.postMessage(
-          { type: 'fill', title: msg.title, autotype: msg.autotype, fields: fields,
-            theme: localStorage.getItem('theme') || 'dark' },
-          bookmarkletOrigin || '*'
-        )
-      }
-      setTimeout(function() { window.close() }, 100)
-    } catch(_) {
-      sendError('Failed to decrypt credentials')
+      pendingCredentials = { autotype: msg.autotype, fields: fields, sensitiveCodes: msg.sensitiveCodes || [] }
+      pendingFill()
+    } catch(_) { sendError('Failed to decrypt credentials') }
+  }
+
+  // ── Error handling ─────────────────────────────────────────────────────────
+
+  function sendError(message) {
+    var phase = detectErrorPhase(message)
+    showErrorPhase(phase, message)
+    // Also forward to bookmarklet so it can clean up, but no overlay.
+    if (window.opener) {
+      try { window.opener.postMessage({ type: 'cancel' }, bookmarkletOrigin || '*') } catch(_) {}
     }
   }
 
-  // ── Shared helpers ────────────────────────────────────────────────────────
+  // ── Shared helpers ─────────────────────────────────────────────────────────
+
+  var PORTPASS_URL = (function() {
+    var p = window.location.href
+    return p.slice(0, p.lastIndexOf('/') + 1)
+  }())
 
   function sequenceHasSensitiveCode(seq, sensitiveCodes) {
     if (!sensitiveCodes || !sensitiveCodes.length) return false
@@ -696,16 +980,6 @@ body {
       }
     }
     return false
-  }
-
-  function sendError(message) {
-    $content.innerHTML = ''
-    var el = document.createElement('div')
-    el.className = 'pp-error'
-    el.textContent = message
-    $content.appendChild(el)
-    if (window.opener) window.opener.postMessage({ type: 'error', message: message }, '*')
-    setTimeout(function() { window.close() }, 3000)
   }
 
   function canonicalURL(href) {
