@@ -521,7 +521,7 @@ body {
     var bcCount = bcPongCount
     var wsCount = wsProbeReplies.length
 
-    if (bcCount > 1 || wsCount > 1 || (bcCount >= 1 && wsCount >= 1)) {
+    if (bcCount > 1 || wsCount > 1) {
       showErrorPhase('multiinstance')
       if (window.opener) {
         try { window.opener.postMessage({ type: 'cancel' }, bookmarkletOrigin || '*') } catch(_) {}
@@ -532,6 +532,7 @@ body {
       sendError(wsProbeError || 'Cannot connect to websocket relay')
       return
     }
+    // Prefer BC when available — same instance may respond on both channels if cross-profile is enabled
     if (bcCount >= 1) { doHello(); return }
     processRelayBlob(wsProbeReplies[0])
   }
