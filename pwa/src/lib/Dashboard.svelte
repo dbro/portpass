@@ -49,6 +49,11 @@
   let secondaryCount    = $derived($secondaryVaults.length)
   let allVaultsReadonly = $derived($selectedFile?.readonly && $secondaryVaults.every(v => v.readonly))
 
+  // Tracked file modification timestamps — detect external changes before saving.
+  // Kept outside $state; these are write-guards, not reactive UI state.
+  let primaryModified = null   // lastModified of the primary vault file
+  let secondaryModified = {}   // keyed by vault UUID
+
   // State for the "unlock additional vault" modal flow.
   // handle is kept outside $state to prevent Svelte 5 from deep-proxying the FileSystemFileHandle.
   let _secondaryHandle = null
@@ -77,6 +82,14 @@
       dbName   = info?.name ?? ''
       lastSave = info?.when ?? ''
     } catch (e) {}
+    const h = get(selectedFile)?.handle
+    if (h) h.getFile().then(f => { primaryModified = f.lastModified }).catch(() => {})
+    for (const sv of get(secondaryVaults)) {
+      if (sv.handle) {
+        const uuid = sv.uuid
+        sv.handle.getFile().then(f => { secondaryModified[uuid] = f.lastModified }).catch(() => {})
+      }
+    }
     getSwitchboardUrl(dbKey).then(url => switchboardUrl.set(url)).catch(() => {})
     getCrossProfileEnabled(dbKey).then(v => crossProfileEnabled.set(v)).catch(() => {})
     document.addEventListener('visibilitychange', onVisibilityChange)
@@ -762,10 +775,19 @@
             : v
           ))
           selectedVaultUuid = targetVault
+          if (secondaryModified[targetVault] !== undefined) {
+            try {
+              const current = (await sv.handle.getFile()).lastModified
+              if (current !== secondaryModified[targetVault]) {
+                if (!confirm(`"${sv.name || sv.filename}" was modified by another Portpass instance since it was loaded.\n\nSaving will overwrite those changes. Save anyway?`)) return
+              }
+            } catch {}
+          }
           const data = saveDatabase(targetVault)
           const w = await sv.handle.createWritable()
           await w.write(data)
           await w.close()
+          try { secondaryModified[targetVault] = (await sv.handle.getFile()).lastModified } catch {}
           showToast('Saved to ' + (sv.name || sv.filename), null, 2000)
         }
       }
@@ -809,10 +831,19 @@
                 ? { ...v, items: items.map(i => ({ ...i, vaultUuid: targetVault })) }
                 : v
               ))
+              if (secondaryModified[targetVault] !== undefined) {
+                try {
+                  const current = (await sv.handle.getFile()).lastModified
+                  if (current !== secondaryModified[targetVault]) {
+                    if (!confirm(`"${sv.name || sv.filename}" was modified by another Portpass instance since it was loaded.\n\nSaving will overwrite those changes. Save anyway?`)) return
+                  }
+                } catch {}
+              }
               const data = saveDatabase(targetVault)
               const w = await sv.handle.createWritable()
               await w.write(data)
               await w.close()
+              try { secondaryModified[targetVault] = (await sv.handle.getFile()).lastModified } catch {}
             }
           }
         } catch (e) {
@@ -866,9 +897,18 @@
         selectedFile.update(s => ({ ...s, handle, name: handle.name }))
       }
 
+      if (primaryModified !== null) {
+        try {
+          const current = (await handle.getFile()).lastModified
+          if (current !== primaryModified) {
+            if (!confirm('This vault was modified by another Portpass instance since it was loaded.\n\nSaving will overwrite those changes. Save anyway?')) return
+          }
+        } catch {}
+      }
       const w = await handle.createWritable()
       await w.write(data)
       await w.close()
+      try { primaryModified = (await handle.getFile()).lastModified } catch {}
       isDirty = false
       try { lastSave = getDatabaseInfo(dbKey)?.when ?? '' } catch {}
       if (!silent) showToast('Vault saved')
@@ -1144,6 +1184,7 @@
           masterPassword: secondarySetup.password,
         }]
       })
+      _secondaryHandle.getFile().then(f => { secondaryModified[secondaryUuid] = f.lastModified }).catch(() => {})
       secondarySetup = null
       sheetOpen = true
     } catch (e) {
