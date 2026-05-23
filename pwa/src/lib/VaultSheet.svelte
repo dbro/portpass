@@ -480,7 +480,7 @@
         </div>
         {#if $crossProfileEnabled}
           <label class="vault-label muted" style="font-size:12px;display:block;margin-bottom:4px">
-            Switchboard URL
+            WebSocket Relay URL
             <input
               class="input"
               style="font-size:13px;display:block;width:100%;margin-top:4px"
@@ -498,7 +498,7 @@
           <div class="switchboard-status-row">
             <span class="switchboard-status-dot" class:switchboard-ok={$switchboardConnected} class:switchboard-error={!$switchboardConnected}></span>
             <span class="muted" style="font-size:13px">
-              {$switchboardConnected ? 'Cross-profile autofill ready' : 'switchboard not connected'}
+              {$switchboardConnected ? 'Cross-profile autofill ready' : 'websocket relay not connected'}
             </span>
           </div>
           <div class="muted" style="font-size:12px">

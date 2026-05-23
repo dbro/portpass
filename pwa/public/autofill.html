@@ -510,7 +510,7 @@ body {
           else if (msg.type === 'reply') done(resolve, msg)
         } catch(_) { done(reject, new Error('Invalid relay message')) }
       }
-      ws.onerror = function() { done(reject, new Error('Portpass is not open — open and unlock Portpass, or start the relay server')) }
+      ws.onerror = function() { done(reject, new Error('Cannot connect to websocket relay')) }
       ws.onclose = function() { if (!settled) done(reject, new Error('relay server closed unexpectedly')) }
     })
   }
@@ -765,7 +765,8 @@ body {
 
   function detectErrorPhase(msg) {
     var lm = (msg || '').toLowerCase()
-    if (/lock/.test(lm) || /open a record/.test(lm))                         return 'locked'
+    if (/cannot connect|websocket relay/.test(lm))                           return 'noconn'
+    if (/vault.*lock|is locked/.test(lm) || /open a record/.test(lm))       return 'locked'
     if (/autofill sequence|no autofill|autotype|could not parse/.test(lm))   return 'noseq'
     if (/non-https|insecure|sensitive.*http/.test(lm))                       return 'http'
     return 'other'
@@ -778,6 +779,10 @@ body {
     if (chosen) $content.appendChild(makeSelectedRecordRow(chosen))
 
     var configs = {
+      noconn: { icon: SVG_WARN_LG, color: 'var(--orange)', title: 'Portpass not found',
+                body: ["Portpass isn't open in this browser profile, and the websocket relay isn't running.",
+                       "To fix: open and unlock Portpass in this browser — or start the websocket relay, then open Portpass in a separate browser profile."],
+                action: 'Open Portpass →' },
       locked: { icon: SVG_LOCK_LG, color: 'var(--red)',    title: 'Vault is locked',
                 body: 'Unlock Portpass to use autofill.', action: 'Unlock Portpass →' },
       noseq:  { icon: SVG_WARN_LG, color: 'var(--orange)', title: 'No autofill sequence set',
@@ -802,13 +807,17 @@ body {
     titleEl.style.color = cfg.color
     titleEl.textContent = cfg.title
 
-    var bodyEl = document.createElement('div')
-    bodyEl.className = 'pp-error-body'
-    bodyEl.textContent = cfg.body
-
     center.appendChild(iconWrap)
     center.appendChild(titleEl)
-    if (cfg.body) center.appendChild(bodyEl)
+    if (cfg.body) {
+      var bodyLines = Array.isArray(cfg.body) ? cfg.body : [cfg.body]
+      bodyLines.forEach(function(line) {
+        var el = document.createElement('div')
+        el.className = 'pp-error-body'
+        el.textContent = line
+        center.appendChild(el)
+      })
+    }
 
     if (cfg.action) {
       var link = document.createElement('a')
