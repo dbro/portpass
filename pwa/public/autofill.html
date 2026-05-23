@@ -113,10 +113,11 @@ body {
 /* Done circle */
 .pp-done-circle {
   width: 56px; height: 56px; border-radius: 50%;
-  background: var(--green-bg);
+  background: var(--amber-bg);
   display: flex; align-items: center; justify-content: center;
+  color: var(--amber);
 }
-.pp-done-title { font-size: 18px; font-weight: 700; color: var(--success) }
+.pp-done-title { font-size: 18px; font-weight: 700; color: var(--amber) }
 .pp-done-sub   { font-size: 13px; color: var(--text-muted) }
 
 /* Waiting text */
@@ -808,7 +809,7 @@ body {
 
   function detectErrorPhase(msg) {
     var lm = (msg || '').toLowerCase()
-    if (/cannot connect|websocket relay/.test(lm))                           return 'noconn'
+    if (/cannot connect|websocket relay|no subscriber/.test(lm))             return 'noconn'
     if (/vault.*lock|is locked/.test(lm) || /open a record/.test(lm))       return 'locked'
     if (/autofill sequence|no autofill|autotype|could not parse/.test(lm))   return 'noseq'
     if (/non-https|insecure|sensitive.*http/.test(lm))                       return 'http'
@@ -826,8 +827,8 @@ body {
                        body: 'More than one Portpass window is open. Close all but one and try again, or use the secondary vault feature to access multiple vaults from one window.',
                        action: null },
       noconn: { icon: SVG_WARN_LG, color: 'var(--orange)', title: 'Portpass not found',
-                body: ["Portpass isn't open in this browser profile, and the websocket relay isn't running.",
-                       "To fix: open and unlock Portpass in this browser — or start the websocket relay, then open Portpass in a separate browser profile."],
+                body: ["Portpass isn't open in this browser profile.",
+                       "Open and unlock Portpass, then try again — or start the websocket relay and open Portpass in a separate browser profile for cross-profile autofill."],
                 action: 'Open Portpass →' },
       locked: { icon: SVG_LOCK_LG, color: 'var(--red)',    title: 'Vault is locked',
                 body: 'Unlock Portpass to use autofill.', action: 'Unlock Portpass →' },
