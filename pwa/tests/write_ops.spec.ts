@@ -130,12 +130,14 @@ test.describe('Notes reveal in edit view', () => {
     await expect(page.locator('textarea')).not.toBeVisible()
   })
 
-  test('records without notes show textarea directly with no eye icon', async ({ page }) => {
-    await openVault(page)
-    // three entry 2 has no notes set
-    await page.locator('.record-row', { hasText: 'three entry 2' }).click()
-    await page.getByRole('button', { name: 'Edit' }).click()
+  test('new record with no notes shows textarea directly with no eye icon', async ({ page }) => {
+    await createVault(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    await page.getByPlaceholder('e.g. Bank of America').fill('No Notes Entry')
+    const pwInput = page.locator('input.mono').first()
+    await pwInput.fill('secret')
 
+    // Notes textarea should be present without any masking or eye icon
     await expect(page.locator('textarea')).toBeVisible()
     await expect(page.locator('.notes-masked')).not.toBeVisible()
     await expect(page.getByLabel('Reveal notes')).not.toBeVisible()
