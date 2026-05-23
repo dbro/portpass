@@ -47,7 +47,7 @@
     return { secret: secret.toUpperCase().replace(/[\s-]/g, ''), digits, period }
   }
 
-  let { record, isNew, isDesktop, hasDelegates = false, vaultUuid, rwVaults = [], onvaultchange, oncancel, onsave, ondelete, ondirtychange } = $props()
+  let { record, isNew, isDesktop, bookmarkletsSupported = false, hasDelegates = false, vaultUuid, rwVaults = [], onvaultchange, oncancel, onsave, ondelete, ondirtychange } = $props()
 
   let vaultDropOpen = $state(false)
 
@@ -595,7 +595,7 @@
       <input class="input" value={draft.URL} oninput={e => set('URL', e.target.value)}/>
     </label>
 
-    {#if isDesktop}
+    {#if bookmarkletsSupported}
     <div class="field">
       <div class="autotype-header">
         <div class="autotype-label-group">

@@ -8,7 +8,7 @@
   import { getDelegates, addDelegate, revokeDelegate, setSwitchboardUrl, setCrossProfileEnabled } from './delegates.js'
   import Icon from './Icon.svelte'
 
-  let { isDesktop, onback, onlock, onlockall, onlocksecondary, onunlockadditional, ondbsave, ondirtychange, theme, accent, ontheme, onaccent } = $props()
+  let { isDesktop, bookmarkletsSupported = false, onback, onlock, onlockall, onlocksecondary, onunlockadditional, ondbsave, ondirtychange, theme, accent, ontheme, onaccent } = $props()
 
   // ── Biometric ──────────────────────────────────────────────────────────────
   let biometricAvailable = $state(false)
@@ -445,7 +445,7 @@
   </div>
 
   <!-- Autofill delegates -->
-  {#if isDesktop}
+  {#if bookmarkletsSupported}
   <div class="vault-section">
     <div class="vault-section-title">AUTOFILL</div>
     <p class="muted" style="font-size:14px;margin:0 0 14px;line-height:1.5">

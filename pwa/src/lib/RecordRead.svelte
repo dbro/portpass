@@ -5,7 +5,7 @@
   import { getTOTP, getFieldValue, getCustomFieldValue } from '../wasm.js'
   import Icon from './Icon.svelte'
 
-  let { record, uuid, isDesktop, hasDelegates = false, vaultUuid, onback, onedit, oncopy, oncopytotp,
+  let { record, uuid, isDesktop, bookmarkletsSupported = false, hasDelegates = false, vaultUuid, onback, onedit, oncopy, oncopytotp,
         onwasmcopyfield, onwasmcopycustomfield } = $props()
 
   let revealed        = $state(false)
@@ -472,7 +472,7 @@
       </div>
     {/if}
 
-  {#if isDesktop}
+  {#if bookmarkletsSupported}
     {@const autotypeSeq = record.Autotype || ''}
     {@const isDefault = !autotypeSeq}
     {@const displaySeq = autotypeSeq || '\\u\\t\\p\\n'}

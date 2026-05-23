@@ -19,7 +19,8 @@
 
   let theme  = $state(localStorage.getItem('theme')  || 'dark')
   let accent = $state(localStorage.getItem('accent') || 'amber')
-  let isDesktop = $state(false)
+  let isDesktop             = $state(false)
+  let bookmarkletsSupported = $state(false)
 
   $effect(() => { localStorage.setItem('theme',  theme)  })
   $effect(() => { localStorage.setItem('accent', accent) })
@@ -188,6 +189,10 @@
     isDesktop = mq.matches
     mq.addEventListener('change', e => { isDesktop = e.matches })
 
+    const ptrMq = window.matchMedia('(pointer: fine)')
+    bookmarkletsSupported = ptrMq.matches
+    ptrMq.addEventListener('change', e => { bookmarkletsSupported = e.matches })
+
     // In popup mode, try to bridge to an already-open unlocked Portpass tab.
     // If bridge succeeds, skip WASM loading — the popup is just a bridge.
     if (isPopup) {
@@ -240,6 +245,7 @@
       {theme}
       {accent}
       {isDesktop}
+      {bookmarkletsSupported}
       ontheme={t => theme = t}
       onaccent={a => accent = a}
       intent={pendingIntent}

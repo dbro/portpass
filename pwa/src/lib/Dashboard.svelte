@@ -19,7 +19,7 @@
   import RecordEdit from './RecordEdit.svelte'
   import VaultSheet from './VaultSheet.svelte'
 
-  let { onclosed, isPopup = false, theme, accent, isDesktop, ontheme, onaccent, intent = null, onclearintent } = $props()
+  let { onclosed, isPopup = false, theme, accent, isDesktop, bookmarkletsSupported = false, ontheme, onaccent, intent = null, onclearintent } = $props()
 
   function focusOnMount(node) {
     setTimeout(() => node.focus(), 0)
@@ -1488,6 +1488,7 @@
   {#if sheetOpen}
     <VaultSheet
       {isDesktop}
+      {bookmarkletsSupported}
       {theme}
       {accent}
       onback={closeVaultSheet}
@@ -1505,6 +1506,7 @@
       {record}
       {isNew}
       {isDesktop}
+      {bookmarkletsSupported}
       {hasDelegates}
       vaultUuid={isNew ? (newRecordVaultUuid || dbKey) : (selectedVaultUuid || dbKey)}
       {rwVaults}
@@ -1520,6 +1522,7 @@
         {record}
         uuid={selectedUUID}
         {isDesktop}
+        {bookmarkletsSupported}
         {hasDelegates}
         vaultUuid={selectedVaultUuid || dbKey}
         onback={() => { record = null; selectedUUID = null; selectedVaultUuid = null }}
