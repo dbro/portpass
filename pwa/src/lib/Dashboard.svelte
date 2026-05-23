@@ -12,7 +12,7 @@
   import { addSecondaryCredential, removeSecondaryCredential } from './secondaryVaults.js'
   import { getSwitchboardUrl, getCrossProfileEnabled } from './delegates.js'
   import { isBiometricEnrolledForFile, unlockWithBiometric } from './biometric.js'
-  import { getDelegates, verifyAndUpdate } from './delegates.js'
+  import { getDelegates, verifyDelegate, recordFill } from './delegates.js'
   import Icon from './Icon.svelte'
   import RecordList from './RecordList.svelte'
   import RecordRead from './RecordRead.svelte'
@@ -382,8 +382,14 @@
         const spkiBytes = Uint8Array.from(atob(msg.pub), c => c.charCodeAt(0))
         const sigBytes  = Uint8Array.from(atob(msg.sig), c => c.charCodeAt(0))
         const message   = new TextEncoder().encode(JSON.stringify({ url: msg.url, nonce: msg.replyTo, ecdh: msg.ecdh, ts: msg.ts }))
-        const verified  = await verifyAndUpdate(dbKey, spkiBytes, message, sigBytes, 'relay')
+        const verified  = await verifyDelegate(dbKey, spkiBytes, message, sigBytes)
         if (!verified) return
+        if (msg.msgType === 'fill-done') {
+          await recordFill(dbKey, verified.id, 'relay')
+          delegatesVersion.update(v => v + 1)
+          if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo }))
+          return
+        }
         if (msg.msgType === 'view-record') {
           if (msg.uuid) selectRecord(msg.uuid, msg.vaultUuid || null)
           if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo }))
@@ -426,7 +432,6 @@
           }
           return
         }
-        delegatesVersion.update(v => v + 1)
         await processAutofillIntent({ url: msg.url, nonce: msg.replyTo, ecdhSpkiB64: msg.ecdh })
       } catch(e) {}
     }
@@ -577,6 +582,7 @@
     const ch = new BroadcastChannel('portpass-autofill')
     let sessionKey = null
     let helloInProgress = false
+    let bcSessionDelegateId = null
 
     ch.onmessage = async event => {
       const msg = event.data
@@ -584,6 +590,14 @@
 
       if (msg.type === 'ping') {
         ch.postMessage({ type: 'pong', nonce: msg.nonce })
+        return
+      }
+
+      if (msg.type === 'fill-done') {
+        if (bcSessionDelegateId) {
+          await recordFill(dbKey, bcSessionDelegateId, 'bc')
+          delegatesVersion.update(v => v + 1)
+        }
         return
       }
 
@@ -600,12 +614,12 @@
           const spkiBytes = Uint8Array.from(atob(msg.pub), c => c.charCodeAt(0))
           const sigBytes  = Uint8Array.from(atob(msg.sig),  c => c.charCodeAt(0))
           const sigMsg    = new TextEncoder().encode(JSON.stringify({ nonce: msg.nonce, ecdhSpki: msg.ecdhSpki }))
-          const verified  = await verifyAndUpdate(dbKey, spkiBytes, sigMsg, sigBytes, 'bc')
+          const verified  = await verifyDelegate(dbKey, spkiBytes, sigMsg, sigBytes)
           if (!verified) {
             ch.postMessage({ type: 'error', message: 'Autofill request not authorized', nonce: msg.nonce })
             return
           }
-          delegatesVersion.update(v => v + 1)
+          bcSessionDelegateId = verified.id
           const openerPub = await crypto.subtle.importKey(
             'jwk', msg.pubkey, { name: 'ECDH', namedCurve: 'P-256' }, false, []
           )

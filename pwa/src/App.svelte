@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import { get } from 'svelte/store'
   import { selectedFile } from './store.js'
-  import { verifyAndUpdate } from './lib/delegates.js'
+  import { verifyDelegate } from './lib/delegates.js'
   import { loadWasm } from './wasm.js'
   import StartPage from './lib/StartPage.svelte'
   import Dashboard from './lib/Dashboard.svelte'
@@ -49,7 +49,7 @@
     const sigBytes  = Uint8Array.from(atob(sigB64), c => c.charCodeAt(0))
     const message   = new TextEncoder().encode(JSON.stringify({ url, nonce, ecdh: ecdhB64, ts }))
 
-    const delegate = await verifyAndUpdate(vaultUuid, spkiBytes, message, sigBytes)
+    const delegate = await verifyDelegate(vaultUuid, spkiBytes, message, sigBytes)
     if (!delegate) return
 
     pendingIntent = { url, nonce, ecdhSpkiB64: ecdhB64 }

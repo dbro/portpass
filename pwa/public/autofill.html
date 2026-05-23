@@ -511,7 +511,8 @@ body {
       viewRecord: function(uuid, vu) {
         return cpSignAndSend('view-record', { url: uuid, uuid: uuid, vaultUuid: vu || null })
       },
-      saveUrl: function(uuid, vu) { wsSaveUrl(uuid, vu) }
+      saveUrl: function(uuid, vu) { wsSaveUrl(uuid, vu) },
+      notifyFilled: function() { wsNotifyFilled() }
     }
   }
 
@@ -612,6 +613,28 @@ body {
 
   function doSelectSearchResult(rec) {
     selectRecord(rec, 'norecords')
+  }
+
+  function wsNotifyFilled() {
+    if (!cpSigningKey || !cpPubSpkiB64) return
+    var nonce = crypto.randomUUID()
+    var ts = Date.now()
+    var payload = JSON.stringify({ url: '', nonce: nonce, ecdh: '', ts: ts })
+    crypto.subtle.sign(
+      { name: 'ECDSA', hash: 'SHA-256' }, cpSigningKey, new TextEncoder().encode(payload)
+    ).then(function(sigBytes) {
+      var sigB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(sigBytes)))
+      var ws
+      try { ws = new WebSocket(wsRelayUrl) } catch(e) { return }
+      ws.onopen = function() {
+        ws.send(JSON.stringify({
+          type: 'publish', channel: 'portpass-autofill', replyTo: nonce,
+          msgType: 'fill-done', url: '', ecdh: '', ts: ts, sig: sigB64, pub: cpPubSpkiB64
+        }))
+      }
+      ws.onmessage = function() { ws.close() }
+      ws.onerror = ws.onclose = function() {}
+    }).catch(function() {})
   }
 
   function wsSaveUrl(uuid, vaultUuid) {
@@ -778,6 +801,7 @@ body {
   }
 
   function showDone() {
+    if ($transport && $transport.notifyFilled) $transport.notifyFilled()
     hideSearchUI()
     $subheader.style.display = 'none'
     $content.innerHTML = ''
@@ -1210,6 +1234,9 @@ body {
       },
       saveUrl: function(uuid, vu) {
         ch.postMessage({ type: 'save-url', uuid: uuid, vaultUuid: vu || null, url: saveUrl, nonce: nonce })
+      },
+      notifyFilled: function() {
+        ch.postMessage({ type: 'fill-done' })
       }
     }
     setStatus('Searching for matches…')

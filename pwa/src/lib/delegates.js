@@ -51,17 +51,15 @@ export async function revokeDelegate(vaultUuid, delegateId) {
   await save(all)
 }
 
-// Verify a signature against registered delegates. On success, increments the
-// counter for the given channel ('bc' or 'relay') and returns the delegate.
-// Returns null if no delegate matches or signature is invalid.
-export async function verifyAndUpdate(vaultUuid, spkiBytes, message, signatureBytes, channel) {
+// Verify a signature against registered delegates. Returns the matching delegate
+// on success, null if no delegate matches or the signature is invalid.
+export async function verifyDelegate(vaultUuid, spkiBytes, message, signatureBytes) {
   const all = await load()
   const list = (all[vaultUuid] ?? []).map(migrate)
   for (const d of list) {
     const stored = new Uint8Array(d.publicKey)
-    const lenMatch = stored.length === spkiBytes.length
-    const bytesMatch = lenMatch && stored.every((b, i) => b === spkiBytes[i])
-    if (!bytesMatch) continue
+    if (stored.length !== spkiBytes.length) continue
+    if (!stored.every((b, i) => b === spkiBytes[i])) continue
     try {
       const key = await crypto.subtle.importKey(
         'spki', spkiBytes, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']
@@ -69,21 +67,28 @@ export async function verifyAndUpdate(vaultUuid, spkiBytes, message, signatureBy
       const valid = await crypto.subtle.verify(
         { name: 'ECDSA', hash: 'SHA-256' }, key, signatureBytes, message
       )
-      if (valid) {
-        if (channel === 'relay') {
-          d.relayCount = (d.relayCount ?? 0) + 1
-          d.relayLastUsed = Date.now()
-        } else {
-          d.bcCount = (d.bcCount ?? 0) + 1
-          d.bcLastUsed = Date.now()
-        }
-        all[vaultUuid] = list
-        await save(all)
-        return d
-      }
+      if (valid) return d
     } catch { continue }
   }
   return null
+}
+
+// Record a successful page fill for a delegate. Called when autofill.html shows
+// its done/checkmark screen — once per page filled, not per field or connection.
+export async function recordFill(vaultUuid, delegateId, channel) {
+  const all = await load()
+  const list = (all[vaultUuid] ?? []).map(migrate)
+  const d = list.find(x => x.id === delegateId)
+  if (!d) return
+  if (channel === 'relay') {
+    d.relayCount = (d.relayCount ?? 0) + 1
+    d.relayLastUsed = Date.now()
+  } else {
+    d.bcCount = (d.bcCount ?? 0) + 1
+    d.bcLastUsed = Date.now()
+  }
+  all[vaultUuid] = list
+  await save(all)
 }
 
 export async function getSwitchboardUrl(vaultUuid) {
