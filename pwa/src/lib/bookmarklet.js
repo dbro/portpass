@@ -2,17 +2,17 @@
 // makeDelegateBookmarkletUrl(portpassUrl, privKeyJwk) returns the javascript: URL
 // for a named delegate. privKeyJwk is a Web Crypto JWK export of the ECDSA P-256 private key.
 
-export function makeDelegateBookmarkletUrl(portpassUrl, privKeyJwk, delegateId) {
+export function makeDelegateBookmarkletUrl(portpassUrl, privKeyJwk, delegateId, relayUrl) {
   const origin = new URL(portpassUrl).origin
   return 'javascript:' + encodeURIComponent(
-    `(${DELEGATE_BOOKMARKLET_IIFE.toString()})(${JSON.stringify(portpassUrl)},${JSON.stringify(origin)},${JSON.stringify(privKeyJwk)},${JSON.stringify(delegateId)})`
+    `(${DELEGATE_BOOKMARKLET_IIFE.toString()})(${JSON.stringify(portpassUrl)},${JSON.stringify(origin)},${JSON.stringify(privKeyJwk)},${JSON.stringify(delegateId)},${JSON.stringify(relayUrl)})`
   )
 }
 
 // Self-contained IIFE embedded in the javascript: URL.
 // PORTPASS_URL and PORTPASS_ORIGIN are baked in at install time via JSON.stringify.
 // PRIV_KEY_JWK is the ECDSA P-256 private key; DELEGATE_ID identifies the delegate on the switchboard.
-function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, PRIV_KEY_JWK, DELEGATE_ID) {
+function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, PRIV_KEY_JWK, DELEGATE_ID, RELAY_URL) {
   'use strict'
 
   if (window.__ppRunning) return
@@ -91,6 +91,7 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, PRIV_KEY_JWK, 
         isSecure: isSecure,
         privKey: PRIV_KEY_JWK,
         delegateId: DELEGATE_ID,
+        relayUrl: RELAY_URL,
         hasActiveField: !!activeEl,
       }, PORTPASS_ORIGIN)
 

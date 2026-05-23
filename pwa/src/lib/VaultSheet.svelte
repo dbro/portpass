@@ -210,7 +210,9 @@
       newDelegatePubKeySpki = await crypto.subtle.exportKey('spki', keyPair.publicKey)
       newDelegateId  = crypto.randomUUID()
       newDelegateUrl = makeDelegateBookmarkletUrl(
-        window.location.origin + import.meta.env.BASE_URL, newDelegatePrivKeyJwk, newDelegateId
+        window.location.origin + import.meta.env.BASE_URL,
+        newDelegatePrivKeyJwk, newDelegateId,
+        get(switchboardUrl)
       )
     } catch (e) {
       newDelegateError = 'Failed to generate key pair'

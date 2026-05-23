@@ -294,9 +294,12 @@ body {
   // Mode detection
   var cprivKey = null
   var delegateId = null
-  var bcPongArrived = false
-  var modeDecided = false
-  var modeTimer = null
+  var bcPongCount = 0
+  var wsProbeReplies = []
+  var wsProbeWs = null
+  var probeTimer = null
+  var probeDecided = false
+  var wsProbeError = null
 
   // WebSocket relay crypto state
   var cpEcdhKeyPair = null
@@ -312,7 +315,7 @@ body {
   var selectedUuid = null
   var selectedVaultUuid = null
 
-  // Transport abstraction — set once in onHelloResponse (BroadcastChannel) or startWsTransport (WebSocket relay).
+  // Transport abstraction — set once in onHelloResponse (BroadcastChannel) or setupWsTransport (WebSocket relay).
   // All business logic calls $transport.method() with no knowledge of which channel is active.
   var $transport = null
   var _pendingSearch = null  // resolve fn for an in-flight search
@@ -381,12 +384,8 @@ body {
   // ── Ping Dashboard via BroadcastChannel ───────────────────────────────────
   ch.onmessage = function(e) {
     if (e.data && e.data.type === 'pong' && e.data.nonce === pingNonce) {
-      if (e.data.relayUrl)
-        wsRelayUrl = e.data.relayUrl.replace(/^http/, 'ws') + '/ws'
-      bcPongArrived = true
-      if (!modeDecided && cprivKey !== null) {
-        modeDecided = true; clearTimeout(modeTimer); doHello()
-      }
+      bcPongCount++
+      scheduleDecide(50)
     }
   }
   ch.postMessage({ type: 'ping', nonce: pingNonce })
@@ -404,6 +403,7 @@ body {
     cprivKey = msg.privKey || null
     delegateId = msg.delegateId || null
     hasActiveField = !!msg.hasActiveField
+    if (msg.relayUrl) wsRelayUrl = msg.relayUrl.replace(/^http/, 'ws').replace(/\/ws$/, '') + '/ws'
 
     if ($urlDisplay) { $urlDisplay.textContent = currentUrl; $urlDisplay.title = currentUrl }
 
@@ -415,17 +415,7 @@ body {
       } catch(_) {}
     }
 
-    if (bcPongArrived) {
-      modeDecided = true; doHello()
-    } else {
-      modeTimer = setTimeout(function() {
-        if (!modeDecided) {
-          modeDecided = true
-          if (cprivKey) startWsTransport(cprivKey)
-          else sendError('Portpass is not open — open and unlock Portpass first')
-        }
-      }, 200)
-    }
+    startProbe()
   }
 
   // ── Messages from bookmarklet (field-clicked, fill-done, fill-error) ──────
@@ -443,39 +433,33 @@ body {
     }
   }
 
-  // ── WebSocket relay path ──────────────────────────────────────────────────
+  // ── Parallel probe: BC + WebSocket relay ─────────────────────────────────
 
-  async function startWsTransport(privKeyJwk) {
-    setStatus('Requesting credentials…')
+  function scheduleDecide(ms) {
+    if (probeDecided || probeTimer === null) return
+    clearTimeout(probeTimer)
+    if (ms === 0) { decideTransport(); return }
+    probeTimer = setTimeout(decideTransport, ms)
+  }
+
+  function startProbe() {
+    startWsProbe()  // async — runs in background during the collection window
+    probeTimer = setTimeout(decideTransport, 2000)  // fallback if no response
+  }
+
+  async function startWsProbe() {
+    if (!cprivKey) return
     try {
       cpSigningKey = await crypto.subtle.importKey(
-        'jwk', privKeyJwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']
+        'jwk', cprivKey, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']
       )
-      var pubJwk = { kty: privKeyJwk.kty, crv: privKeyJwk.crv, x: privKeyJwk.x, y: privKeyJwk.y }
+      var pubJwk = { kty: cprivKey.kty, crv: cprivKey.crv, x: cprivKey.x, y: cprivKey.y }
       var pubKey = await crypto.subtle.importKey(
         'jwk', pubJwk, { name: 'ECDSA', namedCurve: 'P-256' }, true, ['verify']
       )
       var pubSpki = await crypto.subtle.exportKey('spki', pubKey)
       cpPubSpkiB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(pubSpki)))
-
-      $transport = {
-        search: async function(q) {
-          var blob = await cpSignAndSend('search', { url: q, query: q })
-          return decryptReply(blob)
-        },
-        fill: async function(uuid, vu) {
-          var blob = await cpSignAndSend('fill-uuid', { url: uuid, uuid: uuid, vaultUuid: vu || null })
-          var results = await decryptReply(blob)
-          if (!results || !results.length) throw new Error('Could not get credentials')
-          return results[0]
-        },
-        viewRecord: function(uuid, vu) {
-          return cpSignAndSend('view-record', { url: uuid, uuid: uuid, vaultUuid: vu || null })
-        },
-        saveUrl: function(uuid, vu) {
-          wsSaveUrl(uuid, vu)
-        }
-      }
+      setupWsTransport()
 
       var ts = Date.now()
       var signedPayload = JSON.stringify({ url: currentUrl, nonce: pingNonce, ecdh: cpEcdhSpkiB64, ts: ts })
@@ -483,15 +467,73 @@ body {
         { name: 'ECDSA', hash: 'SHA-256' }, cpSigningKey, new TextEncoder().encode(signedPayload)
       )
       var sigB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(sigBytes)))
-      if (!delegateId) throw new Error('No delegate ID — reinstall the bookmarklet')
 
-      setStatus('Waiting for Portpass…')
-      var blob = await wsPost({
-        type: 'publish', channel: delegateId, replyTo: pingNonce,
-        url: currentUrl, ecdh: cpEcdhSpkiB64, ts: ts, sig: sigB64, pub: cpPubSpkiB64
-      })
-      await processRelayBlob(blob)
-    } catch(e) { sendError(e.message || 'Autofill failed') }
+      wsProbeWs = new WebSocket(wsRelayUrl)
+      wsProbeWs.onopen = function() {
+        wsProbeWs.send(JSON.stringify({
+          type: 'publish', channel: 'portpass-autofill', replyTo: pingNonce,
+          url: currentUrl, ecdh: cpEcdhSpkiB64, ts: ts, sig: sigB64, pub: cpPubSpkiB64
+        }))
+      }
+      wsProbeWs.onmessage = function(e) {
+        try {
+          var msg = JSON.parse(e.data)
+          if (msg.type === 'reply') {
+            wsProbeReplies.push(msg)
+            scheduleDecide(50)
+          } else if (msg.type === 'error') {
+            wsProbeError = msg.message || 'Relay error'
+            scheduleDecide(0)
+          }
+        } catch(_) {}
+      }
+      wsProbeWs.onerror = function() {
+        wsProbeError = 'Cannot connect to websocket relay'
+        scheduleDecide(0)
+      }
+      wsProbeWs.onclose = function() {}
+    } catch(e) { wsProbeError = e.message }
+  }
+
+  function setupWsTransport() {
+    $transport = {
+      search: async function(q) {
+        var blob = await cpSignAndSend('search', { url: q, query: q })
+        return decryptReply(blob)
+      },
+      fill: async function(uuid, vu) {
+        var blob = await cpSignAndSend('fill-uuid', { url: uuid, uuid: uuid, vaultUuid: vu || null })
+        var results = await decryptReply(blob)
+        if (!results || !results.length) throw new Error('Could not get credentials')
+        return results[0]
+      },
+      viewRecord: function(uuid, vu) {
+        return cpSignAndSend('view-record', { url: uuid, uuid: uuid, vaultUuid: vu || null })
+      },
+      saveUrl: function(uuid, vu) { wsSaveUrl(uuid, vu) }
+    }
+  }
+
+  function decideTransport() {
+    if (probeDecided) return
+    probeDecided = true
+    if (wsProbeWs) { try { wsProbeWs.close() } catch(_) {} wsProbeWs = null }
+    var bcCount = bcPongCount
+    var wsCount = wsProbeReplies.length
+
+    if (bcCount > 1 || wsCount > 1 || (bcCount >= 1 && wsCount >= 1)) {
+      showErrorPhase('multiinstance')
+      if (window.opener) {
+        try { window.opener.postMessage({ type: 'cancel' }, bookmarkletOrigin || '*') } catch(_) {}
+      }
+      return
+    }
+    if (bcCount === 0 && wsCount === 0) {
+      sendError(wsProbeError || 'Cannot connect to websocket relay')
+      return
+    }
+    if (bcCount >= 1) { doHello(); return }
+    processRelayBlob(wsProbeReplies[0])
   }
 
   function wsPost(requestMsg) {
@@ -550,7 +592,7 @@ body {
     )
     var sigB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(sigBytes)))
     return wsPost(Object.assign({
-      type: 'publish', channel: delegateId, replyTo: reqNonce,
+      type: 'publish', channel: 'portpass-autofill', replyTo: reqNonce,
       msgType: msgType, ecdh: cpEcdhSpkiB64, ts: ts, sig: sigB64, pub: cpPubSpkiB64
     }, extraFields))
   }
@@ -571,7 +613,7 @@ body {
   }
 
   function wsSaveUrl(uuid, vaultUuid) {
-    if (!cpSigningKey || !cpPubSpkiB64 || !delegateId) return
+    if (!cpSigningKey || !cpPubSpkiB64) return
     var saveNonce = crypto.randomUUID()
     var ts = Date.now()
     var payload = JSON.stringify({ url: saveUrl, nonce: saveNonce, ecdh: '', ts: ts })
@@ -583,7 +625,7 @@ body {
       try { ws = new WebSocket(wsRelayUrl) } catch(e) { return }
       ws.onopen = function() {
         ws.send(JSON.stringify({
-          type: 'publish', channel: delegateId, replyTo: saveNonce,
+          type: 'publish', channel: 'portpass-autofill', replyTo: saveNonce,
           msgType: 'save-url', uuid: uuid, vaultUuid: vaultUuid,
           url: saveUrl, ecdh: '', ts: ts, sig: sigB64, pub: cpPubSpkiB64
         }))
@@ -779,6 +821,9 @@ body {
     if (chosen) $content.appendChild(makeSelectedRecordRow(chosen))
 
     var configs = {
+      multiinstance: { icon: SVG_WARN_LG, color: 'var(--orange)', title: 'Multiple Portpass windows open',
+                       body: 'More than one Portpass window is open. Close all but one and try again, or use the secondary vault feature to access multiple vaults from one window.',
+                       action: null },
       noconn: { icon: SVG_WARN_LG, color: 'var(--orange)', title: 'Portpass not found',
                 body: ["Portpass isn't open in this browser profile, and the websocket relay isn't running.",
                        "To fix: open and unlock Portpass in this browser — or start the websocket relay, then open Portpass in a separate browser profile."],

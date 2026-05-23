@@ -344,22 +344,15 @@
     if (_sbWs || _sbConnecting) return
     if (!get(crossProfileEnabled)) return
     _sbConnecting = true
-    const delegates = await getDelegates(dbKey)
-    if (!delegates.length) {
-      _sbConnecting = false
-      setTimeout(connectSwitchboard, 10000)  // retry when a delegate may have been created
-      return
-    }
     if (_sbWs) { _sbConnecting = false; return }  // connected while we awaited
     let ws
     try { ws = new WebSocket(sbWsUrl()) } catch { _sbConnecting = false; return }
-    ws.onopen = async () => {
+    ws.onopen = () => {
       _sbWs = ws
       _sbConnecting = false
       switchboardConnected.set(true)
-      const delegates = await getDelegates(dbKey)
-      if (delegates.length && _sbWs === ws)
-        ws.send(JSON.stringify({ type: 'subscribe', channels: delegates.map(d => d.id) }))
+      if (_sbWs === ws)
+        ws.send(JSON.stringify({ type: 'subscribe', channels: ['portpass-autofill'] }))
     }
     ws.onmessage = async (event) => {
       try {
@@ -571,7 +564,7 @@
       if (!msg?.type) return
 
       if (msg.type === 'ping') {
-        ch.postMessage({ type: 'pong', nonce: msg.nonce, relayUrl: get(switchboardUrl) })
+        ch.postMessage({ type: 'pong', nonce: msg.nonce })
         return
       }
 
