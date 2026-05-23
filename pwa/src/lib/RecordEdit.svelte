@@ -111,6 +111,19 @@
     }
     showPw = !showPw
   }
+
+  let showNotes    = $state(false)
+  let notesLoading = $state(false)
+
+  async function revealOrToggleNotes() {
+    if (!showNotes && notesWasWithheld && !draft.Notes) {
+      notesLoading = true
+      const val = getFieldValue(vaultUuid, record?.UUID, 'Notes')
+      set('Notes', val ?? '')
+      notesLoading = false
+    }
+    showNotes = !showNotes
+  }
   let genOpen     = $state(false)
   let showHistory = $state(false)
 
@@ -632,11 +645,23 @@
       </button>
     {/if}
 
-    <label class="field">
-      <span class="field-label muted">Notes</span>
-      <textarea class="input mono" rows={4} value={draft.Notes}
-        oninput={e => set('Notes', e.target.value)}></textarea>
-    </label>
+    <div class="field">
+      <div class="notes-label-row">
+        <span class="field-label muted">Notes</span>
+        {#if notesWasWithheld}
+          <button class="icon-btn-flat" type="button" onclick={revealOrToggleNotes} disabled={notesLoading}
+            aria-label={showNotes ? 'Hide notes' : 'Reveal notes'}>
+            <Icon name={showNotes ? 'eye-off' : 'eye'} size={18}/>
+          </button>
+        {/if}
+      </div>
+      {#if notesWasWithheld && !showNotes}
+        <div class="notes-masked mono">••••••••••••••••</div>
+      {:else}
+        <textarea class="input mono" rows={4} value={draft.Notes}
+          oninput={e => set('Notes', e.target.value)}></textarea>
+      {/if}
+    </div>
 
     <div class="field">
       <div class="autotype-header">
@@ -925,6 +950,17 @@
     border-bottom: 1px solid var(--border);
   }
   .history-entry:last-child { border-bottom: none; }
+
+  .notes-label-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .notes-label-row .field-label { margin-bottom: 0; }
+  .notes-masked {
+    color: var(--text-soft);
+    padding: 2px 0;
+  }
 
   .history-time {
     font-size: 12px;
