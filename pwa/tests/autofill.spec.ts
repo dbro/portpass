@@ -130,28 +130,30 @@ test.describe('Autofill sequence — read view', () => {
     await createVault(page)
     await createRecordWithAutotype(page, '\\u\\t\\p\\n')
     await expect(page.locator('.copy-row-label', { hasText: 'Autofill sequence' })).toBeVisible()
+    await switchToRawMode(page)
     await expect(page.locator('.autotype-value')).toHaveText('\\u\\t\\p\\n')
   })
 
-  test('autofill section absent when sequence is empty', async ({ page }) => {
+  test('default sequence shown when autotype is empty', async ({ page }) => {
     await createVault(page)
     await page.getByRole('button', { name: 'New', exact: true }).click()
     await page.getByPlaceholder('e.g. Bank of America').fill('No Autofill')
     await page.locator('input.mono').first().fill('testpassword')
     await page.getByRole('button', { name: 'Save' }).click()
     await page.locator('.record-row', { hasText: 'No Autofill' }).click()
-    await expect(page.locator('.autotype-value')).toHaveCount(0)
+    await expect(page.locator('.autofill-default-badge')).toBeVisible()
+    await expect(page.locator('.chip-area')).toBeVisible()
   })
 
-  test('autofill section absent after clearing sequence on edit', async ({ page }) => {
+  test('default sequence shown after clearing autotype in edit', async ({ page }) => {
     await createVault(page)
     await createRecordWithAutotype(page, '\\u\\t\\p\\n')
-    await expect(page.locator('.autotype-value')).toBeVisible()
+    await expect(page.locator('.chip-area')).toBeVisible()
     await page.getByRole('button', { name: 'Edit' }).click()
     await switchToRawMode(page)
     await page.locator('.autotype-input').fill('')
     await page.getByRole('button', { name: 'Save' }).click()
-    await expect(page.locator('.autotype-value')).toHaveCount(0)
+    await expect(page.locator('.autofill-default-badge')).toBeVisible()
   })
 
 })
@@ -173,6 +175,7 @@ test.describe('Autofill sequence — round-trip persistence', () => {
     await switchToRawMode(page)
     await page.locator('.autotype-input').fill('\\u\\t\\p')
     await page.getByRole('button', { name: 'Save' }).click()
+    await switchToRawMode(page)
     await expect(page.locator('.autotype-value')).toHaveText('\\u\\t\\p')
   })
 

@@ -47,7 +47,7 @@
     return { secret: secret.toUpperCase().replace(/[\s-]/g, ''), digits, period }
   }
 
-  let { record, isNew, isDesktop, vaultUuid, rwVaults = [], onvaultchange, oncancel, onsave, ondelete, ondirtychange } = $props()
+  let { record, isNew, isDesktop, hasDelegates = false, vaultUuid, rwVaults = [], onvaultchange, oncancel, onsave, ondelete, ondirtychange } = $props()
 
   let vaultDropOpen = $state(false)
 
@@ -378,7 +378,8 @@
   }
 
   const savedAutotype = untrack(() => record?.Autotype ?? '')
-  let autofillMode = $state('visual')
+  let autofillMode     = $state('visual')
+  let showAutofillInfo = $state(false)
   let dragIdx = $state(-1), dropIdx = $state(-1)
   let activeMiniForm = $state('')
   let literalInput = $state(''), waitAmount = $state('500'), waitUnit = $state('ms')
@@ -594,78 +595,17 @@
       <input class="input" value={draft.URL} oninput={e => set('URL', e.target.value)}/>
     </label>
 
-    <label class="field">
-      <span class="field-label muted">Email</span>
-      <input class="input" type="email" value={draft.Email} oninput={e => set('Email', e.target.value)}/>
-    </label>
-
-    <div class="field-label muted">Custom fields</div>
-
-    {#each customFields as cf, i}
-      <div class="custom-field-row">
-        <input class="input custom-field-name" class:warn={!cf.Name.trim()}
-          placeholder="Field name"
-          value={cf.Name}
-          oninput={e => { customFields = customFields.map((f, j) => j === i ? { ...f, Name: e.target.value } : f) }}
-        />
-        <div class="input-wrap custom-field-value" class:warn={cf.Value !== null && !cf.Value.trim()}>
-          <input class="input"
-            type={cf.Sensitive ? 'password' : 'text'}
-            placeholder={cf.Value === null && cf.Sensitive ? '••••••••••••' : 'Value'}
-            value={cf.Value ?? ''}
-            oninput={e => { customFields = customFields.map((f, j) => j === i ? { ...f, Value: e.target.value } : f) }}
-          />
-          <button class="icon-btn-flat" type="button"
-            onclick={() => {
-              if (cf.Sensitive && cf.Value === null) {
-                // Withheld sensitive → load value then mark not-sensitive
-                const val = getCustomFieldValue(vaultUuid, record?.UUID, cf.Name)
-                customFields = customFields.map((f, j) => j === i ? { ...f, Sensitive: false, Value: val ?? '' } : f)
-              } else {
-                // Toggle sensitive flag
-                customFields = customFields.map((f, j) => j === i ? { ...f, Sensitive: !f.Sensitive } : f)
-              }
-            }}
-            aria-label={cf.Sensitive ? 'Show value' : 'Hide value'}>
-            <Icon name={cf.Sensitive ? 'eye' : 'eye-off'} size={18}/>
-          </button>
-        </div>
-        <button class="icon-btn-flat danger" type="button"
-          onclick={() => { customFields = customFields.filter((_, j) => j !== i) }}
-          aria-label="Remove field">
-          <Icon name="trash" size={18}/>
-        </button>
-      </div>
-    {/each}
-
-    {#if customFields.length < 9}
-      <button class="add-custom-field" type="button"
-        onclick={() => { customFields = [...customFields, { Name: '', Value: '', Sensitive: false }] }}>
-        + Add custom field
-      </button>
-    {/if}
-
-    <div class="field">
-      <div class="notes-label-row">
-        <span class="field-label muted">Notes</span>
-        {#if notesWasWithheld}
-          <button class="icon-btn-flat" type="button" onclick={revealOrToggleNotes} disabled={notesLoading}
-            aria-label={showNotes ? 'Hide notes' : 'Reveal notes'}>
-            <Icon name={showNotes ? 'eye-off' : 'eye'} size={18}/>
-          </button>
-        {/if}
-      </div>
-      {#if notesWasWithheld && !showNotes}
-        <div class="notes-masked mono">••••••••••••••••</div>
-      {:else}
-        <textarea class="input mono" rows={4} value={draft.Notes}
-          oninput={e => set('Notes', e.target.value)}></textarea>
-      {/if}
-    </div>
-
+    {#if isDesktop}
     <div class="field">
       <div class="autotype-header">
-        <span class="field-label muted">Autofill sequence</span>
+        <div class="autotype-label-group">
+          <span class="field-label muted">Autofill sequence</span>
+          {#if !hasDelegates}
+            <button class="autofill-info-btn" type="button"
+              onclick={() => showAutofillInfo = !showAutofillInfo}
+              aria-label="About autofill">ⓘ</button>
+          {/if}
+        </div>
         <div class="autotype-header-right">
           {#if draft.Autotype !== savedAutotype}
             <button type="button" class="autotype-reset" onclick={resetAutotype}>↩ Reset</button>
@@ -676,6 +616,11 @@
           </div>
         </div>
       </div>
+      {#if showAutofillInfo}
+        <div class="autofill-info-card">
+          Autofill types your credentials into web forms automatically. To use it, open Vault settings and install a bookmarklet in your browser.
+        </div>
+      {/if}
 
       {#if autofillMode === 'visual'}
         <div class="chip-area" role="list"
@@ -818,6 +763,76 @@
             <div class="banner-body muted">{autotypeWarning}</div>
           </div>
         </div>
+      {/if}
+    </div>
+    {/if}
+
+    <label class="field">
+      <span class="field-label muted">Email</span>
+      <input class="input" type="email" value={draft.Email} oninput={e => set('Email', e.target.value)}/>
+    </label>
+
+    <div class="field-label muted">Custom fields</div>
+
+    {#each customFields as cf, i}
+      <div class="custom-field-row">
+        <input class="input custom-field-name" class:warn={!cf.Name.trim()}
+          placeholder="Field name"
+          value={cf.Name}
+          oninput={e => { customFields = customFields.map((f, j) => j === i ? { ...f, Name: e.target.value } : f) }}
+        />
+        <div class="input-wrap custom-field-value" class:warn={cf.Value !== null && !cf.Value.trim()}>
+          <input class="input"
+            type={cf.Sensitive ? 'password' : 'text'}
+            placeholder={cf.Value === null && cf.Sensitive ? '••••••••••••' : 'Value'}
+            value={cf.Value ?? ''}
+            oninput={e => { customFields = customFields.map((f, j) => j === i ? { ...f, Value: e.target.value } : f) }}
+          />
+          <button class="icon-btn-flat" type="button"
+            onclick={() => {
+              if (cf.Sensitive && cf.Value === null) {
+                // Withheld sensitive → load value then mark not-sensitive
+                const val = getCustomFieldValue(vaultUuid, record?.UUID, cf.Name)
+                customFields = customFields.map((f, j) => j === i ? { ...f, Sensitive: false, Value: val ?? '' } : f)
+              } else {
+                // Toggle sensitive flag
+                customFields = customFields.map((f, j) => j === i ? { ...f, Sensitive: !f.Sensitive } : f)
+              }
+            }}
+            aria-label={cf.Sensitive ? 'Show value' : 'Hide value'}>
+            <Icon name={cf.Sensitive ? 'eye' : 'eye-off'} size={18}/>
+          </button>
+        </div>
+        <button class="icon-btn-flat danger" type="button"
+          onclick={() => { customFields = customFields.filter((_, j) => j !== i) }}
+          aria-label="Remove field">
+          <Icon name="trash" size={18}/>
+        </button>
+      </div>
+    {/each}
+
+    {#if customFields.length < 9}
+      <button class="add-custom-field" type="button"
+        onclick={() => { customFields = [...customFields, { Name: '', Value: '', Sensitive: false }] }}>
+        + Add custom field
+      </button>
+    {/if}
+
+    <div class="field">
+      <div class="notes-label-row">
+        <span class="field-label muted">Notes</span>
+        {#if notesWasWithheld}
+          <button class="icon-btn-flat" type="button" onclick={revealOrToggleNotes} disabled={notesLoading}
+            aria-label={showNotes ? 'Hide notes' : 'Reveal notes'}>
+            <Icon name={showNotes ? 'eye-off' : 'eye'} size={18}/>
+          </button>
+        {/if}
+      </div>
+      {#if notesWasWithheld && !showNotes}
+        <div class="notes-masked mono">••••••••••••••••</div>
+      {:else}
+        <textarea class="input mono" rows={4} value={draft.Notes}
+          oninput={e => set('Notes', e.target.value)}></textarea>
       {/if}
     </div>
 
@@ -1029,6 +1044,32 @@
   .btn-delete:hover { opacity: 1; }
 
   /* --- Autofill sequence header row --- */
+  .autotype-label-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .autofill-info-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 15px;
+    color: var(--text-muted);
+    padding: 0;
+    line-height: 1;
+  }
+  .autofill-info-btn:hover { color: var(--accent); }
+  .autofill-info-card {
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 13px;
+    color: var(--text-soft);
+    line-height: 1.5;
+    margin-bottom: 8px;
+  }
+
   .autotype-header {
     display: flex;
     align-items: center;

@@ -445,6 +445,7 @@
   </div>
 
   <!-- Autofill delegates -->
+  {#if isDesktop}
   <div class="vault-section">
     <div class="vault-section-title">AUTOFILL</div>
     <p class="muted" style="font-size:14px;margin:0 0 14px;line-height:1.5">
@@ -510,6 +511,7 @@
       </div>
     {/if}
   </div>
+  {/if}
 
   <!-- Appearance -->
   <div class="vault-section">

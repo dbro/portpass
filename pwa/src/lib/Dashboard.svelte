@@ -36,8 +36,14 @@
   let editDirty              = $state(false)
   let vaultDirty             = $state(false)
   let dbName   = $state('')
-  let dbKey    = $state('')
-  let lastSave = $state('')
+  let dbKey        = $state('')
+  let lastSave     = $state('')
+  let hasDelegates = $state(false)
+
+  $effect(() => {
+    void $delegatesVersion
+    if (dbKey) getDelegates(dbKey).then(d => { hasDelegates = d.length > 0 })
+  })
 
   let passwordCount = $derived(
     $dbItems.length + $secondaryVaults.reduce((n, v) => n + (v.items?.length ?? 0), 0)
@@ -1499,6 +1505,7 @@
       {record}
       {isNew}
       {isDesktop}
+      {hasDelegates}
       vaultUuid={isNew ? (newRecordVaultUuid || dbKey) : (selectedVaultUuid || dbKey)}
       {rwVaults}
       onvaultchange={(uuid) => newRecordVaultUuid = uuid}
@@ -1513,6 +1520,7 @@
         {record}
         uuid={selectedUUID}
         {isDesktop}
+        {hasDelegates}
         vaultUuid={selectedVaultUuid || dbKey}
         onback={() => { record = null; selectedUUID = null; selectedVaultUuid = null }}
         onedit={($secondaryVaults.find(v => v.uuid === selectedVaultUuid)?.readonly ?? $selectedFile?.readonly) ? null : startEdit}
