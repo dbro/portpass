@@ -1407,7 +1407,7 @@
     }
     if (e.ctrlKey && e.key === 'b') { e.preventDefault(); copyRecordField('Username'); return }
     if (e.ctrlKey && e.key === 'u') { e.preventDefault(); copyRecordField('URL'); return }
-    if (e.ctrlKey && e.key === 't') { e.preventDefault(); copyTOTP(); return }
+    if (e.ctrlKey && e.key === 'y') { e.preventDefault(); copyTOTP(); return }
     if (e.ctrlKey && e.key === 'e') { e.preventDefault(); copyRecordField('Email'); return }
     if (e.ctrlKey && e.key >= '1' && e.key <= '9') { e.preventDefault(); copyCustomField(parseInt(e.key) - 1); return }
   }
@@ -1522,7 +1522,7 @@
         <div class="help-row"><span>Navigate list</span><div class="help-keys"><kbd>↑</kbd><kbd>↓</kbd></div></div>
         <div class="help-row"><span>Copy username</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>B</kbd></div></div>
         <div class="help-row"><span>Copy password</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>C</kbd></div></div>
-        <div class="help-row"><span>Copy one-time code</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>T</kbd></div></div>
+        <div class="help-row"><span>Copy one-time code</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>Y</kbd></div></div>
         <div class="help-row"><span>Copy URL</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>U</kbd></div></div>
         <div class="help-row"><span>Visit URL</span><div class="help-keys"><kbd>↵</kbd></div></div>
         <div class="help-row"><span>Copy email</span><div class="help-keys"><kbd>Ctrl</kbd><kbd>E</kbd></div></div>
