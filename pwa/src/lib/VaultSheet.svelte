@@ -375,17 +375,17 @@
         </div>
         <div class="vault-stat-divider"></div>
       {/if}
-      {#if groupCount > 0}
-        <div class="vault-stat">
-          <span class="vault-stat-num">{groupCount}</span>
-          <span class="vault-stat-label muted">groups</span>
-        </div>
-        <div class="vault-stat-divider"></div>
-      {/if}
       <div class="vault-stat">
         <span class="vault-stat-num">{passwordCount}</span>
         <span class="vault-stat-label muted">passwords</span>
       </div>
+      {#if groupCount > 0}
+        <div class="vault-stat-divider"></div>
+        <div class="vault-stat">
+          <span class="vault-stat-num">{groupCount}</span>
+          <span class="vault-stat-label muted">groups</span>
+        </div>
+      {/if}
     </div>
   </div>
 

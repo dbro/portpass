@@ -1609,17 +1609,17 @@
             </div>
             <div class="empty-divider"></div>
           {/if}
-          {#if groupCount > 0}
-            <div class="empty-stat">
-              <span class="empty-num">{groupCount}</span>
-              <span class="empty-label muted">groups</span>
-            </div>
-            <div class="empty-divider"></div>
-          {/if}
           <div class="empty-stat">
             <span class="empty-num">{passwordCount}</span>
             <span class="empty-label muted">passwords</span>
           </div>
+          {#if groupCount > 0}
+            <div class="empty-divider"></div>
+            <div class="empty-stat">
+              <span class="empty-num">{groupCount}</span>
+              <span class="empty-label muted">groups</span>
+            </div>
+          {/if}
         </div>
         {#if lastSave}
           <div class="empty-save muted">Last saved {relSaveTime(lastSave)}</div>
