@@ -116,37 +116,36 @@ func (db *V3) marshalRecords() (records []byte, dataBytes []byte, err error) {
 }
 
 // pseudoRandomBytes generates a slice of bytes filled with pseudo random data
-func pseudoRandomBytes(size int) (r []byte) {
-	r = make([]byte, size)
-	_, err := rand.Read(r)
-	if err != nil {
-		// Fallback to zero padding if rand fails, though this should be rare/impossible in most envs
-		// Best effort for padding
-		return r
+func pseudoRandomBytes(size int) []byte {
+	r := make([]byte, size)
+	if _, err := rand.Read(r); err != nil {
+		panic("crypto/rand unavailable: " + err.Error())
 	}
 	return r
 }
 
 // re-calculate and add to the db new encryption key and hmac key then encrypt with and return the encrypted bytes
 func (db *V3) refreshEncryptedKeys(buf io.Writer) error {
-	_, err := rand.Read(db.EncryptionKey[:])
-	if err != nil {
+	var encKey [32]byte
+	var hmacKey [32]byte
+	if _, err := rand.Read(encKey[:]); err != nil {
 		return err
 	}
-	_, err = rand.Read(db.HMACKey[:])
-	if err != nil {
+	if _, err := rand.Read(hmacKey[:]); err != nil {
 		return err
 	}
 	keyTwoFish, err := twofish.NewCipher(db.StretchedKey[:])
 	if err != nil {
 		return err
 	}
-	for _, block := range [][]byte{db.EncryptionKey[:16], db.EncryptionKey[16:], db.HMACKey[:16], db.HMACKey[16:]} {
+	for _, block := range [][]byte{encKey[:16], encKey[16:], hmacKey[:16], hmacKey[16:]} {
 		encrypted := make([]byte, 16)
 		keyTwoFish.Encrypt(encrypted, block)
 		if err := binary.Write(buf, binary.LittleEndian, encrypted); err != nil {
 			return err
 		}
 	}
+	db.EncryptionKey = encKey
+	db.HMACKey = hmacKey
 	return nil
 }

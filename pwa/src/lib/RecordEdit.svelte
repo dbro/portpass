@@ -5,28 +5,6 @@
   import { generatePassword, loadOpts } from './passwordgen.js'
   import { getAutocompleteSuggestion, getFieldValue, getCustomFieldValue } from '../wasm.js'
 
-  // --- TOTP helpers ---
-  const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
-
-  function base32Encode(bytes) {
-    let bits = '', out = ''
-    for (const b of bytes) bits += b.toString(2).padStart(8, '0')
-    for (let i = 0; i + 5 <= bits.length; i += 5) out += B32[parseInt(bits.slice(i, i + 5), 2)]
-    const rem = bits.length % 5
-    if (rem > 0) out += B32[parseInt(bits.slice(-rem).padEnd(5, '0'), 2)]
-    return out
-  }
-
-  function base64ToBase32(b64) {
-    if (!b64) return ''
-    try {
-      const bin = atob(b64)
-      const bytes = new Uint8Array(bin.length)
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-      return base32Encode(bytes)
-    } catch { return '' }
-  }
-
   function parseOtpAuthUri(uri) {
     // Use regex rather than new URL() — custom protocols are unreliable across browsers
     const m = uri.match(/^otpauth:\/\/([^/?#]+)(?:\/[^?#]*)?(?:\?(.*))?$/i)
@@ -68,7 +46,7 @@
   let draft = $state({ Title, Group, Username, Password, URL, Email, Notes, Autotype })
 
   // TOTP state — kept separate from draft; merged into save call
-  let totpSecret   = $state(untrack(() => base64ToBase32(record?.TwoFactorKey ?? '')))
+  let totpSecret   = $state('')
   let totpDigits   = $state(untrack(() => record?.TOTPLength || 6))
   let totpPeriod   = $state(untrack(() => record?.TOTPTimeStep || 30))
 
@@ -172,7 +150,7 @@
 
   let totpChanged = $derived(
     (totpWasConfigured && totpFieldTouched && !totpSecret) ||  // user focused and cleared
-    totpSecret !== (totpLoadedSecret || base64ToBase32(record?.TwoFactorKey ?? '')) ||
+    totpSecret !== totpLoadedSecret ||
     (totpDigits !== (record?.TOTPLength || 6)) ||
     (totpPeriod !== (record?.TOTPTimeStep || 30))
   )
