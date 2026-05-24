@@ -22,7 +22,7 @@
   let { onclosed, isPopup = false, theme, accent, isDesktop, bookmarkletsSupported = false, ontheme, onaccent, intent = null, onclearintent } = $props()
 
   function focusOnMount(node) {
-    setTimeout(() => node.focus(), 0)
+    if (passwordCount > 0) setTimeout(() => node.focus(), 0)
   }
 
   let query                  = $state('')
@@ -59,6 +59,19 @@
   // Kept outside $state; these are write-guards, not reactive UI state.
   let primaryModified = null   // lastModified of the primary vault file
   let secondaryModified = {}   // keyed by vault UUID
+  // B1–B4 + IV (bytes 72–151) of the last write: Twofish-encrypted blocks of freshly
+  // randomised keys plus the CBC IV, all re-randomised on every Encrypt() call.
+  // Read from the unencrypted header with no decryption needed. Used to confirm a
+  // lastModified mismatch is a real conflict and not just a cloud provider updating
+  // the timestamp after upload sync.
+  let primaryHead = null       // Uint8Array(80)
+  let secondaryHead = {}       // keyed by vault UUID
+
+  function sameHead(a, b) {
+    if (!a || !b || a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+    return true
+  }
 
   // State for the "unlock additional vault" modal flow.
   // handle is kept outside $state to prevent Svelte 5 from deep-proxying the FileSystemFileHandle.
@@ -797,9 +810,16 @@
           selectedVaultUuid = targetVault
           if (secondaryModified[targetVault] !== undefined) {
             try {
-              const current = (await sv.handle.getFile()).lastModified
-              if (current !== secondaryModified[targetVault]) {
-                if (!confirm(`"${sv.name || sv.filename}" was modified by another Portpass instance since it was loaded.\n\nSaving will overwrite those changes. Save anyway?`)) return
+              const file = await sv.handle.getFile()
+              if (file.lastModified !== secondaryModified[targetVault]) {
+                let realConflict = true
+                if (secondaryHead[targetVault]) {
+                  try {
+                    const buf = await file.slice(72, 152).arrayBuffer()
+                    realConflict = !sameHead(new Uint8Array(buf), secondaryHead[targetVault])
+                  } catch {}
+                }
+                if (realConflict && !confirm(`"${sv.name || sv.filename}" was modified since it was loaded.\n\nSaving will overwrite those changes. Save anyway?`)) return
               }
             } catch {}
           }
@@ -807,6 +827,7 @@
           const w = await sv.handle.createWritable()
           await w.write(data)
           await w.close()
+          secondaryHead[targetVault] = data.slice(72, 152)
           try { secondaryModified[targetVault] = (await sv.handle.getFile()).lastModified } catch {}
           showToast('Saved to ' + (sv.name || sv.filename), null, 2000)
         }
@@ -853,9 +874,16 @@
               ))
               if (secondaryModified[targetVault] !== undefined) {
                 try {
-                  const current = (await sv.handle.getFile()).lastModified
-                  if (current !== secondaryModified[targetVault]) {
-                    if (!confirm(`"${sv.name || sv.filename}" was modified by another Portpass instance since it was loaded.\n\nSaving will overwrite those changes. Save anyway?`)) return
+                  const file = await sv.handle.getFile()
+                  if (file.lastModified !== secondaryModified[targetVault]) {
+                    let realConflict = true
+                    if (secondaryHead[targetVault]) {
+                      try {
+                        const buf = await file.slice(72, 152).arrayBuffer()
+                        realConflict = !sameHead(new Uint8Array(buf), secondaryHead[targetVault])
+                      } catch {}
+                    }
+                    if (realConflict && !confirm(`"${sv.name || sv.filename}" was modified since it was loaded.\n\nSaving will overwrite those changes. Save anyway?`)) return
                   }
                 } catch {}
               }
@@ -863,6 +891,7 @@
               const w = await sv.handle.createWritable()
               await w.write(data)
               await w.close()
+              secondaryHead[targetVault] = data.slice(72, 152)
               try { secondaryModified[targetVault] = (await sv.handle.getFile()).lastModified } catch {}
             }
           }
@@ -919,15 +948,23 @@
 
       if (primaryModified !== null) {
         try {
-          const current = (await handle.getFile()).lastModified
-          if (current !== primaryModified) {
-            if (!confirm('This vault was modified by another Portpass instance since it was loaded.\n\nSaving will overwrite those changes. Save anyway?')) return
+          const file = await handle.getFile()
+          if (file.lastModified !== primaryModified) {
+            let realConflict = true
+            if (primaryHead) {
+              try {
+                const buf = await file.slice(72, 152).arrayBuffer()
+                realConflict = !sameHead(new Uint8Array(buf), primaryHead)
+              } catch {}
+            }
+            if (realConflict && !confirm('This vault was modified since it was loaded.\n\nSaving will overwrite those changes. Save anyway?')) return
           }
         } catch {}
       }
       const w = await handle.createWritable()
       await w.write(data)
       await w.close()
+      primaryHead = data.slice(72, 152)
       try { primaryModified = (await handle.getFile()).lastModified } catch {}
       isDirty = false
       try { lastSave = getDatabaseInfo(dbKey)?.when ?? '' } catch {}

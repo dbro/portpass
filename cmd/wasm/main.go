@@ -162,7 +162,7 @@ func sensitiveString(s string) *string {
 func recordToView(rec pwsafe.Record) recordView {
 	mt := ""
 	if !rec.ModTime.IsZero() {
-		mt = rec.ModTime.Format("2006-01-02")
+		mt = rec.ModTime.UTC().Format(time.RFC3339)
 	}
 
 	cfViews := make([]customFieldView, len(rec.CustomFields))
