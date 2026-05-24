@@ -126,6 +126,55 @@ func TestRecord_OwnSymbolsForPassword(t *testing.T) {
 	})
 }
 
+func TestCustomField_UnknownPropsRoundTrip(t *testing.T) {
+	t.Run("unknown property ID survives parse/marshal cycle", func(t *testing.T) {
+		// Encode a custom field entry that includes a future property 0x04.
+		raw := "010005hello020005world0300010" + "040003abc"
+		fields := parseCustomFields(raw)
+		assert.Len(t, fields, 1)
+		assert.Equal(t, "hello", fields[0].Name)
+		assert.Equal(t, "world", fields[0].Value)
+		assert.False(t, fields[0].Sensitive)
+		assert.Len(t, fields[0].UnknownProps, 1)
+		assert.Equal(t, byte(0x04), fields[0].UnknownProps[0].id)
+		assert.Equal(t, "abc", fields[0].UnknownProps[0].val)
+
+		marshaled := string(marshalCustomFields(fields))
+		reparsed := parseCustomFields(marshaled)
+		assert.Len(t, reparsed, 1)
+		assert.Equal(t, fields[0].Name, reparsed[0].Name)
+		assert.Equal(t, fields[0].Value, reparsed[0].Value)
+		assert.Equal(t, fields[0].Sensitive, reparsed[0].Sensitive)
+		assert.Equal(t, fields[0].UnknownProps, reparsed[0].UnknownProps)
+	})
+
+	t.Run("unknown property survives vault file write-read cycle", func(t *testing.T) {
+		db := NewV3("test", "password")
+		cf := CustomField{
+			Name:         "key",
+			Value:        "val",
+			UnknownProps: []customFieldProp{{0x04, "future"}},
+		}
+		rec := Record{Title: "Site", Password: "pass", CustomFields: []CustomField{cf}}
+		uuid := db.SetRecord(rec)
+
+		savePath := "./test_dbs/unknown_prop_test.dat"
+		err := WritePWSafeFile(db, savePath)
+		defer os.Remove(savePath)
+		assert.NoError(t, err)
+
+		loaded, err := OpenPWSafeFile(savePath, "password")
+		assert.NoError(t, err)
+		got := loaded.Records[uuid].CustomFields
+		assert.Len(t, got, 1)
+		assert.Equal(t, "key", got[0].Name)
+		assert.Equal(t, "val", got[0].Value)
+		assert.Len(t, got[0].UnknownProps, 1)
+		assert.Equal(t, byte(0x04), got[0].UnknownProps[0].id)
+		assert.Equal(t, "future", got[0].UnknownProps[0].val)
+	})
+}
+
 func TestRecord_Autotype(t *testing.T) {
 	t.Run("setField stores autotype string", func(t *testing.T) {
 		r := &Record{}

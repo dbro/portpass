@@ -347,13 +347,14 @@ func updateRecordFields(this js.Value, args []js.Value) interface{} {
 					cfs[i] = pwsafe.CustomField{Name: inp.Name, Sensitive: inp.Sensitive}
 					if inp.Value != nil {
 						cfs[i].Value = *inp.Value
-					} else {
-						// null = preserve existing value for this field name
-						for _, ex := range rec.CustomFields {
-							if ex.Name == inp.Name {
+					}
+					for _, ex := range rec.CustomFields {
+						if ex.Name == inp.Name {
+							if inp.Value == nil {
 								cfs[i].Value = ex.Value
-								break
 							}
+							cfs[i].UnknownProps = ex.UnknownProps
+							break
 						}
 					}
 				}
