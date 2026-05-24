@@ -517,7 +517,7 @@
   padding: 16px 24px 8px;
 }
 .vault-app.is-desktop .record-pane-actions { display: flex; gap: 8px; }
-.vault-app.is-desktop .record-body { padding: 8px 24px 32px; max-width: 640px; }
+.vault-app.is-desktop .record-body { padding: 8px 24px 32px; }
 .vault-app.is-desktop .fab { display: none; }
 .vault-app.is-desktop .desktop-new-btn {
   position: absolute; bottom: 16px; left: 16px; z-index: 4;
