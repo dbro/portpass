@@ -290,11 +290,7 @@ func (r *Record) marshal() ([]byte, []byte, error) {
 	}
 
 	if len(r.CustomFields) > 0 {
-		cfs := r.CustomFields
-		if len(cfs) > 9 {
-			cfs = cfs[:9]
-		}
-		appendField(recordCustomTextField, marshalCustomFields(cfs))
+		appendField(recordCustomTextField, marshalCustomFields(r.CustomFields))
 	}
 
 	if len(r.UnknownFields) > 0 {
@@ -353,9 +349,6 @@ func parseCustomFields(s string) []CustomField {
 	}
 	if cur != nil && cur.Name != "" {
 		fields = append(fields, *cur)
-	}
-	if len(fields) > 9 {
-		fields = fields[:9]
 	}
 	return fields
 }

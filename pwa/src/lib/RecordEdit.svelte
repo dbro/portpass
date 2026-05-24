@@ -72,8 +72,9 @@
   let totpDigits   = $state(untrack(() => record?.TOTPLength || 6))
   let totpPeriod   = $state(untrack(() => record?.TOTPTimeStep || 30))
 
-  // Custom fields — independent editable copy of initial prop value
-  let customFields = $state(untrack(() => (record?.CustomFields ?? []).slice(0, 9).map(cf => ({ Name: cf.Name, Value: cf.Value, Sensitive: !!cf.Sensitive }))))
+  // Custom fields — independent editable copy of initial prop value (first 9 only; overflow preserved on save)
+  let customFields  = $state(untrack(() => (record?.CustomFields ?? []).slice(0, 9).map(cf => ({ Name: cf.Name, Value: cf.Value, Sensitive: !!cf.Sensitive }))))
+  let overflowFields = untrack(() => (record?.CustomFields ?? []).slice(9))
   let totpGearOpen = $state(false)
   let totpRevealed = $state(false)
   let totpError    = $state('')
@@ -179,7 +180,7 @@
     const orig = (record?.CustomFields ?? []).slice(0, 9)
     if (orig.length !== customFields.length) return true
     return customFields.some((cf, i) =>
-      cf.Name !== orig[i].Name || cf.Value !== orig[i].Value || cf.Sensitive !== !!orig[i].Sensitive
+      cf.Name !== orig[i]?.Name || cf.Value !== orig[i]?.Value || cf.Sensitive !== !!orig[i]?.Sensitive
     )
   })
   let dirty   = $derived(!record || Object.keys(draft).some(k => (record[k] ?? '') !== draft[k]) || totpChanged || customFieldsDirty)
@@ -198,7 +199,7 @@
       d.TOTPLength   = String(totpDigits)
       d.TOTPTimeStep = String(totpPeriod)
     }
-    d.CustomFields = customFields.slice()
+    d.CustomFields = [...customFields, ...overflowFields]
     return d
   }
 

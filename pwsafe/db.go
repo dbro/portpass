@@ -25,7 +25,7 @@ type V3 struct {
 	Iter          uint32 //the number of iterations on the hash function to create the stretched key
 	LastMod       time.Time
 	LastSavePath  string
-	Records       map[string]Record //the key is the record title
+	Records       map[string]Record // keyed by UUID hex (see uuidKey)
 	Salt          [32]byte
 	StretchedKey  [sha256.Size]byte
 }
