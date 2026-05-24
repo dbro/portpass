@@ -1225,6 +1225,13 @@
         return
       }
 
+      if (get(secondaryVaults).some(v => v.uuid === secondaryUuid)) {
+        closeDatabase(secondaryUuid)
+        secondarySetup = { ...secondarySetup, busy: false,
+          error: `"${secondarySetup.filename}" is already open as a secondary vault.` }
+        return
+      }
+
       const info  = getDatabaseInfo(secondaryUuid)
       const items = getDatabaseData(secondaryUuid)
       let readonly = true
