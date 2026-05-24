@@ -26,6 +26,9 @@
   }
 
   let query                  = $state('')
+  let debouncedQuery         = $state('')
+  let _debounceTimer
+  $effect(() => { const q = query; clearTimeout(_debounceTimer); _debounceTimer = setTimeout(() => { debouncedQuery = q }, 150) })
   let selectedUUID           = $state(null)
   let selectedVaultUuid      = $state(null) // null = primary vault
   let record                 = $state(null)
@@ -1270,9 +1273,9 @@
     function sortedEntries(items, vaultUuid) {
       let list = items
       if (pendingDeleteUUID) list = list.filter(i => i.uuid !== pendingDeleteUUID)
-      if (query.trim()) {
+      if (debouncedQuery.trim()) {
         try {
-          const matched = new Set(searchRecords(vaultUuid ?? dbKey, query, 0))
+          const matched = new Set(searchRecords(vaultUuid ?? dbKey, debouncedQuery, 0))
           list = list.filter(i => matched.has(i.uuid))
         } catch {}
       }
@@ -1327,12 +1330,12 @@
 
     if (e.key === 'Escape') {
       if (showHelp) { showHelp = false; return }
-      if (inSearch && query) { query = ''; return }
+      if (inSearch && query) { query = ''; clearTimeout(_debounceTimer); debouncedQuery = ''; return }
       if (inSearch) { searchInput?.blur(); return }
       if (sheetOpen) { sheetOpen = false; return }
       if (isEditing) { cancelEdit(); return }
       if (record) { record = null; selectedUUID = null; return }
-      if (query) { query = ''; return }
+      if (query) { query = ''; clearTimeout(_debounceTimer); debouncedQuery = ''; return }
       return
     }
 
@@ -1473,13 +1476,13 @@
       use:focusOnMount
     />
     {#if query}
-      <button class="icon-btn-flat" onclick={() => query = ''} aria-label="Clear search">
+      <button class="icon-btn-flat" onclick={() => { query = ''; clearTimeout(_debounceTimer); debouncedQuery = '' }} aria-label="Clear search">
         <Icon name="x" size={16} stroke="var(--text-soft)"/>
       </button>
     {/if}
   </div>
 
-  <RecordList {query} {selectedUUID} {collapseSeq} excludeUUID={pendingDeleteUUID} storageKey={dbKey} primaryVaultName={vaultName} ontap={selectRecord} oncopy={copyToClipboard} oncopytotp={copyTOTPForUUID} onwasmcopyfield={copyFieldViaWasm} onwasmcopycustomfield={copyCustomFieldViaWasm}/>
+  <RecordList query={debouncedQuery} {selectedUUID} {collapseSeq} excludeUUID={pendingDeleteUUID} storageKey={dbKey} primaryVaultName={vaultName} ontap={selectRecord} oncopy={copyToClipboard} oncopytotp={copyTOTPForUUID} onwasmcopyfield={copyFieldViaWasm} onwasmcopycustomfield={copyCustomFieldViaWasm}/>
 
   <!-- FAB (mobile) — hidden when all open vaults are read-only -->
   {#if !allVaultsReadonly}
