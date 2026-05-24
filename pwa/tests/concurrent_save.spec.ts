@@ -68,7 +68,7 @@ test.describe('Concurrent save protection', () => {
     await page.evaluate(() => { (window as any).__fileState.lastModified = 2000000 })
     await triggerSave(page)
 
-    expect(dialogMessage).toContain('modified by another Portpass instance')
+    expect(dialogMessage).toContain('modified since it was loaded')
   })
 
   test('saves after user accepts conflict dialog', async ({ page }) => {

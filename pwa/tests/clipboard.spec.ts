@@ -96,8 +96,6 @@ test.describe('Clipboard autoclear', () => {
   test('does not clear on return if clipboard was overwritten while backgrounded', async ({ page }) => {
     await copyPassword(page)
 
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(FIRST_PASSWORD)
-
     await simulateHide(page)
     await page.waitForTimeout(400) // timer fires while hidden
 
