@@ -231,7 +231,7 @@
 .vault-app .record-bar-group {
   font-size: 13px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase;
 }
-.vault-app .record-body { flex: 1; overflow-y: auto; padding: 20px 16px 32px; }
+.vault-app .record-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 20px 16px 32px; }
 .vault-app .record-title { font-size: 26px; font-weight: 700; letter-spacing: -0.015em; margin: 0 0 20px; }
 
 /* Drain bar uses transform:scaleX (reliable cross-browser) behind text via z-index:-1.
@@ -509,7 +509,7 @@
   height: 100%; padding-bottom: 80px;
 }
 .vault-app.is-desktop .record-screen {
-  grid-column: 2; grid-row: 2 / -1; height: 100%;
+  grid-column: 2; grid-row: 2 / -1; height: 100%; min-width: 0; overflow-x: hidden;
 }
 .vault-app.is-desktop .record-screen .record-bar { display: none; }
 .vault-app.is-desktop .record-pane-header {
