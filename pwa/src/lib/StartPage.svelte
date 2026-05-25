@@ -46,7 +46,9 @@
       biometricEnrolled = entry.uuid
         ? await isBiometricEnrolled(entry.uuid)
         : await isBiometricEnrolledForFile(fileHandle.name)
-      if (biometricEnrolled && autoBiometric) unlockBiometric()
+      // Only trigger if you can ensure a clean permission flow.
+      const status = await fileHandle.queryPermission({ mode: 'read' })
+      if (status == 'granted' && biometricEnrolled && autoBiometric) unlockBiometric()
     } catch {}
   })
 
@@ -129,9 +131,21 @@
   }
 
   async function unlockBiometric() {
-    busy = true; error = ''
+    // 1. Guard against re-entry
+    if (busy) return; busy = true
+    error = ''
+
     try {
-      // Retrieve the master password from biometric, use it immediately, let it go out of scope.
+      // 2. Request File Permission FIRST (User-Activation requirement)
+      // This is a direct call on the handle, which Chrome trusts if
+      // called within the same event loop as the button click.
+      const perm = await fileHandle.requestPermission({ mode: 'read' })
+      if (perm !== 'granted') {
+        error = 'File access was denied.'
+        return
+      }
+
+      // 3. Authenticate with Biometric
       let biometricPassword
       try {
         biometricPassword = await unlockWithBiometric(fileHandle.name)
@@ -140,18 +154,26 @@
         console.error(e)
         return
       }
-      const perm = await fileHandle.requestPermission({ mode: 'read' })
-      if (perm !== 'granted') { biometricPassword = null; error = 'File access was denied.'; return }
+
+      // 4. Verify file existence
       let file
-      try { file = await fileHandle.getFile() } catch (e) {
-        if (e.name === 'NotFoundError') { biometricPassword = null; await handleFileMissing(); return }
+      try {
+        file = await fileHandle.getFile()
+      } catch (e) {
+        if (e.name === 'NotFoundError') {
+          await handleFileMissing()
+          return
+        }
         throw e
       }
-      const buf  = await file.arrayBuffer()
+
+      // 5. Decrypt and Open
+      const buf = await file.arrayBuffer()
       let vaultUuid
       try {
         vaultUuid = openDatabase(new Uint8Array(buf), biometricPassword)
-      } catch {
+      } catch (e) {
+        console.error("[DEBUG] Decryption failed. Error:", e)
         biometricPassword = null
         await clearBiometricForFile(fileHandle.name)
         biometricEnrolled = false
@@ -159,13 +181,24 @@
         return
       }
       biometricPassword = null
+
+      // 6. UI/State updates
       dbItems.set(getDatabaseData(vaultUuid))
-      const info     = getDatabaseInfo(vaultUuid)
       const writable = await probeWriteAccess(fileHandle)
-      selectedFile.set({ handle: fileHandle, name: fileHandle.name, readonly: !writable, uuid: vaultUuid })
+      selectedFile.set({
+        handle: fileHandle,
+        name: fileHandle.name,
+        readonly: !writable,
+        uuid: vaultUuid
+      })
+
       await pushRecentHandle(fileHandle, vaultUuid)
       await autoUnlockSecondaries(vaultUuid)
       onopened()
+
+    } catch (e) {
+      console.error(e)
+      error = 'An unexpected error occurred.'
     } finally {
       busy = false
     }
