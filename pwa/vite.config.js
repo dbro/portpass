@@ -68,6 +68,17 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm,gz}'],
         maximumFileSizeToCacheInBytes: 5000000,
+	// Inject the header into the requests
+        manifestTransforms: [async (entries) => {
+          const manifest = entries.map(entry => {
+            return {
+              ...entry,
+              // This tells Workbox to use custom headers for requests
+              headers: { 'ngrok-skip-browser-warning': 'true' }
+            }
+          })
+          return { manifest }
+        }]
       }
     })
   ],
