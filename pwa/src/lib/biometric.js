@@ -115,7 +115,6 @@ export async function unlockWithBiometric(filename) {
     return new TextDecoder().decode(plaintext)
 
   } catch (err) {
-    console.error(`[DEBUG] FAILED. Name: ${err.name}, Message: ${err.message}`)
     throw err
   }
 }

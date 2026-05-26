@@ -393,6 +393,7 @@ body {
 
   // ── Mode detection ────────────────────────────────────────────────────────
   function onOpenerMessage(event) {
+    if (!window.opener || event.source !== window.opener) return
     var msg = event.data
     if (!msg || msg.type !== 'init') return
     window.removeEventListener('message', onOpenerMessage)
