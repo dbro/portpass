@@ -528,8 +528,8 @@ body {
 
     if (bcCount > 1 || wsCount > 1) {
       showErrorPhase('multiinstance')
-      if (window.opener) {
-        try { window.opener.postMessage({ type: 'cancel' }, bookmarkletOrigin || '*') } catch(_) {}
+      if (window.opener && bookmarkletOrigin) {
+        try { window.opener.postMessage({ type: 'cancel' }, bookmarkletOrigin) } catch(_) {}
       }
       return
     }
@@ -697,10 +697,10 @@ body {
       return
     }
 
-    if (window.opener) {
+    if (window.opener && bookmarkletOrigin) {
       window.opener.postMessage(
         { type: 'fill', autotype: cred.autotype, fields: cred.fields },
-        bookmarkletOrigin || '*'
+        bookmarkletOrigin
       )
     }
   }
@@ -1298,8 +1298,8 @@ body {
     var phase = detectErrorPhase(message)
     showErrorPhase(phase, message)
     // Also forward to bookmarklet so it can clean up, but no overlay.
-    if (window.opener) {
-      try { window.opener.postMessage({ type: 'cancel' }, bookmarkletOrigin || '*') } catch(_) {}
+    if (window.opener && bookmarkletOrigin) {
+      try { window.opener.postMessage({ type: 'cancel' }, bookmarkletOrigin) } catch(_) {}
     }
   }
 
