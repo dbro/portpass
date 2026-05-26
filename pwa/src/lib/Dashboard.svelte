@@ -1323,14 +1323,16 @@
       }
 
       if (secondaryUuid === dbKey) {
-        closeDatabase(secondaryUuid)
+        // Don't closeDatabase here — same UUID means this IS the primary vault.
+        // Closing it would remove the primary from WASM memory.
         secondarySetup = { ...secondarySetup, busy: false,
           error: `"${secondarySetup.filename}" is already open as your primary vault and cannot also be added as a secondary vault.` }
         return
       }
 
       if (get(secondaryVaults).some(v => v.uuid === secondaryUuid)) {
-        closeDatabase(secondaryUuid)
+        // Don't closeDatabase here — this secondary is already in the WASM map.
+        // Closing it would break the already-open secondary vault.
         secondarySetup = { ...secondarySetup, busy: false,
           error: `"${secondarySetup.filename}" is already open as a secondary vault.` }
         return

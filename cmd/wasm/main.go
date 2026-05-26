@@ -58,7 +58,9 @@ func openDB(this js.Value, args []js.Value) interface{} {
 	}
 
 	uuid := vaultUUID(newDB)
-	databases[uuid] = newDB
+	if _, exists := databases[uuid]; !exists {
+		databases[uuid] = newDB
+	}
 
 	result, _ := json.Marshal(map[string]string{"uuid": uuid})
 	return string(result)
