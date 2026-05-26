@@ -63,7 +63,9 @@ test.describe('Unlock screen', () => {
     await page.getByRole('button', { name: 'Unlock' }).click()
 
     await expect(page.getByPlaceholder('Search vault')).toBeVisible({ timeout: 10000 })
-    await expect(page.locator('.desktop-new-btn')).not.toBeVisible()
+    // Vault should be marked read-only
+    await page.locator('.vault-pill').click()
+    await expect(page.locator('.vault-badge-ro')).toBeVisible()
   })
 
   test('Enter key submits password', async ({ page }) => {

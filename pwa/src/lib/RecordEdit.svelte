@@ -25,7 +25,7 @@
     return { secret: secret.toUpperCase().replace(/[\s-]/g, ''), digits, period }
   }
 
-  let { record, isNew, isDesktop, bookmarkletsSupported = false, hasDelegates = false, vaultUuid, rwVaults = [], onvaultchange, oncancel, onsave, ondelete, ondirtychange } = $props()
+  let { record, isNew, isDesktop, bookmarkletsSupported = false, hasDelegates = false, vaultUuid, rwVaults = [], vaultReadonly = false, onvaultchange, oncancel, onsave, ondelete, ondirtychange } = $props()
 
   let vaultDropOpen = $state(false)
 
@@ -397,7 +397,7 @@
   <div class="record-bar" style={isDesktop ? 'display:none' : ''}>
     <button class="btn-text" onclick={oncancel}>Cancel</button>
     <div class="record-bar-group muted">{isNew ? 'New' : 'Edit'}</div>
-    <button class="btn-text primary" disabled={!canSave} onclick={() => onsave(buildSaveDraft())}>Save</button>
+    <button class="btn-text primary" disabled={!canSave} onclick={() => onsave(buildSaveDraft())}>{vaultReadonly ? 'Save as' : 'Save'}</button>
   </div>
 
   {#if isDesktop}
@@ -406,7 +406,7 @@
       <div class="record-pane-actions">
         <button class="btn-text" onclick={oncancel}>Cancel</button>
         <button class="btn btn-primary" disabled={!canSave} onclick={() => onsave(buildSaveDraft())}
-          style="height:36px;padding:0 14px;font-size:14px">Save</button>
+          style="height:36px;padding:0 14px;font-size:14px">{vaultReadonly ? 'Save as' : 'Save'}</button>
       </div>
     </div>
   {/if}
@@ -821,6 +821,7 @@
           <Icon name="trash" size={16}/>
           Delete {draft.Title}
         </button>
+        {#if vaultReadonly}<div class="delete-ro-note muted">Saves a copy of the vault with this entry removed</div>{/if}
       </div>
     {/if}
   </div>
@@ -1021,6 +1022,11 @@
     opacity: 0.75;
   }
   .btn-delete:hover { opacity: 1; }
+  .delete-ro-note {
+    font-size: 12px;
+    margin-top: 4px;
+    padding-left: 2px;
+  }
 
   /* --- Autofill sequence header row --- */
   .autotype-label-group {

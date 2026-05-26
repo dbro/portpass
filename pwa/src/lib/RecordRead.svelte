@@ -5,7 +5,7 @@
   import { getTOTP, getFieldValue, getCustomFieldValue } from '../wasm.js'
   import Icon from './Icon.svelte'
 
-  let { record, uuid, isDesktop, bookmarkletsSupported = false, hasDelegates = false, vaultUuid, onback, onedit, oncopy, oncopytotp,
+  let { record, uuid, isDesktop, bookmarkletsSupported = false, hasDelegates = false, vaultUuid, onback, onedit, vaultReadonly = false, oncopy, oncopytotp,
         onwasmcopyfield, onwasmcopycustomfield } = $props()
 
   let revealed        = $state(false)
@@ -319,7 +319,10 @@
     <Icon name="back" size={22}/>
   </button>
   <div class="record-bar-group muted">{record.Group ?? ''}</div>
-  <button class="btn-text primary" onclick={onedit} style={onedit ? '' : 'visibility:hidden;pointer-events:none'}>Edit</button>
+  <div class="record-bar-edit" style={onedit ? '' : 'visibility:hidden;pointer-events:none'}>
+    <button class="btn-text primary" onclick={onedit}>Edit</button>
+    {#if vaultReadonly}<span class="ro-chip muted">read-only</span>{/if}
+  </div>
 </div>
 
 <!-- Desktop pane header (hidden on mobile via CSS) -->
@@ -328,6 +331,7 @@
     <span class="record-bar-group muted">{record.Group ?? ''}</span>
     {#if onedit}
       <div class="record-pane-actions">
+        {#if vaultReadonly}<span class="ro-chip muted">read-only</span>{/if}
         <button class="btn btn-ghost" onclick={onedit} style="height:36px;padding:0 14px;font-size:14px">Edit</button>
       </div>
     {/if}
@@ -603,6 +607,21 @@
 </div>
 
 <style>
+  .record-bar-edit {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .ro-chip {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-pill);
+    padding: 1px 7px;
+    white-space: nowrap;
+  }
+
   .totp-bar {
     height: 2px;
     background: var(--border);

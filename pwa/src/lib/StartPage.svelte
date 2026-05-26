@@ -28,7 +28,7 @@
   let biometricAvailable = $state(false)
   let biometricEnrolled  = $state(false)
 
-  const supportsFilePicker = typeof window !== 'undefined' && 'showOpenFilePicker' in window
+  const supportsFilePicker = typeof window !== 'undefined' && typeof window.showOpenFilePicker === 'function'
 
   let fallbackFile = $state(null)  // File object when supportsFilePicker is false
   let fileInputEl  = $state(null)
@@ -70,7 +70,7 @@
     fileInputEl.click()
   }
 
-  function onFileInputChange(e) {
+  async function onFileInputChange(e) {
     const file = e.target.files?.[0]
     if (!file) return
     e.target.value = ''
@@ -78,15 +78,16 @@
     mode = 'unlock'
     error = ''
     password = ''
-    biometricEnrolled = false
+    biometricEnrolled = await isBiometricEnrolledForFile(file.name)
   }
 
   // After a successful vault open, check whether to offer biometric enrollment.
   // The offer is shown at most once per vault file — if dismissed, the user can
   // enable biometric/PIN unlock later from the vault settings sheet.
   function afterUnlock() {
-    const offerKey = `biometric-offered-${fileHandle?.name}`
-    if (!fallbackFile && biometricAvailable && !biometricEnrolled && !localStorage.getItem(offerKey)) {
+    const fname = fallbackFile?.name ?? fileHandle?.name
+    const offerKey = `biometric-offered-${fname}`
+    if (biometricAvailable && !biometricEnrolled && !localStorage.getItem(offerKey)) {
       localStorage.setItem(offerKey, '1')
       mode = 'offer-biometric'
     } else {
@@ -136,46 +137,50 @@
     error = ''
 
     try {
-      // 2. Request File Permission FIRST (User-Activation requirement)
-      // This is a direct call on the handle, which Chrome trusts if
-      // called within the same event loop as the button click.
-      const perm = await fileHandle.requestPermission({ mode: 'read' })
-      if (perm !== 'granted') {
-        error = 'File access was denied.'
-        return
+      const fname = fileHandle?.name ?? fallbackFile?.name
+
+      // 2. Request file permission (file handle path only — user activation requirement)
+      if (fileHandle) {
+        const perm = await fileHandle.requestPermission({ mode: 'read' })
+        if (perm !== 'granted') {
+          error = 'File access was denied.'
+          return
+        }
       }
 
       // 3. Authenticate with Biometric
       let biometricPassword
       try {
-        biometricPassword = await unlockWithBiometric(fileHandle.name)
+        biometricPassword = await unlockWithBiometric(fname)
       } catch (e) {
         error = e.name === 'NotAllowedError' ? 'Biometric authentication cancelled.' : e.message
         console.error(e)
         return
       }
 
-      // 4. Verify file existence
-      let file
-      try {
-        file = await fileHandle.getFile()
-      } catch (e) {
-        if (e.name === 'NotFoundError') {
-          await handleFileMissing()
-          return
+      // 4. Read file bytes
+      let buf
+      if (fileHandle) {
+        let file
+        try {
+          file = await fileHandle.getFile()
+        } catch (e) {
+          if (e.name === 'NotFoundError') { await handleFileMissing(); return }
+          throw e
         }
-        throw e
+        buf = await file.arrayBuffer()
+      } else {
+        buf = await fallbackFile.arrayBuffer()
       }
 
       // 5. Decrypt and Open
-      const buf = await file.arrayBuffer()
       let vaultUuid
       try {
         vaultUuid = openDatabase(new Uint8Array(buf), biometricPassword)
       } catch (e) {
         console.error("[DEBUG] Decryption failed. Error:", e)
         biometricPassword = null
-        await clearBiometricForFile(fileHandle.name)
+        await clearBiometricForFile(fname)
         biometricEnrolled = false
         error = 'Biometric/PIN unlock is out of date — please enter your master password.'
         return
@@ -184,16 +189,14 @@
 
       // 6. UI/State updates
       dbItems.set(getDatabaseData(vaultUuid))
-      const writable = await probeWriteAccess(fileHandle)
-      selectedFile.set({
-        handle: fileHandle,
-        name: fileHandle.name,
-        readonly: !writable,
-        uuid: vaultUuid
-      })
-
-      await pushRecentHandle(fileHandle, vaultUuid)
-      await autoUnlockSecondaries(vaultUuid)
+      if (fileHandle) {
+        const writable = await probeWriteAccess(fileHandle)
+        selectedFile.set({ handle: fileHandle, name: fileHandle.name, readonly: !writable, uuid: vaultUuid })
+        await pushRecentHandle(fileHandle, vaultUuid)
+        await autoUnlockSecondaries(vaultUuid)
+      } else {
+        selectedFile.set({ handle: null, name: fname, readonly: true, uuid: vaultUuid })
+      }
       onopened()
 
     } catch (e) {
@@ -208,7 +211,8 @@
     busy = true; error = ''
     try {
       const info = getDatabaseInfo($selectedFile?.uuid ?? '')
-      await enrollBiometric(password, info?.uuid, fileHandle?.name)
+      const fname = fallbackFile?.name ?? fileHandle?.name
+      await enrollBiometric(password, info?.uuid, fname)
       biometricEnrolled = true
       onopened()
     } catch (e) {

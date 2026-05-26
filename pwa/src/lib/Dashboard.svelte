@@ -3,6 +3,7 @@
   import { get } from 'svelte/store'
   import { selectedFile, dbItems, secondaryVaults, toast, clipboardSession, clipboardContext, switchboardUrl, switchboardConnected, crossProfileEnabled, delegatesVersion } from '../store.js'
   import {
+    openDatabase,
     getRecordData, getDatabaseData, saveDatabase, getDatabaseInfo,
     updateRecordFields, updateDBFields, deleteRecord as wasmDeleteRecord,
     searchRecords, closeDatabase, loadVaultFile,
@@ -20,6 +21,9 @@
   import VaultSheet from './VaultSheet.svelte'
 
   let { onclosed, isPopup = false, theme, accent, isDesktop, bookmarkletsSupported = false, ontheme, onaccent, intent = null, onclearintent } = $props()
+
+  const supportsFilePicker = typeof window !== 'undefined' && typeof window.showOpenFilePicker === 'function'
+  const supportsSaveAs     = typeof window !== 'undefined' && typeof window.showSaveFilePicker === 'function'
 
   function focusOnMount(node) {
     if (passwordCount > 0) setTimeout(() => node.focus(), 0)
@@ -56,7 +60,14 @@
     + $secondaryVaults.reduce((n, v) => n + new Set(v.items?.map(i => i.group).filter(Boolean)).size, 0)
   )
   let secondaryCount    = $derived($secondaryVaults.length)
-  let allVaultsReadonly = $derived($selectedFile?.readonly && $secondaryVaults.every(v => v.readonly))
+  // True when the vault being edited/created is readonly (primary or secondary)
+  let editVaultReadonly = $derived(
+    isNew
+      ? !!$selectedFile?.readonly && (!newRecordVaultUuid || newRecordVaultUuid === dbKey)
+      : selectedVaultUuid
+        ? !!($secondaryVaults.find(v => v.uuid === selectedVaultUuid)?.readonly)
+        : !!$selectedFile?.readonly
+  )
 
   // Tracked file modification timestamps — detect external changes before saving.
   // Kept outside $state; these are write-guards, not reactive UI state.
@@ -79,6 +90,8 @@
   // State for the "unlock additional vault" modal flow.
   // handle is kept outside $state to prevent Svelte 5 from deep-proxying the FileSystemFileHandle.
   let _secondaryHandle = null
+  let _secondaryFallbackFile = null  // File object when showOpenFilePicker isn't available
+  let secondaryFileInputEl = $state(null)
   let secondarySetup = $state(null) // { password, showPw, busy, error, needsAuth, filename }
   let newRecordVaultUuid = $state(null) // null = primary vault
 
@@ -786,6 +799,42 @@
     editDirty = false
   }
 
+  // Save a secondary vault when it has no writable handle (Save As picker or iOS download).
+  // Updates secondaryVaults state and stored credentials on success. Throws on abort/error.
+  async function saveSecondaryAs(sv, data) {
+    if (supportsSaveAs) {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: sv.filename ?? 'vault.psafe3',
+        types: [{ description: 'Password Safe', accept: { 'application/octet-stream': ['.psafe3', '.dat'] } }],
+      })
+      const w = await handle.createWritable()
+      await w.write(data)
+      await w.close()
+      const filename = handle.name
+      secondaryVaults.update(vs => vs.map(v => v.uuid === sv.uuid
+        ? { ...v, handle, filename, readonly: false }
+        : v
+      ))
+      secondaryHead[sv.uuid] = data.slice(72, 152)
+      try { secondaryModified[sv.uuid] = (await handle.getFile()).lastModified } catch {}
+      try { await addSecondaryCredential(dbKey, filename, sv.uuid, sv.masterPassword, handle) } catch {}
+      showToast('Saved to ' + (sv.name || filename), null, 2000)
+    } else {
+      const fname = sv.filename ?? 'vault'
+      const download = fname.endsWith('.psafe3') || fname.endsWith('.dat') ? fname : fname + '.psafe3'
+      const blob = new Blob([data], { type: 'application/octet-stream' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = download
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      showToast('Vault downloaded', null, 2000)
+    }
+  }
+
   async function saveRecord(draft) {
     try {
       const targetVault = isNew ? (newRecordVaultUuid || dbKey) : (selectedVaultUuid || dbKey)
@@ -811,7 +860,7 @@
             : v
           ))
           selectedVaultUuid = targetVault
-          if (secondaryModified[targetVault] !== undefined) {
+          if (sv.handle && !sv.readonly && secondaryModified[targetVault] !== undefined) {
             try {
               const file = await sv.handle.getFile()
               if (file.lastModified !== secondaryModified[targetVault]) {
@@ -827,16 +876,20 @@
             } catch {}
           }
           const data = saveDatabase(targetVault)
-          const w = await sv.handle.createWritable()
-          await w.write(data)
-          await w.close()
-          secondaryHead[targetVault] = data.slice(72, 152)
-          try { secondaryModified[targetVault] = (await sv.handle.getFile()).lastModified } catch {}
-          showToast('Saved to ' + (sv.name || sv.filename), null, 2000)
+          if (sv.handle && !sv.readonly) {
+            const w = await sv.handle.createWritable()
+            await w.write(data)
+            await w.close()
+            secondaryHead[targetVault] = data.slice(72, 152)
+            try { secondaryModified[targetVault] = (await sv.handle.getFile()).lastModified } catch {}
+            showToast('Saved to ' + (sv.name || sv.filename), null, 2000)
+          } else {
+            await saveSecondaryAs(sv, data)
+          }
         }
       }
     } catch (e) {
-      showToast('Failed to save: ' + e.message)
+      if (e.name !== 'AbortError') showToast('Failed to save: ' + e.message)
     }
   }
 
@@ -875,7 +928,7 @@
                 ? { ...v, items: items.map(i => ({ ...i, vaultUuid: targetVault })) }
                 : v
               ))
-              if (secondaryModified[targetVault] !== undefined) {
+              if (sv.handle && !sv.readonly && secondaryModified[targetVault] !== undefined) {
                 try {
                   const file = await sv.handle.getFile()
                   if (file.lastModified !== secondaryModified[targetVault]) {
@@ -891,11 +944,15 @@
                 } catch {}
               }
               const data = saveDatabase(targetVault)
-              const w = await sv.handle.createWritable()
-              await w.write(data)
-              await w.close()
-              secondaryHead[targetVault] = data.slice(72, 152)
-              try { secondaryModified[targetVault] = (await sv.handle.getFile()).lastModified } catch {}
+              if (sv.handle && !sv.readonly) {
+                const w = await sv.handle.createWritable()
+                await w.write(data)
+                await w.close()
+                secondaryHead[targetVault] = data.slice(72, 152)
+                try { secondaryModified[targetVault] = (await sv.handle.getFile()).lastModified } catch {}
+              } else {
+                await saveSecondaryAs(sv, data)
+              }
             }
           }
         } catch (e) {
@@ -940,16 +997,36 @@
     try {
       const data = saveDatabase(dbKey)
       let handle = $selectedFile?.handle
+      let savedAs = false
 
-      if (!handle) {
-        handle = await window.showSaveFilePicker({
-          suggestedName: $selectedFile?.name ?? 'vault.psafe3',
-          types: [{ description: 'Password Safe', accept: { 'application/octet-stream': ['.psafe3', '.dat'] } }],
-        })
-        selectedFile.update(s => ({ ...s, handle, name: handle.name }))
+      if (!handle || $selectedFile?.readonly) {
+        if (supportsSaveAs) {
+          handle = await window.showSaveFilePicker({
+            suggestedName: $selectedFile?.name ?? 'vault.psafe3',
+            types: [{ description: 'Password Safe', accept: { 'application/octet-stream': ['.psafe3', '.dat'] } }],
+          })
+          savedAs = true
+        } else {
+          // No file picker (iOS): trigger a download
+          const fname = ($selectedFile?.name ?? 'vault')
+          const download = fname.endsWith('.psafe3') || fname.endsWith('.dat') ? fname : fname + '.psafe3'
+          const blob = new Blob([data], { type: 'application/octet-stream' })
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = download
+          document.body.appendChild(a)
+          a.click()
+          document.body.removeChild(a)
+          URL.revokeObjectURL(url)
+          isDirty = false
+          try { lastSave = getDatabaseInfo(dbKey)?.when ?? '' } catch {}
+          if (!silent) showToast('Vault saved')
+          return
+        }
       }
 
-      if (primaryModified !== null) {
+      if (!savedAs && primaryModified !== null) {
         try {
           const file = await handle.getFile()
           if (file.lastModified !== primaryModified) {
@@ -969,6 +1046,9 @@
       await w.close()
       primaryHead = data.slice(72, 152)
       try { primaryModified = (await handle.getFile()).lastModified } catch {}
+      if (savedAs) {
+        selectedFile.update(s => ({ ...s, handle, name: handle.name, readonly: false }))
+      }
       isDirty = false
       try { lastSave = getDatabaseInfo(dbKey)?.when ?? '' } catch {}
       if (!silent) showToast('Vault saved')
@@ -1182,21 +1262,39 @@
 
   async function unlockAdditionalVault() {
     sheetOpen = false
-    let secondaryHandle
-    try {
-      ;[secondaryHandle] = await window.showOpenFilePicker({
-        types: [{ description: 'Password Safe', accept: { 'application/octet-stream': ['.psafe3', '.dat'] } }],
-      })
-    } catch (e) {
-      sheetOpen = true
-      if (e.name !== 'AbortError') showToast('Could not open file: ' + e.message)
-      return
+    if (supportsFilePicker) {
+      let secondaryHandle
+      try {
+        ;[secondaryHandle] = await window.showOpenFilePicker({
+          types: [{ description: 'Password Safe', accept: { 'application/octet-stream': ['.psafe3', '.dat'] } }],
+        })
+      } catch (e) {
+        sheetOpen = true
+        if (e.name !== 'AbortError') showToast('Could not open file: ' + e.message)
+        return
+      }
+      _secondaryHandle = secondaryHandle
+      _secondaryFallbackFile = null
+      secondarySetup = {
+        filename: secondaryHandle.name,
+        password: '', showPw: false, busy: false, error: '',
+        needsAuth: await isBiometricEnrolledForFile($selectedFile?.name ?? ''),
+      }
+    } else {
+      secondaryFileInputEl.click()
     }
-    _secondaryHandle = secondaryHandle
+  }
+
+  function onSecondaryFileInput(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) { sheetOpen = true; return }
+    _secondaryHandle = null
+    _secondaryFallbackFile = file
     secondarySetup = {
-      filename: secondaryHandle.name,
+      filename: file.name,
       password: '', showPw: false, busy: false, error: '',
-      needsAuth: await isBiometricEnrolledForFile($selectedFile?.name ?? ''),
+      needsAuth: false,
     }
   }
 
@@ -1216,7 +1314,13 @@
     }
 
     try {
-      const secondaryUuid = await loadVaultFile(_secondaryHandle, secondarySetup.password)
+      let secondaryUuid
+      if (_secondaryHandle) {
+        secondaryUuid = await loadVaultFile(_secondaryHandle, secondarySetup.password)
+      } else {
+        const buf = await _secondaryFallbackFile.arrayBuffer()
+        secondaryUuid = openDatabase(new Uint8Array(buf), secondarySetup.password)
+      }
 
       if (secondaryUuid === dbKey) {
         closeDatabase(secondaryUuid)
@@ -1235,7 +1339,9 @@
       const info  = getDatabaseInfo(secondaryUuid)
       const items = getDatabaseData(secondaryUuid)
       let readonly = true
-      try { const w = await _secondaryHandle.createWritable(); await w.abort(); readonly = false } catch {}
+      if (_secondaryHandle) {
+        try { const w = await _secondaryHandle.createWritable(); await w.abort(); readonly = false } catch {}
+      }
 
       await addSecondaryCredential(dbKey, secondarySetup.filename, secondaryUuid, secondarySetup.password, _secondaryHandle)
 
@@ -1251,7 +1357,10 @@
           masterPassword: secondarySetup.password,
         }]
       })
-      _secondaryHandle.getFile().then(f => { secondaryModified[secondaryUuid] = f.lastModified }).catch(() => {})
+      if (_secondaryHandle) {
+        _secondaryHandle.getFile().then(f => { secondaryModified[secondaryUuid] = f.lastModified }).catch(() => {})
+      }
+      _secondaryFallbackFile = null
       secondarySetup = null
       sheetOpen = true
     } catch (e) {
@@ -1491,20 +1600,21 @@
 
   <RecordList query={debouncedQuery} {selectedUUID} {collapseSeq} excludeUUID={pendingDeleteUUID} storageKey={dbKey} primaryVaultName={vaultName} ontap={selectRecord} oncopy={copyToClipboard} oncopytotp={copyTOTPForUUID} onwasmcopyfield={copyFieldViaWasm} onwasmcopycustomfield={copyCustomFieldViaWasm}/>
 
-  <!-- FAB (mobile) — hidden when all open vaults are read-only -->
-  {#if !allVaultsReadonly}
-    <button class="fab" onclick={startNew} aria-label="New">
-      <Icon name="plus" size={22} stroke="var(--accent-on)"/>
-    </button>
-  {/if}
+  <!-- FAB (mobile) -->
+  <button class="fab" onclick={startNew} aria-label="New">
+    <Icon name="plus" size={22} stroke="var(--accent-on)"/>
+  </button>
 
   <!-- New button (desktop, bottom of left panel) -->
-  {#if isDesktop && !allVaultsReadonly}
+  {#if isDesktop}
     <button class="desktop-new-btn" onclick={startNew}>
       <Icon name="plus" size={18}/>
       <span>New</span>
     </button>
   {/if}
+
+  <!-- Hidden file input for secondary vault fallback (when showOpenFilePicker isn't available) -->
+  <input bind:this={secondaryFileInputEl} type="file" accept=".psafe3,.dat" style="display:none" onchange={onSecondaryFileInput} />
 </div>
 
 {#if showHelp}
@@ -1571,6 +1681,7 @@
       {hasDelegates}
       vaultUuid={isNew ? (newRecordVaultUuid || dbKey) : (selectedVaultUuid || dbKey)}
       {rwVaults}
+      vaultReadonly={editVaultReadonly}
       onvaultchange={(uuid) => newRecordVaultUuid = uuid}
       oncancel={cancelEdit}
       onsave={saveRecord}
@@ -1587,7 +1698,8 @@
         {hasDelegates}
         vaultUuid={selectedVaultUuid || dbKey}
         onback={() => { record = null; selectedUUID = null; selectedVaultUuid = null }}
-        onedit={($secondaryVaults.find(v => v.uuid === selectedVaultUuid)?.readonly ?? $selectedFile?.readonly) ? null : startEdit}
+        onedit={startEdit}
+        vaultReadonly={selectedVaultUuid ? !!$secondaryVaults.find(v => v.uuid === selectedVaultUuid)?.readonly : !!$selectedFile?.readonly}
         oncopy={copyToClipboard}
         oncopytotp={copyTOTPForUUID}
         onwasmcopyfield={copyFieldViaWasm}
