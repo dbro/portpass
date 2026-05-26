@@ -1072,6 +1072,8 @@
     return bytes
   }
 
+  function absoluteUrl(url) { return url.includes('://') ? url : 'https://' + url }
+
   function hashesEqual(a, b) {
     if (!a || !b || a.length !== b.length) return false
     let diff = 0
@@ -1513,7 +1515,7 @@
     if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); startEdit(); return }
     if (e.key === 'Enter' && !e.target.matches('button, a')) {
       e.preventDefault()
-      if (record.URL) window.open(/^https?:\/\//i.test(record.URL) ? record.URL : 'https://' + record.URL, '_blank')
+      if (record.URL) window.open(absoluteUrl(record.URL), '_blank')
       return
     }
     if (e.ctrlKey && e.key === 'c') {

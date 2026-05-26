@@ -61,6 +61,8 @@
     const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
     return new Uint8Array(buf)
   }
+  function absoluteUrl(url) { return url.includes('://') ? url : 'https://' + url }
+
   function hashesEqual(a, b) {
     if (!a || !b || a.length !== b.length) return false
     let diff = 0
@@ -465,7 +467,7 @@
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <!-- svelte-ignore a11y_click_events_have_key_events -->
           <div class="copy-row-actions" onclick={e => e.stopPropagation()}>
-            <a class="icon-btn-flat" href={/^https?:\/\//i.test(record.URL) ? record.URL : 'https://' + record.URL} target="_blank" rel="noreferrer" aria-label="Open URL">
+            <a class="icon-btn-flat" href={absoluteUrl(record.URL)} target="_blank" rel="noreferrer" aria-label="Open URL" onclick={e => { e.preventDefault(); window.open(absoluteUrl(record.URL), '_blank') }}>
               <Icon name="external" size={18}/>
             </a>
             <button class="icon-btn-flat copy-btn" onclick={() => handleCopy(record.URL, 'URL')} aria-label="Copy URL">

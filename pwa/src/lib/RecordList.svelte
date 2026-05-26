@@ -33,6 +33,8 @@
     const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
     return new Uint8Array(buf)
   }
+  function absoluteUrl(url) { return url.includes('://') ? url : 'https://' + url }
+
   function hashesEqual(a, b) {
     if (!a || !b || a.length !== b.length) return false
     for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
@@ -466,7 +468,7 @@
       <button onclick={() => { handleCopy(contextMenu.rec.URL, contextMenu.uuid, 'URL'); closeMenu() }}>
         <span>Copy URL</span><span class="ctx-keys"><kbd>Ctrl</kbd><kbd>U</kbd></span>
       </button>
-      <button onclick={() => { window.open(/^https?:\/\//i.test(contextMenu.rec.URL) ? contextMenu.rec.URL : 'https://' + contextMenu.rec.URL, '_blank'); closeMenu() }}>
+      <button onclick={() => { window.open(absoluteUrl(contextMenu.rec.URL), '_blank'); closeMenu() }}>
         <span>Visit URL</span><span class="ctx-keys"><kbd>↵</kbd></span>
       </button>
     {/if}
