@@ -465,7 +465,7 @@
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <!-- svelte-ignore a11y_click_events_have_key_events -->
           <div class="copy-row-actions" onclick={e => e.stopPropagation()}>
-            <a class="icon-btn-flat" href={record.URL} target="_blank" rel="noreferrer" aria-label="Open URL">
+            <a class="icon-btn-flat" href={/^https?:\/\//i.test(record.URL) ? record.URL : 'https://' + record.URL} target="_blank" rel="noreferrer" aria-label="Open URL">
               <Icon name="external" size={18}/>
             </a>
             <button class="icon-btn-flat copy-btn" onclick={() => handleCopy(record.URL, 'URL')} aria-label="Copy URL">

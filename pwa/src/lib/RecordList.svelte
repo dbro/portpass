@@ -466,7 +466,7 @@
       <button onclick={() => { handleCopy(contextMenu.rec.URL, contextMenu.uuid, 'URL'); closeMenu() }}>
         <span>Copy URL</span><span class="ctx-keys"><kbd>Ctrl</kbd><kbd>U</kbd></span>
       </button>
-      <button onclick={() => { window.open(contextMenu.rec.URL, '_blank'); closeMenu() }}>
+      <button onclick={() => { window.open(/^https?:\/\//i.test(contextMenu.rec.URL) ? contextMenu.rec.URL : 'https://' + contextMenu.rec.URL, '_blank'); closeMenu() }}>
         <span>Visit URL</span><span class="ctx-keys"><kbd>↵</kbd></span>
       </button>
     {/if}
