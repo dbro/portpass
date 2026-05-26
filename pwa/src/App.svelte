@@ -189,7 +189,7 @@
     isDesktop = mq.matches
     mq.addEventListener('change', e => { isDesktop = e.matches })
 
-    const ptrMq = window.matchMedia('(pointer: fine)')
+    const ptrMq = window.matchMedia('(any-pointer: fine)')
     bookmarkletsSupported = ptrMq.matches
     ptrMq.addEventListener('change', e => { bookmarkletsSupported = e.matches })
 
