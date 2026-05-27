@@ -120,20 +120,27 @@ export function getTOTP(vaultUuid, recordUuid) {
 }
 
 
-// Copies a standard field value directly to clipboard from WASM.
-// returnHash=true causes a SHA-256 hash of the value to be returned (for clipboard drain).
-export function copyFieldToClipboard(vaultUuid, recordUuid, fieldname, returnHash = false) {
-    return parseOrThrow(window.copyFieldToClipboard(vaultUuid, recordUuid, fieldname, returnHash))
+// Copies a standard field value to clipboard. WASM returns the plaintext; JS
+// owns the async write so clipboard rejection is observable by the caller.
+// returnHash=true includes a SHA-256 hash of the value for clipboard drain.
+export async function copyFieldToClipboard(vaultUuid, recordUuid, fieldname, returnHash = false) {
+    const result = parseOrThrow(window.copyFieldToClipboard(vaultUuid, recordUuid, fieldname, returnHash))
+    await navigator.clipboard.writeText(result.value)
+    return result
 }
 
-// Copies a custom field value directly to clipboard from WASM.
-export function copyCustomFieldToClipboard(vaultUuid, recordUuid, customFieldName, returnHash = false) {
-    return parseOrThrow(window.copyCustomFieldToClipboard(vaultUuid, recordUuid, customFieldName, returnHash))
+// Copies a custom field value to clipboard. Same async ownership model as copyFieldToClipboard.
+export async function copyCustomFieldToClipboard(vaultUuid, recordUuid, customFieldName, returnHash = false) {
+    const result = parseOrThrow(window.copyCustomFieldToClipboard(vaultUuid, recordUuid, customFieldName, returnHash))
+    await navigator.clipboard.writeText(result.value)
+    return result
 }
 
-// Copies the current TOTP code directly to clipboard from WASM. No drain needed (codes expire).
-export function copyTOTP(vaultUuid, recordUuid) {
-    return parseOrThrow(window.copyTOTP(vaultUuid, recordUuid))
+// Copies the current TOTP code to clipboard. No drain needed (codes expire).
+export async function copyTOTP(vaultUuid, recordUuid) {
+    const result = parseOrThrow(window.copyTOTP(vaultUuid, recordUuid))
+    await navigator.clipboard.writeText(result.value)
+    return result
 }
 
 // Returns the plaintext value of a standard sensitive field for display only.

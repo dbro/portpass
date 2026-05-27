@@ -62,25 +62,24 @@ test.describe('Lazy sensitive WASM functions', () => {
 
   // ── copyFieldToClipboard ─────────────────────────────────────────────────────
 
-  test('copyFieldToClipboard writes password to clipboard', async ({ page }) => {
-    const { vaultUuid, items } = await openVaultInEval(page)
-    const recordUuid = items.find(i => i.title === 'three entry 1')?.uuid
-    await page.evaluate(
-      ([vu, ru]: string[]) => (window as any).copyFieldToClipboard(vu, ru, 'Password'),
-      [vaultUuid, recordUuid]
-    )
-    const clip = await page.evaluate(() => navigator.clipboard.readText())
-    expect(clip).toBe('three1!@$%^&*()')
-  })
-
-  test('copyFieldToClipboard returns {} without returnHash', async ({ page }) => {
+  test('copyFieldToClipboard returns the plaintext value', async ({ page }) => {
     const { vaultUuid, items } = await openVaultInEval(page)
     const recordUuid = items.find(i => i.title === 'three entry 1')?.uuid
     const result = await page.evaluate(
       ([vu, ru]: string[]) => JSON.parse((window as any).copyFieldToClipboard(vu, ru, 'Password')),
       [vaultUuid, recordUuid]
     )
-    expect(result).toEqual({})
+    expect(result.value).toBe('three1!@$%^&*()')
+  })
+
+  test('copyFieldToClipboard returns value without hash by default', async ({ page }) => {
+    const { vaultUuid, items } = await openVaultInEval(page)
+    const recordUuid = items.find(i => i.title === 'three entry 1')?.uuid
+    const result = await page.evaluate(
+      ([vu, ru]: string[]) => JSON.parse((window as any).copyFieldToClipboard(vu, ru, 'Password')),
+      [vaultUuid, recordUuid]
+    )
+    expect(result.hash).toBeUndefined()
   })
 
   test('copyFieldToClipboard returns hash when requested', async ({ page }) => {

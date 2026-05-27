@@ -1098,7 +1098,7 @@
 
   async function copyFieldViaWasm(recordVaultUuid, recordUuid, fieldname) {
     try {
-      const { hash } = copyFieldToClipboard(recordVaultUuid, recordUuid, fieldname, true)
+      const { hash } = await copyFieldToClipboard(recordVaultUuid, recordUuid, fieldname, true)
       const hashBytes = hexToBytes(hash)
       clipHash = hashBytes
       const token = ++sessionSerial
@@ -1114,7 +1114,7 @@
 
   async function copyCustomFieldViaWasm(recordVaultUuid, recordUuid, fieldname) {
     try {
-      const { hash } = copyCustomFieldToClipboard(recordVaultUuid, recordUuid, fieldname, true)
+      const { hash } = await copyCustomFieldToClipboard(recordVaultUuid, recordUuid, fieldname, true)
       const hashBytes = hexToBytes(hash)
       clipHash = hashBytes
       const token = ++sessionSerial
@@ -1139,7 +1139,7 @@
   async function copyTOTPForUUID(uuid) {
     try {
       const vaultUuid = vaultUuidForRecord(uuid)
-      wasmCopyTOTP(vaultUuid, uuid)
+      await wasmCopyTOTP(vaultUuid, uuid)
       if (clearTimer) { clearTimeout(clearTimer); clearTimer = null }
       clipHash = null
       const token = ++sessionSerial
