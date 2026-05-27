@@ -1208,6 +1208,12 @@
     get(secondaryVaults).forEach(v => closeDatabase(v.uuid))
     closeDatabase(dbKey)
     secondaryVaults.set([])
+    dbItems.set([])
+    selectedFile.set(null)
+    if (clearTimer) { clearTimeout(clearTimer); clearTimer = null }
+    clipHash = null
+    clipboardSession.set(null)
+    clipboardContext.set(null)
     onclosed()
   }
 
@@ -1224,6 +1230,12 @@
     get(secondaryVaults).forEach(v => closeDatabase(v.uuid))
     closeDatabase(dbKey)
     secondaryVaults.set([])
+    dbItems.set([])
+    selectedFile.set(null)
+    if (clearTimer) { clearTimeout(clearTimer); clearTimer = null }
+    clipHash = null
+    clipboardSession.set(null)
+    clipboardContext.set(null)
     onclosed()
   }
 
