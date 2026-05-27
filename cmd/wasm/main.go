@@ -333,9 +333,10 @@ func updateRecordFields(this js.Value, args []js.Value) interface{} {
 			} else {
 				// Use *string for Value so JSON null (withheld) can be distinguished from "" (clear).
 				type cfInput struct {
-					Name      string  `json:"Name"`
-					Value     *string `json:"Value"`
-					Sensitive bool    `json:"Sensitive"`
+					Name         string  `json:"Name"`
+					Value        *string `json:"Value"`
+					Sensitive    bool    `json:"Sensitive"`
+					OriginalName string  `json:"OriginalName,omitempty"`
 				}
 				var inputs []cfInput
 				if err := json.Unmarshal([]byte(value), &inputs); err != nil {
@@ -350,8 +351,12 @@ func updateRecordFields(this js.Value, args []js.Value) interface{} {
 					if inp.Value != nil {
 						cfs[i].Value = *inp.Value
 					}
+					lookupName := inp.Name
+					if inp.OriginalName != "" {
+						lookupName = inp.OriginalName
+					}
 					for _, ex := range rec.CustomFields {
-						if ex.Name == inp.Name {
+						if ex.Name == lookupName {
 							if inp.Value == nil {
 								cfs[i].Value = ex.Value
 							}
