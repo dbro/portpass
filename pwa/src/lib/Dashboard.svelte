@@ -1136,9 +1136,9 @@
     return selectedVaultUuid || dbKey
   }
 
-  async function copyTOTPForUUID(uuid) {
+  async function copyTOTPForUUID(uuid, vaultUuidHint = null) {
     try {
-      const vaultUuid = vaultUuidForRecord(uuid)
+      const vaultUuid = vaultUuidHint ?? vaultUuidForRecord(uuid)
       await wasmCopyTOTP(vaultUuid, uuid)
       if (clearTimer) { clearTimeout(clearTimer); clearTimer = null }
       clipHash = null
@@ -1449,7 +1449,7 @@
         const next = flatList[0]
         if (next) { selectRecord(next.uuid, next.vaultUuid); searchInput?.blur() }
       } else {
-        const idx = flatList.findIndex(i => i.uuid === selectedUUID)
+        const idx = flatList.findIndex(i => i.uuid === selectedUUID && i.vaultUuid === selectedVaultUuid)
         if (idx === flatList.length - 1) {
           record = null; selectedUUID = null; searchInput?.focus()
         } else {
@@ -1465,7 +1465,7 @@
         const prev = flatList[flatList.length - 1]
         if (prev) { selectRecord(prev.uuid, prev.vaultUuid); searchInput?.blur() }
       } else {
-        const idx = flatList.findIndex(i => i.uuid === selectedUUID)
+        const idx = flatList.findIndex(i => i.uuid === selectedUUID && i.vaultUuid === selectedVaultUuid)
         if (idx === 0) {
           record = null; selectedUUID = null; searchInput?.focus()
         } else {
@@ -1575,7 +1575,7 @@
     {/if}
   </div>
 
-  <RecordList query={debouncedQuery} {selectedUUID} {collapseSeq} excludeUUID={pendingDeleteUUID} storageKey={dbKey} primaryVaultName={vaultName} ontap={selectRecord} oncopy={copyToClipboard} oncopytotp={copyTOTPForUUID} onwasmcopyfield={copyFieldViaWasm} onwasmcopycustomfield={copyCustomFieldViaWasm}/>
+  <RecordList query={debouncedQuery} {selectedUUID} {selectedVaultUuid} {collapseSeq} excludeUUID={pendingDeleteUUID} storageKey={dbKey} primaryVaultName={vaultName} ontap={selectRecord} oncopy={copyToClipboard} oncopytotp={copyTOTPForUUID} onwasmcopyfield={copyFieldViaWasm} onwasmcopycustomfield={copyCustomFieldViaWasm}/>
 
   <!-- FAB (mobile) -->
   <button class="fab" onclick={startNew} aria-label="New">
