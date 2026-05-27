@@ -244,8 +244,28 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, PRIV_KEY_JWK, 
           var prev = prevFocusable(el)
           if (prev) { if (el) el.dispatchEvent(new Event('blur', { bubbles: true })); prev.focus(); el = prev }
         } else if (code === 'n') {
+          if (el) {
+            ['keydown', 'keypress', 'keyup'].forEach(function(evType) {
+              el.dispatchEvent(new KeyboardEvent(evType, {
+                key: 'Enter', code: 'Enter', keyCode: 13, which: 13,
+                bubbles: true, cancelable: true
+              }))
+            })
+          }
           var form = el && el.closest('form')
-          if (form) try { form.requestSubmit() } catch (_) { form.submit() }
+          var submitBtn = (form && form.querySelector('[type=submit]')) ||
+                          (form && form.querySelector('[default-button]'))
+          if (!submitBtn && form) {
+            var btns = Array.from(form.querySelectorAll('button:not([type=reset])'))
+            if (btns.length === 1) submitBtn = btns[0]
+          }
+          if (submitBtn) {
+            submitBtn.click()
+          } else if (form) {
+            try { form.requestSubmit() } catch (_) {
+              try { form.submit() } catch (_2) {}
+            }
+          }
         }
       }
     }
