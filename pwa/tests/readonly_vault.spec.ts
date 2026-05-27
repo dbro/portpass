@@ -53,7 +53,7 @@ async function lockVault(page: Page) {
   await page.locator('.vault-pill').click()
   await expect(page.locator('.vault-settings-body')).toBeVisible()
   await page.getByRole('button', { name: /Lock vault/ }).click()
-  await expect(page.getByRole('button', { name: 'Open vault file' })).toBeVisible({ timeout: 5000 })
+  await expect(page.getByPlaceholder('Master password')).toBeVisible({ timeout: 5000 })
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -200,7 +200,8 @@ test.describe('Biometric/PIN unlock on fallback path (iOS)', () => {
 
     await lockVault(page)
 
-    // Re-select the same file — biometric button should appear
+    // Navigate back to landing, then re-select the same file — biometric button should appear
+    await page.getByRole('button', { name: 'Open a different vault' }).click()
     const [fc2] = await Promise.all([
       page.waitForEvent('filechooser'),
       page.getByRole('button', { name: 'Open vault file' }).click(),
@@ -230,6 +231,8 @@ test.describe('Biometric/PIN unlock on fallback path (iOS)', () => {
 
     await lockVault(page)
 
+    // Navigate back to landing, then re-select the same file
+    await page.getByRole('button', { name: 'Open a different vault' }).click()
     const [fc2] = await Promise.all([
       page.waitForEvent('filechooser'),
       page.getByRole('button', { name: 'Open vault file' }).click(),

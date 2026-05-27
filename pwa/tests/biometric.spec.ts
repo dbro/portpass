@@ -75,12 +75,12 @@ async function openVaultNoEnroll(page: Page) {
   await expect(page.getByPlaceholder('Search vault')).toBeVisible({ timeout: 10000 })
 }
 
-// Lock the vault and wait for the landing screen.
+// Lock the vault and wait for the unlock screen (recent handles restores file state).
 async function lockVault(page: Page) {
   await page.locator('.vault-pill').click()
   await expect(page.locator('.vault-settings-body')).toBeVisible()
   await page.getByRole('button', { name: /Lock vault/ }).click()
-  await expect(page.getByRole('button', { name: 'Open vault file' })).toBeVisible({ timeout: 5000 })
+  await expect(page.getByPlaceholder('Master password')).toBeVisible({ timeout: 5000 })
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -170,6 +170,8 @@ test.describe('Biometric/PIN unlock', () => {
     await openVaultAndEnroll(page)
     await lockVault(page)
 
+    // Return to landing screen (lockVault leaves us on the unlock screen)
+    await page.getByRole('button', { name: 'Open a different vault' }).click()
     // Create a brand-new vault — no fast unlock enrollment for it
     await page.getByRole('button', { name: 'Create one' }).click()
     await page.getByPlaceholder('Master password').fill('newpassword')
@@ -186,7 +188,8 @@ test.describe('Biometric/PIN unlock', () => {
     await openVaultAndEnroll(page)
     await lockVault(page)
 
-    // Re-open file — fast unlock button should appear for three.dat
+    // Mock handle can't survive IDB serialization, so re-pick the file to restore state
+    await page.getByRole('button', { name: 'Open a different vault' }).click()
     await page.getByRole('button', { name: 'Open vault file' }).click()
     await expect(page.locator('.btn-biometric')).toBeVisible({ timeout: 5000 })
 
@@ -205,6 +208,8 @@ test.describe('Biometric/PIN unlock', () => {
     await openVaultAndEnroll(page)
     await lockVault(page)
 
+    // Mock handle can't survive IDB serialization, so re-pick the file to restore state
+    await page.getByRole('button', { name: 'Open a different vault' }).click()
     await page.getByRole('button', { name: 'Open vault file' }).click()
     await expect(page.locator('.btn-biometric')).toBeVisible({ timeout: 5000 })
 
