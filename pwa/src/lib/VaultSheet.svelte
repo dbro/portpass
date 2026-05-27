@@ -8,7 +8,7 @@
   import { getDelegates, addDelegate, revokeDelegate, setSwitchboardUrl, setCrossProfileEnabled } from './delegates.js'
   import Icon from './Icon.svelte'
 
-  let { isDesktop, bookmarkletsSupported = false, onback, onlock, onlockall, onlocksecondary, onunlockadditional, ondbsave, ondirtychange, theme, accent, ontheme, onaccent } = $props()
+  let { isDesktop, bookmarkletsSupported = false, onback, onlock, onlockall, onlocksecondary, onunlockadditional, ondbsave, onsvdbsave, ondirtychange, theme, accent, ontheme, onaccent } = $props()
 
   // ── Biometric ──────────────────────────────────────────────────────────────
   let biometricAvailable = $state(false)
@@ -153,6 +153,7 @@
     svDetailOrigDesc = svDetailDraftDesc
     secondaryVaults.update(vs => vs.map(v => v.uuid === uuid ? { ...v, name: svDetailDraftName } : v))
     selectedDetailVault = null
+    onsvdbsave?.(uuid)
   }
 
   function saveAndBack() {

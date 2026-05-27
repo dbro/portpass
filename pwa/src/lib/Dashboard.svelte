@@ -1175,6 +1175,24 @@
     }
   }
 
+  async function saveSecondaryDBFields(uuid) {
+    const sv = get(secondaryVaults).find(v => v.uuid === uuid)
+    if (!sv || sv.readonly) return
+    try {
+      const data = saveDatabase(uuid)
+      if (sv.handle) {
+        const w = await sv.handle.createWritable()
+        await w.write(data)
+        await w.close()
+        secondaryHead[uuid] = data.slice(72, 152)
+        try { secondaryModified[uuid] = (await sv.handle.getFile()).lastModified } catch {}
+        showToast('Saved to ' + (sv.name || sv.filename), null, 2000)
+      }
+    } catch (e) {
+      if (e.name !== 'AbortError') showToast('Failed to save: ' + e.message)
+    }
+  }
+
   function closeVaultSheet() {
     if (vaultDirty) {
       if (!confirm('Discard unsaved changes?')) return
@@ -1624,6 +1642,7 @@
       onlocksecondary={lockSecondaryVault}
       onunlockadditional={unlockAdditionalVault}
       ondbsave={saveDBFields}
+      onsvdbsave={saveSecondaryDBFields}
       ondirtychange={(d) => vaultDirty = d}
       {ontheme}
       {onaccent}
