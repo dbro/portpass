@@ -323,7 +323,7 @@
   <div class="record-bar-group muted">{record.Group ?? ''}</div>
   <div class="record-bar-edit" style={onedit ? '' : 'visibility:hidden;pointer-events:none'}>
     <button class="btn-text primary" onclick={onedit}>Edit</button>
-    {#if vaultReadonly}<span class="ro-chip muted">read-only</span>{/if}
+    {#if vaultReadonly}<span class="ro-chip">READ-ONLY</span>{/if}
   </div>
 </div>
 
@@ -333,7 +333,7 @@
     <span class="record-bar-group muted">{record.Group ?? ''}</span>
     {#if onedit}
       <div class="record-pane-actions">
-        {#if vaultReadonly}<span class="ro-chip muted">read-only</span>{/if}
+        {#if vaultReadonly}<span class="ro-chip">READ-ONLY</span>{/if}
         <button class="btn btn-ghost" onclick={onedit} style="height:36px;padding:0 14px;font-size:14px">Edit</button>
       </div>
     {/if}
@@ -615,12 +615,14 @@
     gap: 6px;
   }
   .ro-chip {
+    display: inline-block;
     font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: var(--text-soft);
     border: 1px solid var(--border-strong);
     border-radius: var(--r-pill);
-    padding: 1px 7px;
+    padding: 1px 8px;
     white-space: nowrap;
   }
 
