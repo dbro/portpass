@@ -8,7 +8,7 @@
     enrollBiometric, unlockWithBiometric, clearBiometricForFile,
   } from './biometric.js'
   import { getSecondaryCredentials } from './secondaryVaults.js'
-  import { getRecentHandles, pushRecentHandle } from './recentHandles.js'
+  import { getRecentHandles, pushRecentHandle, pushRecentName } from './recentHandles.js'
   import Icon from './Icon.svelte'
 
   let { onopened, autoBiometric = true, isPopup = false } = $props()
@@ -30,24 +30,36 @@
 
   const supportsFilePicker = typeof window !== 'undefined' && typeof window.showOpenFilePicker === 'function'
 
-  let fallbackFile = $state(null)  // File object when supportsFilePicker is false
-  let fileInputEl  = $state(null)
+  let fallbackFile   = $state(null)  // File object when supportsFilePicker is false
+  let fileInputEl    = $state(null)
+  let rememberedName = $state(null)  // filename remembered from IDB when no handle is available
+  let awaitingFilePick = $state(false) // true when unlock() is waiting for file picker
 
   onMount(async () => {
     biometricAvailable = await isBiometricSupported()
 
-    if (!supportsFilePicker) return
     try {
       const handles = await getRecentHandles()
       if (!handles.length) return
       const entry = handles[0]
+
+      if (!entry.handle) {
+        // Fallback path (no File System Access API): show remembered filename and
+        // let the user pick the file again when they click Unlock.
+        if (entry.name) { rememberedName = entry.name; mode = 'unlock' }
+        return
+      }
+
+      if (!supportsFilePicker) return
       fileHandle = entry.handle
       mode = 'unlock'
       biometricEnrolled = entry.uuid
         ? await isBiometricEnrolled(entry.uuid)
         : await isBiometricEnrolledForFile(fileHandle.name)
-      // Only trigger if you can ensure a clean permission flow.
-      const status = await fileHandle.queryPermission({ mode: 'read' })
+      // queryPermission is a Chrome extension; guard for Firefox.
+      const status = fileHandle.queryPermission
+        ? await fileHandle.queryPermission({ mode: 'read' })
+        : 'prompt'
       if (status == 'granted' && biometricEnrolled && autoBiometric) unlockBiometric()
     } catch {}
   })
@@ -77,8 +89,13 @@
     fallbackFile = file
     mode = 'unlock'
     error = ''
-    password = ''
-    biometricEnrolled = await isBiometricEnrolledForFile(file.name)
+    if (awaitingFilePick) {
+      awaitingFilePick = false
+      await unlock()
+    } else {
+      password = ''
+      biometricEnrolled = await isBiometricEnrolledForFile(file.name)
+    }
   }
 
   // After a successful vault open, check whether to offer biometric enrollment.
@@ -96,14 +113,23 @@
   }
 
   async function unlock() {
-    if (!password || (!fileHandle && !fallbackFile)) return
+    if (!password) return
+    if (!fileHandle && !fallbackFile) {
+      // No file loaded yet (remembered name only) — open picker first, then resume.
+      awaitingFilePick = true
+      fileInputEl.click()
+      return
+    }
     busy = true; error = ''
     try {
       let buf
       if (fallbackFile) {
         buf = await fallbackFile.arrayBuffer()
       } else {
-        const perm = await fileHandle.requestPermission({ mode: 'read' })
+        // requestPermission is a Chrome extension; guard for Firefox.
+        const perm = fileHandle.requestPermission
+          ? await fileHandle.requestPermission({ mode: 'read' })
+          : 'granted'
         if (perm !== 'granted') { error = 'File access was denied.'; return }
         let file
         try { file = await fileHandle.getFile() } catch (e) {
@@ -116,6 +142,7 @@
       dbItems.set(getDatabaseData(vaultUuid))
       if (fallbackFile) {
         selectedFile.set({ handle: null, name: fallbackFile.name, readonly: true, uuid: vaultUuid })
+        try { await pushRecentName(fallbackFile.name, vaultUuid) } catch {}
       } else {
         const writable = await probeWriteAccess(fileHandle)
         selectedFile.set({ handle: fileHandle, name: fileHandle.name, readonly: !writable, uuid: vaultUuid })
@@ -141,7 +168,9 @@
 
       // 2. Request file permission (file handle path only — user activation requirement)
       if (fileHandle) {
-        const perm = await fileHandle.requestPermission({ mode: 'read' })
+        const perm = fileHandle.requestPermission
+          ? await fileHandle.requestPermission({ mode: 'read' })
+          : 'granted'
         if (perm !== 'granted') {
           error = 'File access was denied.'
           return
@@ -247,7 +276,9 @@
         const handle = cred.handle
         if (!handle) continue // no stored handle; user must manually re-link
         try {
-          const perm = await handle.requestPermission({ mode: 'read' })
+          const perm = handle.requestPermission
+            ? await handle.requestPermission({ mode: 'read' })
+            : 'granted'
           if (perm !== 'granted') continue
           const vaultUuid = await loadVaultFile(handle, cred.masterPassword)
           if (vaultUuid !== cred.vaultUuid) { closeDatabase(vaultUuid); continue }
@@ -278,7 +309,7 @@
   }
 
   function switchFile() {
-    fileHandle = null; fallbackFile = null; password = ''; error = ''; mode = 'landing'
+    fileHandle = null; fallbackFile = null; rememberedName = null; password = ''; error = ''; mode = 'landing'
     secondaryVaults.set([])
   }
 
@@ -291,6 +322,10 @@
     error = 'Vault file not found — it may have been moved or deleted.'
   }
 </script>
+
+{#if !supportsFilePicker}
+  <input bind:this={fileInputEl} type="file" accept=".psafe3,.dat" style="display:none" onchange={onFileInputChange} />
+{/if}
 
 {#if mode === 'landing'}
   <div class="start-landing">
@@ -308,7 +343,6 @@
       {:else}
         <button class="btn btn-primary" onclick={pickFileFallback}>Open vault file</button>
         <div class="muted" style="font-size:12px;text-align:center;margin-top:4px">Read-only — your browser can't save changes back to the file</div>
-        <input bind:this={fileInputEl} type="file" accept=".psafe3,.dat" style="display:none" onchange={onFileInputChange} />
       {/if}
     </div>
 
@@ -324,7 +358,7 @@
       <div class="unlock-mark">
         <img src="{import.meta.env.BASE_URL}icon.svg" alt="Portpass" style="width:64px;height:64px" />
       </div>
-      <div class="unlock-vault">{(fallbackFile ?? fileHandle)?.name ?? 'Vault'}</div>
+      <div class="unlock-vault">{(fallbackFile ?? fileHandle)?.name ?? rememberedName ?? 'Vault'}</div>
       <div class="unlock-sub" class:muted={!busy} class:unlock-busy={busy}>
         {busy ? 'Unlocking…' : isPopup ? 'Unlock to use Autofill' : 'Vault is locked'}
       </div>
