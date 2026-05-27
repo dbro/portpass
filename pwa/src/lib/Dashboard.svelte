@@ -965,7 +965,7 @@
           isDirty = false
           try { lastSave = getDatabaseInfo(dbKey)?.when ?? '' } catch {}
           if (!silent) showToast('Vault saved')
-          return
+          return true
         }
       }
 
@@ -980,7 +980,7 @@
                 realConflict = !sameHead(new Uint8Array(buf), primaryHead)
               } catch {}
             }
-            if (realConflict && !confirm('This vault was modified since it was loaded.\n\nSaving will overwrite those changes. Save anyway?')) return
+            if (realConflict && !confirm('This vault was modified since it was loaded.\n\nSaving will overwrite those changes. Save anyway?')) return false
           }
         } catch {}
       }
@@ -995,8 +995,10 @@
       isDirty = false
       try { lastSave = getDatabaseInfo(dbKey)?.when ?? '' } catch {}
       if (!silent) showToast('Vault saved')
+      return true
     } catch (e) {
       if (e.name !== 'AbortError') showToast('Save failed: ' + e.message)
+      return false
     }
   }
 
@@ -1166,10 +1168,11 @@
   async function saveDBFields(fields) {
     try {
       updateDBFields(dbKey, fields)
-      await saveFile(true)
-      dbName = fields.Name ?? dbName  // fields uses PascalCase for the WASM write API
-      vaultDirty = false
-      showToast('Vault info saved')
+      if (await saveFile(true)) {
+        dbName = fields.Name ?? dbName  // fields uses PascalCase for the WASM write API
+        vaultDirty = false
+        showToast('Vault info saved')
+      }
     } catch (e) {
       showToast('Failed to save vault info: ' + e.message)
     }
