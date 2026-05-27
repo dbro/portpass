@@ -3,6 +3,24 @@ import { svelte } from '@sveltejs/vite-plugin-svelte'
 import { VitePWA } from 'vite-plugin-pwa'
 import { execSync } from 'child_process'
 import { copyFileSync, existsSync } from 'fs'
+import { minify } from 'terser'
+
+function bookmarkletPlugin() {
+  return {
+    name: 'bookmarklet-iife-minify',
+    async transform(code, id) {
+      if (!id.endsWith('bookmarklet.js')) return null
+      const marker = 'function DELEGATE_BOOKMARKLET_IIFE'
+      const fnStart = code.indexOf(marker)
+      if (fnStart === -1) return null
+      const result = await minify(code.slice(fnStart), { compress: true, mangle: true })
+      return {
+        code: code.replace('DELEGATE_BOOKMARKLET_IIFE.toString()', JSON.stringify(result.code)),
+        map: null,
+      }
+    }
+  }
+}
 
 let version = '0.0.0-dev'
 try {
@@ -13,6 +31,7 @@ try {
 
 export default defineConfig({
   plugins: [
+    bookmarkletPlugin(),
     svelte(),
     VitePWA({
       registerType: 'autoUpdate',
@@ -66,7 +85,7 @@ export default defineConfig({
         type: 'module',
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm,gz}'],
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm,gz,webmanifest}'],
         maximumFileSizeToCacheInBytes: 5000000,
 	// Inject the header into the requests
         manifestTransforms: [async (entries) => {
