@@ -1,7 +1,7 @@
 <script>
   import { get } from 'svelte/store'
   import { tick, untrack } from 'svelte'
-  import { selectedFile, dbItems, secondaryVaults, clipboardSession, clipboardContext } from '../store.js'
+  import { selectedFile, dbItems, secondaryVaults, clipboardSession, clipboardContext, toast } from '../store.js'
   import { searchRecords, getRecordData } from '../wasm.js'
   import Icon from './Icon.svelte'
 
@@ -115,6 +115,7 @@
       animVariant ^= 1
       flashedUUID  = uuid
       flashedField = field
+      toast.set({ message: `${field} copied to clipboard`, duration: 2000 })
     }
   }
 
@@ -130,10 +131,11 @@
       animVariant ^= 1
       flashedUUID  = uuid
       flashedField = displayField
+      toast.set({ message: `${fieldName} copied to clipboard`, duration: 2000 })
     }
   }
 
-  async function handleCopy(value, uuid, field = 'Password') {
+  async function handleCopy(value, uuid, field = 'Password', label = null) {
     const token = await oncopy(value)
     if (token !== null) {
       const hash = Array.from(await sha256(value))
@@ -147,6 +149,7 @@
       animVariant ^= 1
       flashedUUID  = uuid
       flashedField = field
+      toast.set({ message: `${label ?? field} copied to clipboard`, duration: 2000 })
     }
   }
 
@@ -481,7 +484,7 @@
       <button onclick={() => {
         const vaultUuid = vaultUuidForRecord(contextMenu.uuid)
         if (cf.Value === null) handleWasmCustomCopy(vaultUuid, contextMenu.uuid, cf.Name, `custom-${i}`)
-        else handleCopy(cf.Value, contextMenu.uuid, `custom-${i}`)
+        else handleCopy(cf.Value, contextMenu.uuid, `custom-${i}`, cf.Name)
         closeMenu()
       }}>
         <span>Copy {truncate(cf.Name, 14)}</span><span class="ctx-keys"><kbd>Ctrl</kbd><kbd>{i + 1}</kbd></span>

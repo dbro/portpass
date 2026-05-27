@@ -1207,6 +1207,7 @@
           clipboardContext.set(null)
         }
       }, 500)
+      showToast('One-time code copied to clipboard', null, 2000)
     } catch {
       showToast('Copy failed')
     }
@@ -1416,7 +1417,10 @@
     if (value === null) {  // null = withheld sensitive value — use WASM copy
       const vaultUuid = selectedVaultUuid || dbKey
       const { token, hashBytes } = await copyFieldViaWasm(vaultUuid, selectedUUID, field)
-      if (token !== null) clipboardContext.set({ token, field, uuid: selectedUUID, hash: Array.from(hashBytes) })
+      if (token !== null) {
+        clipboardContext.set({ token, field, uuid: selectedUUID, hash: Array.from(hashBytes) })
+        showToast(`${field} copied to clipboard`, null, 2000)
+      }
       return
     }
     if (!value) return
@@ -1424,6 +1428,7 @@
     if (token !== null) {
       const hash = Array.from(await sha256(value))
       clipboardContext.set({ token, field, uuid: selectedUUID, hash })
+      showToast(`${field} copied to clipboard`, null, 2000)
     }
   }
 
@@ -1433,7 +1438,10 @@
     if (cf.Value === null) {  // null = withheld sensitive custom field — use WASM copy
       const vaultUuid = selectedVaultUuid || dbKey
       const { token, hashBytes } = await copyCustomFieldViaWasm(vaultUuid, selectedUUID, cf.Name)
-      if (token !== null) clipboardContext.set({ token, field: `custom-${index}`, uuid: selectedUUID, hash: Array.from(hashBytes) })
+      if (token !== null) {
+        clipboardContext.set({ token, field: `custom-${index}`, uuid: selectedUUID, hash: Array.from(hashBytes) })
+        showToast(`${cf.Name} copied to clipboard`, null, 2000)
+      }
       return
     }
     if (!cf.Value) return
@@ -1441,6 +1449,7 @@
     if (token !== null) {
       const hash = Array.from(await sha256(cf.Value))
       clipboardContext.set({ token, field: `custom-${index}`, uuid: selectedUUID, hash })
+      showToast(`${cf.Name} copied to clipboard`, null, 2000)
     }
   }
 

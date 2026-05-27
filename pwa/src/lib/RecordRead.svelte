@@ -1,7 +1,7 @@
 <script>
   import { onMount, tick } from 'svelte'
   import { get } from 'svelte/store'
-  import { clipboardSession, clipboardContext } from '../store.js'
+  import { clipboardSession, clipboardContext, toast } from '../store.js'
   import { getTOTP, getFieldValue, getCustomFieldValue } from '../wasm.js'
   import Icon from './Icon.svelte'
 
@@ -131,7 +131,7 @@
     await oncopytotp(uuid)
   }
 
-  async function handleCopy(value, field) {
+  async function handleCopy(value, field, label = field) {
     const token = await oncopy(value)
     if (token !== null) {
       const hash = Array.from(await sha256(value))
@@ -141,6 +141,7 @@
       await tick()
       animVariant ^= 1
       copiedField = field
+      toast.set({ message: `${label} copied to clipboard`, duration: 2000 })
     }
   }
 
@@ -154,6 +155,7 @@
       await tick()
       animVariant ^= 1
       copiedField = fieldname
+      toast.set({ message: `${fieldname} copied to clipboard`, duration: 2000 })
     }
   }
 
@@ -167,6 +169,7 @@
       await tick()
       animVariant ^= 1
       copiedField = displayField
+      toast.set({ message: `${fieldname} copied to clipboard`, duration: 2000 })
     }
   }
 
@@ -402,7 +405,7 @@
                 <div class="history-entry" class:clipboard-active={copiedField === `history-${entry.ts}`} style={copiedField === `history-${entry.ts}` ? drainStyle() : ''}>
                   <span class="history-time muted">{relTimeUnix(entry.ts)}</span>
                   <span class="history-pw mono">{entry.password}</span>
-                  <button class="icon-btn-flat" onclick={() => handleCopy(entry.password, `history-${entry.ts}`)} aria-label="Copy">
+                  <button class="icon-btn-flat" onclick={() => handleCopy(entry.password, `history-${entry.ts}`, 'Password')} aria-label="Copy">
                     <Icon name="copy" size={15}/>
                   </button>
                 </div>
@@ -554,8 +557,8 @@
           <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div class="copy-row" class:clipboard-active={copiedField === `custom-${i}`} style={copiedField === `custom-${i}` ? drainStyle() : ''}
       role="button" tabindex="0"
-      onclick={() => cf.Value === null ? handleWasmCustomCopy(cf.Name, `custom-${i}`) : handleCopy(cf.Value, `custom-${i}`)}
-      onkeydown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cf.Value === null ? handleWasmCustomCopy(cf.Name, `custom-${i}`) : handleCopy(cf.Value, `custom-${i}`) } }}>
+      onclick={() => cf.Value === null ? handleWasmCustomCopy(cf.Name, `custom-${i}`) : handleCopy(cf.Value, `custom-${i}`, cf.Name)}
+      onkeydown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cf.Value === null ? handleWasmCustomCopy(cf.Name, `custom-${i}`) : handleCopy(cf.Value, `custom-${i}`, cf.Name) } }}>
       <div class="copy-row-label muted">{cf.Name}</div>
       <div class="copy-row-main">
         <div class="copy-row-value">
@@ -582,7 +585,7 @@
               <Icon name={customRevealed[i] ? 'eye-off' : 'eye'} size={18}/>
             </button>
           {/if}
-          <button class="icon-btn-flat copy-btn" onclick={() => cf.Value === null ? handleWasmCustomCopy(cf.Name, `custom-${i}`) : handleCopy(cf.Value, `custom-${i}`)} aria-label="Copy {cf.Name}">
+          <button class="icon-btn-flat copy-btn" onclick={() => cf.Value === null ? handleWasmCustomCopy(cf.Name, `custom-${i}`) : handleCopy(cf.Value, `custom-${i}`, cf.Name)} aria-label="Copy {cf.Name}">
             <Icon name="copy" size={18}/>
           </button>
         </div>
