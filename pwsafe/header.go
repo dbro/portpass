@@ -78,6 +78,9 @@ func (h *header) setField(id byte, data []byte) error {
 	case headerTree:
 		h.Tree = string(data)
 	case headerLastSave:
+		if len(data) != 4 {
+			return fmt.Errorf("invalid length for LastSave: %d", len(data))
+		}
 		h.LastSave = time.Unix(int64(binary.LittleEndian.Uint32(data)), 0)
 	case headerLastSaveBy:
 		h.LastSaveBy = data

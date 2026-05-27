@@ -117,14 +117,26 @@ func (r *Record) setField(id byte, data []byte) error {
 	case recordPassword:
 		r.Password = string(data)
 	case recordCreateTime:
+		if len(data) != 4 {
+			return fmt.Errorf("invalid length for CreateTime: %d", len(data))
+		}
 		r.CreateTime = time.Unix(int64(binary.LittleEndian.Uint32(data)), 0)
 	case recordPasswordModTime:
 		r.PasswordModTime = string(data)
 	case recordAccessTime:
+		if len(data) != 4 {
+			return fmt.Errorf("invalid length for AccessTime: %d", len(data))
+		}
 		r.AccessTime = time.Unix(int64(binary.LittleEndian.Uint32(data)), 0)
 	case recordPasswordExpiry:
+		if len(data) != 4 {
+			return fmt.Errorf("invalid length for PasswordExpiry: %d", len(data))
+		}
 		r.PasswordExpiry = time.Unix(int64(binary.LittleEndian.Uint32(data)), 0)
 	case recordModTime:
+		if len(data) != 4 {
+			return fmt.Errorf("invalid length for ModTime: %d", len(data))
+		}
 		r.ModTime = time.Unix(int64(binary.LittleEndian.Uint32(data)), 0)
 	case recordURL:
 		r.URL = string(data)
