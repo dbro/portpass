@@ -189,9 +189,9 @@
     isDesktop = mq.matches
     mq.addEventListener('change', e => { isDesktop = e.matches })
 
-    const ptrMq = window.matchMedia('(any-pointer: fine)')
-    bookmarkletsSupported = ptrMq.matches
-    ptrMq.addEventListener('change', e => { bookmarkletsSupported = e.matches })
+    // (any-pointer: fine) falsely excludes Windows touchscreen devices; detect mobile OS instead
+    const isMobileOS = navigator.userAgentData?.mobile ?? /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+    bookmarkletsSupported = !isMobileOS
 
     // In popup mode, try to bridge to an already-open unlocked Portpass tab.
     // If bridge succeeds, skip WASM loading — the popup is just a bridge.
