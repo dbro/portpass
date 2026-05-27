@@ -67,26 +67,34 @@ func TestUnmarshalHeader_MissingEndField(t *testing.T) {
 }
 
 func TestUnmarshalHeader_UnknownFieldType(t *testing.T) {
-	// Field 1: Version (type 0x00, data {0x0E, 0x03})
-	versionData := []byte{0x0E, 0x03}
-	versionFieldBytes := buildHeaderField(0x00, versionData)
-
-	// Field 2: Unknown Field (type 0xFE, data {0x01})
+	versionFieldBytes := buildHeaderField(0x00, []byte{0x0E, 0x03})
 	unknownFieldData := []byte{0x01}
 	unknownFieldBytes := buildHeaderField(0xFE, unknownFieldData)
-
-	// Field 3: END (type 0xFF, data nil)
 	endFieldBytes := buildHeaderField(0xFF, nil)
 
-	// Concatenate fields
 	headerBytes := append(versionFieldBytes, unknownFieldBytes...)
 	headerBytes = append(headerBytes, endFieldBytes...)
 
-	// var h header // h is not used when only checking for error
 	h, _, _, err := UnmarshalHeader(headerBytes)
 
 	assert.Nil(t, err, "UnmarshalHeader should not error on unknown field type")
-	assert.Equal(t, unknownFieldData, h.UnknownFields[0xFE], "Unknown field should be preserved")
+	assert.Equal(t, []unknownField{{ID: 0xFE, Data: unknownFieldData}}, h.UnknownFields, "Unknown field should be preserved")
+}
+
+func TestUnmarshalHeader_DuplicateUnknownFieldType(t *testing.T) {
+	versionFieldBytes := buildHeaderField(0x00, []byte{0x0E, 0x03})
+	dataA := []byte{0x01}
+	dataB := []byte{0x02, 0x03}
+	endFieldBytes := buildHeaderField(0xFF, nil)
+
+	headerBytes := append(versionFieldBytes, buildHeaderField(0xFE, dataA)...)
+	headerBytes = append(headerBytes, buildHeaderField(0xFE, dataB)...)
+	headerBytes = append(headerBytes, endFieldBytes...)
+
+	h, _, _, err := UnmarshalHeader(headerBytes)
+
+	assert.Nil(t, err, "UnmarshalHeader should not error on duplicate unknown field type")
+	assert.Equal(t, []unknownField{{ID: 0xFE, Data: dataA}, {ID: 0xFE, Data: dataB}}, h.UnknownFields, "Both occurrences of the unknown field should be preserved in order")
 }
 
 func TestUnmarshalHeader_FieldLengthExceedsData(t *testing.T) {
