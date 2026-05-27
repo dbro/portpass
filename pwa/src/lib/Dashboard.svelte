@@ -1524,7 +1524,7 @@
     if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); startEdit(); return }
     if (e.key === 'Enter' && !e.target.matches('button, a')) {
       e.preventDefault()
-      if (record.URL) window.open(absoluteUrl(record.URL), '_blank')
+      if (record.URL) window.open(absoluteUrl(record.URL), '_blank', 'noopener,noreferrer')
       return
     }
     if (e.ctrlKey && e.key === 'c') {
