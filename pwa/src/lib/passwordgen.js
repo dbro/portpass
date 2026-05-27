@@ -32,18 +32,23 @@ function filtered(pool, excludeChars) {
   return pool.split('').filter(c => !exclude.has(c)).join('')
 }
 
+function unbiasedBelow(n) {
+  // Rejection sampling: discard values in the biased tail so every index
+  // in [0, n) is equally likely. Expected iterations < 2.
+  const limit = 0x100000000 - (0x100000000 % n)
+  const arr = new Uint32Array(1)
+  do { crypto.getRandomValues(arr) } while (arr[0] >= limit)
+  return arr[0] % n
+}
+
 function randomFrom(pool) {
   if (!pool) return ''
-  const arr = new Uint32Array(1)
-  crypto.getRandomValues(arr)
-  return pool[arr[0] % pool.length]
+  return pool[unbiasedBelow(pool.length)]
 }
 
 function cryptoShuffle(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
-    const rnd = new Uint32Array(1)
-    crypto.getRandomValues(rnd)
-    const j = rnd[0] % (i + 1)
+    const j = unbiasedBelow(i + 1)
     ;[arr[i], arr[j]] = [arr[j], arr[i]]
   }
 }
