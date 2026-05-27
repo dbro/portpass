@@ -41,6 +41,7 @@
 
 
     const age = Date.now() - ts
+    if (age > 60000 || age < -5000) return
 
     const vaultUuid = get(selectedFile)?.uuid ?? ''
     if (!vaultUuid) return

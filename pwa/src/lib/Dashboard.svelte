@@ -747,9 +747,53 @@
     }
   }
 
+  async function checkPrimaryConflict() {
+    const handle = $selectedFile?.handle
+    if (!handle || primaryModified === null) return true
+    try {
+      const file = await handle.getFile()
+      if (file.lastModified !== primaryModified) {
+        let realConflict = true
+        if (primaryHead) {
+          try {
+            const buf = await file.slice(72, 152).arrayBuffer()
+            realConflict = !sameHead(new Uint8Array(buf), primaryHead)
+          } catch {}
+        }
+        if (realConflict) {
+          if (!confirm('This vault was modified since it was loaded.\n\nSaving will overwrite those changes. Save anyway?')) return false
+          primaryModified = file.lastModified
+        }
+      }
+    } catch {}
+    return true
+  }
+
   async function saveRecord(draft) {
     try {
       const targetVault = isNew ? (newRecordVaultUuid || dbKey) : (selectedVaultUuid || dbKey)
+
+      if (targetVault === dbKey) {
+        if (!await checkPrimaryConflict()) return
+      } else {
+        const sv = get(secondaryVaults).find(v => v.uuid === targetVault)
+        if (sv?.handle && !sv.readonly && secondaryModified[targetVault] !== undefined) {
+          try {
+            const file = await sv.handle.getFile()
+            if (file.lastModified !== secondaryModified[targetVault]) {
+              let realConflict = true
+              if (secondaryHead[targetVault]) {
+                try {
+                  const buf = await file.slice(72, 152).arrayBuffer()
+                  realConflict = !sameHead(new Uint8Array(buf), secondaryHead[targetVault])
+                } catch {}
+              }
+              if (realConflict && !confirm(`"${sv.name || sv.filename}" was modified since it was loaded.\n\nSaving will overwrite those changes. Save anyway?`)) return
+            }
+          } catch {}
+        }
+      }
+
       const uuid = updateRecordFields(targetVault, isNew ? null : selectedUUID, draft)
       selectedUUID = uuid ?? selectedUUID
       record = getRecordData(targetVault, selectedUUID)
@@ -772,21 +816,6 @@
             : v
           ))
           selectedVaultUuid = targetVault
-          if (sv.handle && !sv.readonly && secondaryModified[targetVault] !== undefined) {
-            try {
-              const file = await sv.handle.getFile()
-              if (file.lastModified !== secondaryModified[targetVault]) {
-                let realConflict = true
-                if (secondaryHead[targetVault]) {
-                  try {
-                    const buf = await file.slice(72, 152).arrayBuffer()
-                    realConflict = !sameHead(new Uint8Array(buf), secondaryHead[targetVault])
-                  } catch {}
-                }
-                if (realConflict && !confirm(`"${sv.name || sv.filename}" was modified since it was loaded.\n\nSaving will overwrite those changes. Save anyway?`)) return
-              }
-            } catch {}
-          }
           const data = saveDatabase(targetVault)
           if (sv.handle && !sv.readonly) {
             const w = await sv.handle.createWritable()
@@ -827,19 +856,15 @@
 
       pendingDeleteTimer = setTimeout(async () => {
         try {
-          wasmDeleteRecord(targetVault, pendingDeleteUUID)
           if (targetVault === dbKey) {
+            if (!await checkPrimaryConflict()) return
+            wasmDeleteRecord(targetVault, pendingDeleteUUID)
             dbItems.set(getDatabaseData(dbKey))
             isDirty = true
             await saveFile(true)
           } else {
             const sv = get(secondaryVaults).find(v => v.uuid === targetVault)
             if (sv) {
-              const items = getDatabaseData(targetVault)
-              secondaryVaults.update(vs => vs.map(v => v.uuid === targetVault
-                ? { ...v, items: items.map(i => ({ ...i, vaultUuid: targetVault })) }
-                : v
-              ))
               if (sv.handle && !sv.readonly && secondaryModified[targetVault] !== undefined) {
                 try {
                   const file = await sv.handle.getFile()
@@ -855,6 +880,12 @@
                   }
                 } catch {}
               }
+              wasmDeleteRecord(targetVault, pendingDeleteUUID)
+              const items = getDatabaseData(targetVault)
+              secondaryVaults.update(vs => vs.map(v => v.uuid === targetVault
+                ? { ...v, items: items.map(i => ({ ...i, vaultUuid: targetVault })) }
+                : v
+              ))
               const data = saveDatabase(targetVault)
               if (sv.handle && !sv.readonly) {
                 const w = await sv.handle.createWritable()
