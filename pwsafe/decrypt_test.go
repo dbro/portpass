@@ -455,6 +455,16 @@ func TestEdgeCases_EmptyDBOperations(t *testing.T) {
 	assert.Empty(t, openedDbNewEmpty.Groups(), "Reloaded new empty DB Groups() should be empty")
 }
 
+func TestUnmarshalRecord_TruncatedInput(t *testing.T) {
+	// A field header is 5 bytes (4 length + 1 type). Inputs shorter than that must
+	// return an error rather than panicking with an out-of-range slice.
+	for length := 0; length < 5; length++ {
+		input := make([]byte, length)
+		_, _, err := unmarshalRecord(input, &Record{})
+		assert.NotNil(t, err, "expected error for %d-byte input", length)
+	}
+}
+
 func TestEdgeCases_ModifyDeleteAndNonExistent(t *testing.T) {
 	// Part 1: Modify then Delete
 	modifyDeletePath := "./test_dbs/modify_delete_test.dat"
