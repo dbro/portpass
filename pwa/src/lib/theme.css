@@ -56,6 +56,28 @@
 .theme-light { --danger:#b3361f; --success:#2c7a4e; }
 .theme-dark  { --danger:#e08673; --success:#6cba8a; }
 
+/* Autofill UI semantic colors — fixed hues, not accent-dependent */
+.theme-light {
+  --amber:            oklch(54% 0.13 72);
+  --amber-bg:         oklch(93.5% 0.05 80);
+  --orange:           oklch(46% 0.13 50);
+  --orange-bg-strong: oklch(91% 0.07 75);
+  --red-bg-strong:    oklch(93% 0.05 18);
+  --green-bg:         oklch(94% 0.045 145);
+  --wait-blue:        oklch(55% 0.15 230);
+  --wait-blue-bg:     oklch(94% 0.04 230);
+}
+.theme-dark {
+  --amber:            oklch(71% 0.12 75);
+  --amber-bg:         oklch(24% 0.07 72);
+  --orange:           oklch(64% 0.15 52);
+  --orange-bg-strong: oklch(27% 0.09 60);
+  --red-bg-strong:    oklch(22% 0.08 18);
+  --green-bg:         oklch(21% 0.07 145);
+  --wait-blue:        oklch(65% 0.15 230);
+  --wait-blue-bg:     oklch(21% 0.07 230);
+}
+
 .vault-app, .vault-app * { box-sizing: border-box; }
 .vault-app {
   font-family: var(--font-ui);

@@ -1,0 +1,1445 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws://localhost:7577; object-src 'none'; base-uri 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Portpass autofill</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="icon.svg">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0 }
+:root {
+  --bg: #14161a; --surface: #1c1f24; --surface-2: #262a31;
+  --border: #2c3038; --text: #f1ede4; --text-muted: #a6a39b;
+  --text-soft: #757279; --amber: #d9a358; --amber-bg: #3a2e1a;
+  --success: #6cba8a; --green-bg: #1a3025;
+  --red: #e08673; --orange: #c47030;
+}
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 14px; background: var(--bg); color: var(--text);
+  height: 100dvh; overflow: hidden;
+}
+#app { height: 100%; display: flex; flex-direction: column; }
+
+/* ── Header ── */
+#pp-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 14px; height: 46px; flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+#pp-header img { width: 22px; height: 22px; border-radius: 5px }
+#pp-header .pp-brand { font-weight: 600; font-size: 15px }
+#pp-search-toggle {
+  margin-left: auto; background: none; border: none; cursor: pointer;
+  color: var(--text-muted); display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: 6px; flex-shrink: 0; padding: 0;
+}
+#pp-search-toggle:hover { color: var(--text); background: var(--surface-2) }
+#pp-search-toggle.active { color: var(--amber) }
+#pp-search-bar {
+  padding: 8px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+
+/* ── Sub-header (pick phase only) ── */
+#pp-subheader {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 14px; height: 36px; flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+.pp-action-label {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--text-muted); flex-shrink: 0;
+}
+.pp-current-url {
+  font-family: ui-monospace, monospace; font-size: 11px;
+  color: var(--text-soft); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; max-width: 200px;
+}
+
+/* ── Content area ── */
+#pp-content { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+
+/* ── Picker rows ── */
+.rec-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px 8px 10px; cursor: pointer;
+  border-bottom: 1px solid var(--border); min-height: 40px;
+  border-left: 3px solid transparent; transition: background 0.1s;
+}
+.rec-row:hover { background: var(--amber-bg); border-left-color: var(--amber) }
+.rec-marker { width: 16px; flex-shrink: 0; display: flex; align-items: center }
+.rec-name {
+  flex: 1; min-width: 0; font-weight: 600; font-size: 13px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rec-url {
+  width: 150px; flex-shrink: 0; font-family: ui-monospace, monospace;
+  font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-muted);
+}
+.rec-url.url-saved { color: var(--text-muted) }
+.rec-match-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: 100px;
+  background: var(--amber-bg); color: var(--amber);
+  font-size: 12px; font-weight: 600; flex-shrink: 0; white-space: nowrap;
+}
+.rec-pencil {
+  width: 22px; height: 22px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: 5px;
+  background: var(--surface-2); cursor: pointer; color: var(--text-muted);
+}
+.rec-pencil:hover { border-color: var(--text-muted) }
+.rec-pencil.pencil-saved { border-color: var(--success); background: var(--green-bg); color: var(--success) }
+
+/* ── SelectedRecordRow (waiting / done / error phases) ── */
+.selected-record-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; background: var(--amber-bg);
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+
+/* ── Phase center (waiting / done / error content) ── */
+.pp-phase-center {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 12px; padding: 24px; text-align: center;
+}
+
+/* Waiting illustration */
+.pp-waiting-illus { opacity: 0.35; color: var(--text-muted) }
+
+/* Done circle */
+.pp-done-circle {
+  width: 56px; height: 56px; border-radius: 50%;
+  background: var(--amber-bg);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--amber);
+}
+.pp-done-title { font-size: 18px; font-weight: 700; color: var(--amber) }
+.pp-done-sub   { font-size: 13px; color: var(--text-muted) }
+
+/* Waiting text */
+.pp-waiting-title { font-size: 16px; font-weight: 700 }
+.pp-waiting-sub   { font-size: 13px; color: var(--text-muted); line-height: 1.5 }
+
+/* Error */
+.pp-error-icon-wrap { display: flex; align-items: center; justify-content: center }
+.pp-error-title { font-size: 15px; font-weight: 700 }
+.pp-error-body  { font-size: 13px; color: var(--text-muted) }
+.pp-error-action {
+  font-size: 13px; font-weight: 600; color: var(--amber);
+  text-decoration: none; display: inline-block; margin-top: 4px;
+}
+.pp-error-action:hover { text-decoration: underline }
+
+/* ── Autotype chip display (waiting phase) ── */
+.pp-chips-row {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
+  gap: 5px; padding: 8px 12px; max-width: 100%;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.pp-chip {
+  display: inline-flex; align-items: center; gap: 2px;
+  border-radius: 100px; padding: 3px 8px;
+  font-size: 11px; font-weight: 500; white-space: nowrap;
+}
+.pp-chip-field   { background: var(--amber-bg); color: var(--amber); font-weight: 600 }
+.pp-chip-nav     { background: var(--surface);  color: var(--text-muted) }
+.pp-chip-literal { border: 1px solid var(--border); color: var(--text);
+                   font-family: ui-monospace, monospace; font-weight: 400 }
+.pp-chip-wait    { border: 1px solid var(--border); color: var(--text-muted) }
+.pp-chip-unknown { border: 1.5px solid var(--orange); color: var(--orange) }
+.pp-chip-error   { border: 1.5px solid var(--red);    color: var(--red) }
+.pp-chip-sep     { color: var(--text-soft); font-size: 11px; user-select: none }
+.pp-chip-suffix  { font-size: 9px; opacity: 0.55 }
+
+/* ── View-in-Portpass link (below amber banner) ── */
+.pp-view-link-bar {
+  display: flex; justify-content: flex-end;
+  padding: 5px 14px; flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+.pp-view-link {
+  font-size: 11px; color: var(--text-soft);
+  background: none; border: none; cursor: pointer;
+  font-family: inherit; padding: 0;
+}
+.pp-view-link:hover { color: var(--text-muted) }
+
+/* ── Footer (waiting phase) ── */
+.pp-footer {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 14px; border-top: 1px solid var(--border); flex-shrink: 0;
+}
+.pp-footer-btn {
+  background: none; border: none; cursor: pointer;
+  font-size: 14px; color: var(--text-muted); font-family: inherit; padding: 4px 0;
+}
+.pp-footer-btn:hover { color: var(--text) }
+
+/* ── Search / no-match ── */
+.pp-notice {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px; font-size: 11px; color: var(--text-muted);
+  background: var(--surface-2); border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.pp-search-wrap { padding: 10px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0 }
+.pp-search {
+  width: 100%; padding: 8px 10px; background: var(--surface);
+  border: 1.5px solid var(--border); border-radius: 8px;
+  color: var(--text); font-family: inherit; font-size: 13px; outline: none;
+}
+.pp-search:focus { border-color: var(--amber) }
+.pp-section-hdr {
+  padding: 5px 14px; font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
+  color: var(--text-soft); border-bottom: 1px solid var(--border);
+  text-transform: uppercase; flex-shrink: 0;
+}
+.pp-placeholder {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 6px; color: var(--text-muted);
+  font-size: 13px; padding: 24px; text-align: center;
+}
+.pp-status { padding: 12px 14px; font-size: 13px; color: var(--text-muted) }
+.pp-error-inline { padding: 12px 14px; font-size: 13px; color: var(--red) }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="pp-header">
+    <img src="icon.svg" alt="">
+    <span class="pp-brand">Portpass</span>
+    <button id="pp-search-toggle" style="display:none" title="Search all passwords"></button>
+  </div>
+  <div id="pp-search-bar" style="display:none">
+    <input id="pp-search-input" class="pp-search" type="text" placeholder="Search all passwords…">
+  </div>
+  <div id="pp-subheader">
+    <span class="pp-action-label">CLICK TO AUTOFILL</span>
+    <span id="pp-url-display" class="pp-current-url"></span>
+  </div>
+  <div id="pp-content">
+    <div class="pp-status">Connecting to Portpass…</div>
+  </div>
+</div>
+<script>
+;(function() {
+  'use strict'
+
+  // ── Theme ─────────────────────────────────────────────────────────────────
+  var _accentMap = {
+    amber:    { light: ['#b07418', '#f3e6c9'], dark: ['#d9a358', '#3a2e1a'] },
+    sage:     { light: ['#5a7a4f', '#dde6d4'], dark: ['#97b386', '#2c3a26'] },
+    slate:    { light: ['#4a5d82', '#dee3ee'], dark: ['#8da3c8', '#25304a'] },
+    burgundy: { light: ['#8a3a3a', '#ead4d4'], dark: ['#c98a8a', '#3a2222'] },
+  }
+  function applyTheme(dark, accent) {
+    var r = document.documentElement.style
+    if (!dark) {
+      r.setProperty('--bg',        '#f6f3ee')
+      r.setProperty('--surface',   '#fbfaf7')
+      r.setProperty('--surface-2', '#efece5')
+      r.setProperty('--border',    '#e3ddd1')
+      r.setProperty('--text',      '#1c1f24')
+      r.setProperty('--text-muted','#5a5d65')
+      r.setProperty('--text-soft', '#87898f')
+      r.setProperty('--success',   '#2c7a4e')
+      r.setProperty('--green-bg',  '#e8f5ee')
+      r.setProperty('--red',       '#b3361f')
+      r.setProperty('--orange',    '#8b5020')
+    } else {
+      r.setProperty('--bg',        '#14161a')
+      r.setProperty('--surface',   '#1c1f24')
+      r.setProperty('--surface-2', '#262a31')
+      r.setProperty('--border',    '#2c3038')
+      r.setProperty('--text',      '#f1ede4')
+      r.setProperty('--text-muted','#a6a39b')
+      r.setProperty('--text-soft', '#757279')
+      r.setProperty('--success',   '#6cba8a')
+      r.setProperty('--green-bg',  '#1a3025')
+      r.setProperty('--red',       '#e08673')
+      r.setProperty('--orange',    '#c47030')
+    }
+    var av = (_accentMap[accent] || _accentMap.amber)[dark ? 'dark' : 'light']
+    r.setProperty('--amber',    av[0])
+    r.setProperty('--amber-bg', av[1])
+  }
+  // Theme applied when first message arrives from Portpass via applyTheme().
+
+  // ── SVG icons ─────────────────────────────────────────────────────────────
+  var _S = ' viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"'
+  var SVG_WARN   = '<svg width="13" height="13"' + _S + ' stroke-width="1.6"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>'
+  var SVG_SEARCH_ICO = '<svg width="16" height="16"' + _S + ' stroke-width="1.6"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.3-4.3"/></svg>'
+  var SVG_X_ICO      = '<svg width="16" height="16"' + _S + ' stroke-width="1.6"><path d="M6 6l12 12M18 6 6 18"/></svg>'
+  var SVG_PENCIL = '<svg width="13" height="13"' + _S + ' stroke-width="1.6"><path d="M4 20h4l10-10-4-4L4 16v4Z"/><path d="m14 6 4 4"/></svg>'
+  var SVG_UNDO   = '<svg width="13" height="13"' + _S + ' stroke-width="1.6"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>'
+  var SVG_CHECK_SM = '<svg width="12" height="12"' + _S + ' stroke-width="2.2"><path d="m5 12 5 5L20 7"/></svg>'
+  var SVG_CHECK_MD = '<svg width="24" height="24"' + _S + ' stroke-width="2"><path d="m5 12 5 5L20 7"/></svg>'
+  // Large error icons (40px)
+  var SVG_LOCK_LG  = '<svg width="40" height="40"' + _S + ' stroke-width="1.3"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>'
+  var SVG_WARN_LG  = '<svg width="40" height="40"' + _S + ' stroke-width="1.3"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>'
+  // Waiting illustration: dashed card with amber checkmark circle
+  var SVG_WAITING  = '<svg width="90" height="70"' + _S.replace('currentColor','currentColor') + ' stroke-width="1.5"><rect x="4" y="4" width="66" height="46" rx="8" stroke-dasharray="5 3"/><line x1="14" y1="18" x2="50" y2="18" stroke-width="2" stroke-linecap="round"/><line x1="14" y1="28" x2="42" y2="28" stroke-width="2" stroke-linecap="round"/><circle cx="62" cy="46" r="15" style="fill:var(--amber-bg)" stroke="none"/><path d="m55 46 5 5 9-9" style="stroke:var(--amber)" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+
+  // ── Shared state ───────────────────────────────────────────────────────────
+  var pingNonce = crypto.randomUUID()
+  var ch = new BroadcastChannel('portpass-autofill')
+  var bookmarkletOrigin = null
+  var isSecure = false
+  var currentUrl = ''
+  var saveUrl = ''
+
+  // Mode detection
+  var cprivKey = null
+  var delegateId = null
+  var bcPongCount = 0
+  var wsProbeReplies = []
+  var wsProbeWs = null
+  var probeTimer = null
+  var probeDecided = false
+  var wsProbeError = null
+
+  // WebSocket relay crypto state
+  var cpEcdhKeyPair = null
+  var cpEcdhSpkiB64 = null
+  var wsRelayUrl = 'ws://localhost:7577/ws'
+  var cpSigningKey = null
+  var cpPubSpkiB64 = null
+
+  // BroadcastChannel crypto state
+  var nonce = null
+  var sessionKey = null
+  var keyPair = null
+  var selectedUuid = null
+  var selectedVaultUuid = null
+
+  // Transport abstraction — set once in onHelloResponse (BroadcastChannel) or setupWsTransport (WebSocket relay).
+  // All business logic calls $transport.method() with no knowledge of which channel is active.
+  var $transport = null
+  var _pendingSearch = null  // resolve fn for an in-flight search
+  var _pendingFill = null    // resolve fn for an in-flight fill-uuid
+
+  // Phase state
+  var chosen = null           // the selected record object
+  var previousPhase = null    // 'pick' or 'norecords' — for Back button
+  var lastRecords = []        // saved for Back navigation
+  var pendingCredentials = null  // {autotype, fields, sensitiveCodes} waiting to be sent
+  var fieldClicked = false    // bookmarklet reported a field was clicked
+  var hasActiveField = false  // bookmarklet had a pre-focused field at activation
+
+  var $content       = document.getElementById('pp-content')
+  var $subheader     = document.getElementById('pp-subheader')
+  var $urlDisplay    = document.getElementById('pp-url-display')
+  var $searchToggle  = document.getElementById('pp-search-toggle')
+  var $searchBar     = document.getElementById('pp-search-bar')
+  var $searchInput   = document.getElementById('pp-search-input')
+  var searchOpen     = false
+
+  // Set up the search toggle button icon and handler (once).
+  $searchToggle.innerHTML = SVG_SEARCH_ICO
+  $searchToggle.onclick = toggleSearch
+
+  // Set up the search input with debounced search via transport.
+  ;(function() {
+    var deb = null
+    $searchInput.oninput = function() {
+      clearTimeout(deb)
+      var q = $searchInput.value.trim()
+      if (!q) { showPickerSearchPlaceholder(); return }
+      deb = setTimeout(function() {
+        if (!$transport) return
+        $transport.search(q).then(function(results) {
+          showPickerSearchResults(results)
+        }).catch(function() { showPickerSearchPlaceholder() })
+      }, 150)
+    }
+  }())
+
+  function setStatus(msg) {
+    hideSearchUI()
+    $subheader.style.display = 'none'
+    $content.innerHTML = ''
+    var el = document.createElement('div')
+    el.className = 'pp-status'
+    el.textContent = msg
+    $content.appendChild(el)
+  }
+
+  // ── Startup: generate ECDH key pair, signal ready ─────────────────────────
+  crypto.subtle.generateKey(
+    { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey']
+  ).then(function(kp) {
+    cpEcdhKeyPair = kp
+    return crypto.subtle.exportKey('spki', kp.publicKey)
+  }).then(function(spki) {
+    cpEcdhSpkiB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(spki)))
+    if (window.opener) window.opener.postMessage({ type: 'ready' }, '*')
+    window.addEventListener('message', onOpenerMessage)
+    // Also listen for fill-related messages from bookmarklet (field-clicked, fill-done, fill-error)
+    window.addEventListener('message', onBookmarkletMessage)
+  }).catch(function() { sendError('Startup failed') })
+
+  // ── Ping Dashboard via BroadcastChannel ───────────────────────────────────
+  ch.onmessage = function(e) {
+    if (e.data && e.data.type === 'pong' && e.data.nonce === pingNonce) {
+      bcPongCount++
+      scheduleDecide(50)
+    }
+  }
+  ch.postMessage({ type: 'ping', nonce: pingNonce })
+
+  // ── Mode detection ────────────────────────────────────────────────────────
+  function onOpenerMessage(event) {
+    if (!window.opener || event.source !== window.opener) return
+    var msg = event.data
+    if (!msg || msg.type !== 'init') return
+    window.removeEventListener('message', onOpenerMessage)
+
+    bookmarkletOrigin = event.origin
+    currentUrl = msg.url || ''
+    saveUrl = msg.saveUrl || currentUrl
+    isSecure = !!msg.isSecure
+    cprivKey = msg.privKey || null
+    delegateId = msg.delegateId || null
+    hasActiveField = !!msg.hasActiveField
+    if (msg.relayUrl) wsRelayUrl = msg.relayUrl.replace(/^http/, 'ws').replace(/\/ws$/, '') + '/ws'
+
+    if ($urlDisplay) { $urlDisplay.textContent = currentUrl; $urlDisplay.title = currentUrl }
+
+    if (currentUrl) {
+      try {
+        var sentHost = currentUrl.split('/')[0]
+        var evHost = new URL(event.origin).host.replace(/^www\./, '').toLowerCase()
+        if (evHost && sentHost !== evHost) { sendError('URL mismatch — security check failed'); return }
+      } catch(_) {}
+    }
+
+    startProbe()
+  }
+
+  // ── Messages from bookmarklet (field-clicked, fill-done, fill-error) ──────
+  function onBookmarkletMessage(event) {
+    if (!window.opener || event.source !== window.opener) return
+    var msg = event.data
+    if (!msg) return
+    if (msg.type === 'field-clicked') {
+      fieldClicked = true
+      pendingFill()
+    } else if (msg.type === 'fill-done') {
+      showDone()
+    } else if (msg.type === 'fill-error') {
+      showErrorPhase(detectErrorPhase(msg.error || ''))
+    }
+  }
+
+  // ── Parallel probe: BC + WebSocket relay ─────────────────────────────────
+
+  function scheduleDecide(ms) {
+    if (probeDecided || probeTimer === null) return
+    clearTimeout(probeTimer)
+    if (ms === 0) { decideTransport(); return }
+    probeTimer = setTimeout(decideTransport, ms)
+  }
+
+  function startProbe() {
+    startWsProbe()  // async — runs in background during the collection window
+    probeTimer = setTimeout(decideTransport, 2000)  // fallback if no response
+  }
+
+  async function startWsProbe() {
+    if (!cprivKey) return
+    try {
+      cpSigningKey = await crypto.subtle.importKey(
+        'jwk', cprivKey, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']
+      )
+      var pubJwk = { kty: cprivKey.kty, crv: cprivKey.crv, x: cprivKey.x, y: cprivKey.y }
+      var pubKey = await crypto.subtle.importKey(
+        'jwk', pubJwk, { name: 'ECDSA', namedCurve: 'P-256' }, true, ['verify']
+      )
+      var pubSpki = await crypto.subtle.exportKey('spki', pubKey)
+      cpPubSpkiB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(pubSpki)))
+      setupWsTransport()
+
+      var ts = Date.now()
+      var signedPayload = JSON.stringify({ url: currentUrl, nonce: pingNonce, ecdh: cpEcdhSpkiB64, ts: ts })
+      var sigBytes = await crypto.subtle.sign(
+        { name: 'ECDSA', hash: 'SHA-256' }, cpSigningKey, new TextEncoder().encode(signedPayload)
+      )
+      var sigB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(sigBytes)))
+
+      wsProbeWs = new WebSocket(wsRelayUrl)
+      wsProbeWs.onopen = function() {
+        wsProbeWs.send(JSON.stringify({
+          type: 'publish', channel: 'portpass-autofill', replyTo: pingNonce,
+          url: currentUrl, ecdh: cpEcdhSpkiB64, ts: ts, sig: sigB64, pub: cpPubSpkiB64
+        }))
+      }
+      wsProbeWs.onmessage = function(e) {
+        try {
+          var msg = JSON.parse(e.data)
+          if (msg.type === 'reply') {
+            wsProbeReplies.push(msg)
+            scheduleDecide(50)
+          } else if (msg.type === 'error') {
+            wsProbeError = msg.message || 'Relay error'
+            scheduleDecide(0)
+          }
+        } catch(_) {}
+      }
+      wsProbeWs.onerror = function() {
+        wsProbeError = 'Cannot connect to websocket relay'
+        scheduleDecide(0)
+      }
+      wsProbeWs.onclose = function() {}
+    } catch(e) { wsProbeError = e.message }
+  }
+
+  function setupWsTransport() {
+    $transport = {
+      search: async function(q) {
+        var blob = await cpSignAndSend('search', { url: q, query: q })
+        return decryptReply(blob)
+      },
+      fill: async function(uuid, vu) {
+        var blob = await cpSignAndSend('fill-uuid', { url: uuid, uuid: uuid, vaultUuid: vu || null })
+        var results = await decryptReply(blob)
+        if (!results || !results.length) throw new Error('Could not get credentials')
+        return results[0]
+      },
+      viewRecord: function(uuid, vu) {
+        return cpSignAndSend('view-record', { url: uuid, uuid: uuid, vaultUuid: vu || null })
+      },
+      saveUrl: function(uuid, vu) { wsSaveUrl(uuid, vu) },
+      notifyFilled: function() { wsNotifyFilled() }
+    }
+  }
+
+  function decideTransport() {
+    if (probeDecided) return
+    probeDecided = true
+    if (wsProbeWs) { try { wsProbeWs.close() } catch(_) {} wsProbeWs = null }
+    var bcCount = bcPongCount
+    var wsCount = wsProbeReplies.length
+
+    if (bcCount > 1 || wsCount > 1) {
+      showErrorPhase('multiinstance')
+      if (window.opener && bookmarkletOrigin) {
+        try { window.opener.postMessage({ type: 'cancel' }, bookmarkletOrigin) } catch(_) {}
+      }
+      return
+    }
+    if (bcCount === 0 && wsCount === 0) {
+      sendError(wsProbeError || 'Cannot connect to websocket relay')
+      return
+    }
+    // Prefer BC when available — same instance may respond on both channels if cross-profile is enabled
+    if (bcCount >= 1) { doHello(); return }
+    processRelayBlob(wsProbeReplies[0])
+  }
+
+  function wsPost(requestMsg) {
+    return new Promise(function(resolve, reject) {
+      var ws
+      try { ws = new WebSocket(wsRelayUrl) } catch(e) {
+        reject(new Error('Invalid relay server URL — check settings')); return
+      }
+      var settled = false
+      function done(fn, arg) { if (!settled) { settled = true; ws.close(); fn(arg) } }
+      ws.onopen    = function() { ws.send(JSON.stringify(requestMsg)) }
+      ws.onmessage = function(e) {
+        try {
+          var msg = JSON.parse(e.data)
+          if (msg.type === 'error') done(reject, new Error(msg.message || 'Autofill failed'))
+          else if (msg.type === 'reply') done(resolve, msg)
+        } catch(_) { done(reject, new Error('Invalid relay message')) }
+      }
+      ws.onerror = function() { done(reject, new Error('Cannot connect to websocket relay')) }
+      ws.onclose = function() { if (!settled) done(reject, new Error('relay server closed unexpectedly')) }
+    })
+  }
+
+  async function decryptReply(blob) {
+    var ephPubJwk = JSON.parse(atob(blob.ephPub))
+    var ephPubKey = await crypto.subtle.importKey('jwk', ephPubJwk, { name: 'ECDH', namedCurve: 'P-256' }, false, [])
+    var cpSessionKey = await crypto.subtle.deriveKey(
+      { name: 'ECDH', public: ephPubKey }, cpEcdhKeyPair.privateKey,
+      { name: 'AES-GCM', length: 256 }, false, ['decrypt']
+    )
+    var iv = Uint8Array.from(atob(blob.iv), function(c) { return c.charCodeAt(0) })
+    var ct = Uint8Array.from(atob(blob.ciphertext), function(c) { return c.charCodeAt(0) })
+    var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, cpSessionKey, ct)
+    return JSON.parse(new TextDecoder().decode(pt))
+  }
+
+  async function processRelayBlob(blob) {
+    if (blob.error) { sendError(blob.error); return }
+    try {
+      var data = await decryptReply(blob)
+      if (data && data.records) {
+        applyTheme(data.theme === 'dark', data.accent || 'amber')
+        showPicker(data.records)
+      } else {
+        showPicker(data || [])
+      }
+    } catch(e) { sendError('Decrypt failed: ' + e.message) }
+  }
+
+  async function cpSignAndSend(msgType, extraFields) {
+    var ts = Date.now()
+    var reqNonce = crypto.randomUUID()
+    var signedPayload = JSON.stringify({ url: extraFields.url || '', nonce: reqNonce, ecdh: cpEcdhSpkiB64, ts: ts })
+    var sigBytes = await crypto.subtle.sign(
+      { name: 'ECDSA', hash: 'SHA-256' }, cpSigningKey, new TextEncoder().encode(signedPayload)
+    )
+    var sigB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(sigBytes)))
+    return wsPost(Object.assign({
+      type: 'publish', channel: 'portpass-autofill', replyTo: reqNonce,
+      msgType: msgType, ecdh: cpEcdhSpkiB64, ts: ts, sig: sigB64, pub: cpPubSpkiB64
+    }, extraFields))
+  }
+
+  async function doSearch(query) {
+    var ph = $content.querySelector('.pp-placeholder')
+    if (ph) { ph.style.display = ''; ph.textContent = 'Searching…' }
+    try {
+      var results = await $transport.search(query)
+      showSearchResults(results)
+    } catch(e) {
+      if (ph) { ph.style.display = ''; ph.textContent = 'Search failed: ' + (e.message || 'unknown') }
+    }
+  }
+
+  function doSelectSearchResult(rec) {
+    selectRecord(rec, 'norecords')
+  }
+
+  function wsNotifyFilled() {
+    if (!cpSigningKey || !cpPubSpkiB64) return
+    var nonce = crypto.randomUUID()
+    var ts = Date.now()
+    var payload = JSON.stringify({ url: '', nonce: nonce, ecdh: '', ts: ts })
+    crypto.subtle.sign(
+      { name: 'ECDSA', hash: 'SHA-256' }, cpSigningKey, new TextEncoder().encode(payload)
+    ).then(function(sigBytes) {
+      var sigB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(sigBytes)))
+      var ws
+      try { ws = new WebSocket(wsRelayUrl) } catch(e) { return }
+      ws.onopen = function() {
+        ws.send(JSON.stringify({
+          type: 'publish', channel: 'portpass-autofill', replyTo: nonce,
+          msgType: 'fill-done', url: '', ecdh: '', ts: ts, sig: sigB64, pub: cpPubSpkiB64
+        }))
+      }
+      ws.onmessage = function() { ws.close() }
+      ws.onerror = ws.onclose = function() {}
+    }).catch(function() {})
+  }
+
+  function wsSaveUrl(uuid, vaultUuid) {
+    if (!cpSigningKey || !cpPubSpkiB64) return
+    var saveNonce = crypto.randomUUID()
+    var ts = Date.now()
+    var payload = JSON.stringify({ url: saveUrl, nonce: saveNonce, ecdh: '', ts: ts })
+    crypto.subtle.sign(
+      { name: 'ECDSA', hash: 'SHA-256' }, cpSigningKey, new TextEncoder().encode(payload)
+    ).then(function(sigBytes) {
+      var sigB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(sigBytes)))
+      var ws
+      try { ws = new WebSocket(wsRelayUrl) } catch(e) { return }
+      ws.onopen = function() {
+        ws.send(JSON.stringify({
+          type: 'publish', channel: 'portpass-autofill', replyTo: saveNonce,
+          msgType: 'save-url', uuid: uuid, vaultUuid: vaultUuid,
+          url: saveUrl, ecdh: '', ts: ts, sig: sigB64, pub: cpPubSpkiB64
+        }))
+      }
+      ws.onmessage = function() { ws.close() }
+      ws.onerror = ws.onclose = function() {}
+    }).catch(function() {})
+  }
+
+  function doSaveUrl(uuid, vaultUuid) {
+    $transport.saveUrl(uuid, vaultUuid || null)
+  }
+
+  // ── Record selection — shared entry point ──────────────────────────────────
+  // Called when a picker row is clicked (or auto-advanced for single exact match).
+  function selectRecord(rec, fromPhase) {
+    chosen = rec
+    previousPhase = fromPhase   // null → no Back button
+    fieldClicked = false
+    pendingCredentials = null
+    showWaiting(null)  // autotype chips shown once credentials arrive below
+    $transport.fill(rec.uuid, rec.vaultUuid).then(function(cred) {
+      if (!cred) { sendError('Could not get credentials'); return }
+      updateWaitingWithAutotype(cred.autotype)
+      pendingCredentials = cred
+      pendingFill()
+    }).catch(function(e) { sendError(e.message || 'Autofill failed') })
+  }
+
+  // Triggers fill when credentials AND a field signal (hasActiveField or fieldClicked) are ready.
+  function pendingFill() {
+    if (!pendingCredentials) return
+    if (!hasActiveField && !fieldClicked) return
+
+    var cred = pendingCredentials
+    pendingCredentials = null
+
+    // HTTP security check
+    if (!isSecure && sequenceHasSensitiveCode(cred.autotype || '', cred.sensitiveCodes || [])) {
+      showErrorPhase('http')
+      return
+    }
+
+    if (window.opener && bookmarkletOrigin) {
+      window.opener.postMessage(
+        { type: 'fill', autotype: cred.autotype, fields: cred.fields },
+        bookmarkletOrigin
+      )
+    }
+  }
+
+  // ── Phase rendering ────────────────────────────────────────────────────────
+
+  function makeSelectedRecordRow(rec) {
+    var row = document.createElement('div')
+    row.className = 'selected-record-row'
+    var spacer1 = document.createElement('div')
+    spacer1.style.cssText = 'width:16px;flex-shrink:0'
+    var nameEl = document.createElement('div')
+    nameEl.className = 'rec-name'
+    nameEl.textContent = rec.title
+    nameEl.title = rec.title
+    var indicator
+    if (rec.matchType === 'exact') {
+      indicator = document.createElement('div')
+      indicator.className = 'rec-match-badge'
+      indicator.innerHTML = SVG_CHECK_SM + ' match'
+    } else {
+      indicator = document.createElement('div')
+      indicator.className = 'rec-url'
+      var u = rec.existingUrl ? canonicalURL(rec.existingUrl) : ''
+      indicator.textContent = u
+      indicator.title = u
+    }
+    var spacer2 = document.createElement('div')
+    spacer2.style.cssText = 'width:22px;flex-shrink:0'
+    row.appendChild(spacer1)
+    row.appendChild(nameEl)
+    row.appendChild(indicator)
+    row.appendChild(spacer2)
+    return row
+  }
+
+  function makeViewLinkBar() {
+    var bar = document.createElement('div')
+    bar.className = 'pp-view-link-bar'
+    var btn = document.createElement('button')
+    btn.className = 'pp-view-link'
+    btn.textContent = 'Show in Portpass Tab'
+    btn.onclick = function() {
+      var p = (chosen && $transport) ? $transport.viewRecord(chosen.uuid, chosen.vaultUuid || null) : null
+      if (p && p.then) p.catch(function(){}).then(function() { window.close() })
+      else window.close()
+    }
+    bar.appendChild(btn)
+    return bar
+  }
+
+  function showWaiting(autotype) {
+    hideSearchUI()
+    $subheader.style.display = 'none'
+    $content.innerHTML = ''
+    $content.appendChild(makeSelectedRecordRow(chosen))
+    $content.appendChild(makeViewLinkBar())
+
+    var center = document.createElement('div')
+    center.className = 'pp-phase-center'
+
+    var illus = document.createElement('div')
+    illus.className = 'pp-waiting-illus'
+    illus.innerHTML = SVG_WAITING
+
+    var title = document.createElement('div')
+    title.className = 'pp-waiting-title'
+    title.textContent = 'Click a field to begin'
+
+    var sub = document.createElement('div')
+    sub.className = 'pp-waiting-sub'
+    sub.textContent = autotype ? waitingSubText(autotype) : 'Click any username or password field on the page'
+
+    center.appendChild(illus)
+    center.appendChild(title)
+    center.appendChild(sub)
+    if (autotype) {
+      var chips = buildSequenceChips(autotype)
+      if (chips) center.appendChild(chips)
+    }
+    $content.appendChild(center)
+
+    // Footer with Back (if applicable) and Cancel
+    var footer = document.createElement('div')
+    footer.className = 'pp-footer'
+    if (previousPhase !== null) {
+      var backBtn = document.createElement('button')
+      backBtn.className = 'pp-footer-btn'
+      backBtn.textContent = '← Back'
+      backBtn.onclick = goBack
+      footer.appendChild(backBtn)
+    } else {
+      footer.appendChild(document.createElement('span'))  // spacer
+    }
+    var cancelBtn = document.createElement('button')
+    cancelBtn.className = 'pp-footer-btn'
+    cancelBtn.textContent = 'Cancel'
+    cancelBtn.onclick = function() { window.close() }
+    footer.appendChild(cancelBtn)
+    $content.appendChild(footer)
+  }
+
+  function showDone() {
+    if ($transport && $transport.notifyFilled) $transport.notifyFilled()
+    hideSearchUI()
+    $subheader.style.display = 'none'
+    $content.innerHTML = ''
+    if (chosen) $content.appendChild(makeSelectedRecordRow(chosen))
+
+    var center = document.createElement('div')
+    center.className = 'pp-phase-center pp-phase-done'
+
+    var circle = document.createElement('div')
+    circle.className = 'pp-done-circle'
+    circle.innerHTML = SVG_CHECK_MD
+
+    var title = document.createElement('div')
+    title.className = 'pp-done-title'
+    title.textContent = 'Filled'
+
+    var sub = document.createElement('div')
+    sub.className = 'pp-done-sub'
+    sub.textContent = 'This window will close'
+
+    center.appendChild(circle)
+    center.appendChild(title)
+    center.appendChild(sub)
+    $content.appendChild(center)
+
+    try { window.focus() } catch(_) {}
+    setTimeout(function() { window.close() }, 1500)
+  }
+
+  function detectErrorPhase(msg) {
+    var lm = (msg || '').toLowerCase()
+    if (/cannot connect|websocket relay|no subscriber/.test(lm))             return 'noconn'
+    if (/vault.*lock|is locked/.test(lm) || /open a record/.test(lm))       return 'locked'
+    if (/autofill sequence|no autofill|autotype|could not parse/.test(lm))   return 'noseq'
+    if (/non-https|insecure|sensitive.*http/.test(lm))                       return 'http'
+    return 'other'
+  }
+
+  function showErrorPhase(errorPhase, rawMsg) {
+    hideSearchUI()
+    $subheader.style.display = 'none'
+    $content.innerHTML = ''
+    if (chosen) $content.appendChild(makeSelectedRecordRow(chosen))
+
+    var configs = {
+      multiinstance: { icon: SVG_WARN_LG, color: 'var(--orange)', title: 'Multiple Portpass windows open',
+                       body: 'More than one Portpass window is open. Close all but one and try again, or use the secondary vault feature to access multiple vaults from one window.',
+                       action: null },
+      noconn: { icon: SVG_WARN_LG, color: 'var(--orange)', title: 'Portpass not found',
+                body: ["Portpass isn't open in this browser profile.",
+                       "Open and unlock Portpass, then try again — or start the websocket relay and open Portpass in a separate browser profile for cross-profile autofill."],
+                action: 'Open Portpass →' },
+      locked: { icon: SVG_LOCK_LG, color: 'var(--red)',    title: 'Vault is locked',
+                body: 'Unlock Portpass to use autofill.', action: 'Unlock Portpass →' },
+      noseq:  { icon: SVG_WARN_LG, color: 'var(--orange)', title: 'No autofill sequence set',
+                body: 'This password has no autofill sequence configured.', action: 'Edit in Portpass →' },
+      http:   { icon: SVG_WARN_LG, color: 'var(--red)',    title: 'Insecure page — blocked',
+                body: 'Passwords are only autofilled on HTTPS pages.', action: null },
+      other:  { icon: SVG_WARN_LG, color: 'var(--red)',    title: 'Autofill failed',
+                body: rawMsg || '', action: null },
+    }
+    var cfg = configs[errorPhase] || configs.other
+
+    var center = document.createElement('div')
+    center.className = 'pp-phase-center'
+
+    var iconWrap = document.createElement('div')
+    iconWrap.className = 'pp-error-icon-wrap'
+    iconWrap.style.color = cfg.color
+    iconWrap.innerHTML = cfg.icon
+
+    var titleEl = document.createElement('div')
+    titleEl.className = 'pp-error-title'
+    titleEl.style.color = cfg.color
+    titleEl.textContent = cfg.title
+
+    center.appendChild(iconWrap)
+    center.appendChild(titleEl)
+    if (cfg.body) {
+      var bodyLines = Array.isArray(cfg.body) ? cfg.body : [cfg.body]
+      bodyLines.forEach(function(line) {
+        var el = document.createElement('div')
+        el.className = 'pp-error-body'
+        el.textContent = line
+        center.appendChild(el)
+      })
+    }
+
+    if (cfg.action) {
+      var link = document.createElement('a')
+      link.className = 'pp-error-action'
+      link.textContent = cfg.action
+      link.href = PORTPASS_URL || '#'
+      link.target = '_blank'
+      link.rel = 'noopener'
+      center.appendChild(link)
+    }
+
+    $content.appendChild(center)
+  }
+
+  // Back button: return to previous phase, clear chosen record and pending state.
+  function goBack() {
+    chosen = null
+    pendingCredentials = null
+    fieldClicked = false
+    var prev = previousPhase
+    previousPhase = null
+    if (prev === 'pick') {
+      showPickerContent(lastRecords)  // also resets search state
+    } else if (prev === 'norecords') {
+      showSearchFallback(true)
+    } else {
+      window.close()
+    }
+  }
+
+  // ── Search toggle (picker search) ─────────────────────────────────────────
+
+  function hideSearchUI() {
+    searchOpen = false
+    $searchBar.style.display = 'none'
+    $searchToggle.style.display = 'none'
+    $searchToggle.classList.remove('active')
+    $searchToggle.innerHTML = SVG_SEARCH_ICO
+    $searchInput.value = ''
+  }
+
+  function showPickerSearchPlaceholder() {
+    $content.innerHTML = ''
+    var ph = document.createElement('div')
+    ph.className = 'pp-placeholder'
+    ph.textContent = 'Type to search all passwords'
+    $content.appendChild(ph)
+  }
+
+  function showPickerSearchResults(records) {
+    $content.innerHTML = ''
+    if (!records || !records.length) {
+      var ph = document.createElement('div')
+      ph.className = 'pp-placeholder'
+      ph.textContent = 'No matching passwords found'
+      $content.appendChild(ph)
+      return
+    }
+    records.forEach(function(rec) {
+      $content.appendChild(buildRecordRow(rec, function(r) {
+        selectRecord(r, 'pick')
+      }))
+    })
+  }
+
+  function toggleSearch() {
+    searchOpen = !searchOpen
+    if (searchOpen) {
+      $subheader.style.display = 'none'
+      $searchBar.style.display = ''
+      $searchToggle.classList.add('active')
+      $searchToggle.innerHTML = SVG_X_ICO
+      $searchToggle.title = 'Close search'
+      showPickerSearchPlaceholder()
+      setTimeout(function() { try { $searchInput.focus() } catch(_) {} }, 50)
+    } else {
+      $subheader.style.display = ''
+      $searchBar.style.display = 'none'
+      $searchToggle.classList.remove('active')
+      $searchToggle.innerHTML = SVG_SEARCH_ICO
+      $searchToggle.title = 'Search all passwords'
+      $searchInput.value = ''
+      // Restore original URL-matched rows without rebuilding from scratch.
+      $content.innerHTML = ''
+      lastRecords.forEach(function(rec) {
+        $content.appendChild(buildRecordRow(rec, function(r) { selectRecord(r, 'pick') }))
+      })
+    }
+  }
+
+  // ── Picker rendering ───────────────────────────────────────────────────────
+
+  function buildRecordRow(rec, onFill) {
+    var row = document.createElement('div')
+    row.className = 'rec-row'
+
+    var marker = document.createElement('div')
+    marker.className = 'rec-marker'
+    if (rec.isCurrent) {
+      var mlogo = document.createElement('img')
+      mlogo.src = 'icon.svg'
+      mlogo.style.cssText = 'width:14px;height:14px;border-radius:3px;opacity:0.65'
+      mlogo.title = 'Currently open in Portpass'
+      marker.appendChild(mlogo)
+    }
+
+    var nameEl = document.createElement('div')
+    nameEl.className = 'rec-name'
+    nameEl.textContent = rec.title
+    nameEl.title = rec.title
+
+    var storedCanonical = rec.existingUrl ? canonicalURL(rec.existingUrl) : ''
+
+    // Exact match: amber badge, no pencil
+    if (rec.matchType === 'exact') {
+      var badge = document.createElement('div')
+      badge.className = 'rec-match-badge'
+      badge.innerHTML = SVG_CHECK_SM + ' match'
+      row.onclick = function() { onFill(rec) }
+      row.appendChild(marker); row.appendChild(nameEl); row.appendChild(badge)
+      return row
+    }
+
+    // Non-exact: muted URL + optional pencil
+    var urlEl = document.createElement('div')
+    urlEl.className = 'rec-url'
+    urlEl.textContent = storedCanonical
+    urlEl.title = storedCanonical
+
+    var pencilEl = null
+    if (!rec.readonly) {
+      var urlSaved = false
+      pencilEl = document.createElement('button')
+      pencilEl.className = 'rec-pencil'
+      pencilEl.title = 'Save ' + currentUrl + ' to this password'
+      pencilEl.innerHTML = SVG_PENCIL
+      pencilEl.onclick = function(e) {
+        e.stopPropagation()
+        if (!urlSaved) {
+          urlSaved = true
+          pencilEl.className = 'rec-pencil pencil-saved'
+          pencilEl.title = 'Undo URL change'
+          pencilEl.innerHTML = SVG_UNDO
+          urlEl.className = 'rec-url url-saved'
+          urlEl.textContent = currentUrl + ' ✓'
+          urlEl.title = currentUrl
+          doSaveUrl(rec.uuid, rec.vaultUuid || null)
+        } else {
+          urlSaved = false
+          pencilEl.className = 'rec-pencil'
+          pencilEl.title = 'Save ' + currentUrl + ' to this password'
+          pencilEl.innerHTML = SVG_PENCIL
+          urlEl.className = 'rec-url'
+          urlEl.textContent = storedCanonical
+          urlEl.title = storedCanonical
+        }
+      }
+    }
+
+    row.onclick = function(e) {
+      if (pencilEl && (e.target === pencilEl || pencilEl.contains(e.target))) return
+      onFill(rec)
+    }
+    row.appendChild(marker); row.appendChild(nameEl); row.appendChild(urlEl)
+    if (pencilEl) row.appendChild(pencilEl)
+    return row
+  }
+
+  function showPickerContent(records) {
+    searchOpen = false
+    $searchBar.style.display = 'none'
+    $searchInput.value = ''
+    $searchToggle.classList.remove('active')
+    $searchToggle.innerHTML = SVG_SEARCH_ICO
+    $searchToggle.title = 'Search all passwords'
+    $searchToggle.style.display = ''
+    $subheader.style.display = ''
+    $content.innerHTML = ''
+    records.forEach(function(rec) {
+      $content.appendChild(buildRecordRow(rec, function(r) {
+        selectRecord(r, 'pick')
+      }))
+    })
+  }
+
+  function showPicker(records) {
+    if (!records || !records.length) { showSearchFallback(true); return }
+    if (records.length === 1 && records[0].matchType === 'exact') {
+      selectRecord(records[0], null); return
+    }
+    lastRecords = records
+    showPickerContent(records)
+  }
+
+  // ── Search fallback ────────────────────────────────────────────────────────
+
+  function showSearchFallback(canSearch) {
+    hideSearchUI()
+    $subheader.style.display = 'none'
+    $content.innerHTML = ''
+
+    var notice = document.createElement('div')
+    notice.className = 'pp-notice'
+    notice.innerHTML = SVG_WARN + ' No passwords match '
+    var em = document.createElement('strong')
+    em.textContent = currentUrl
+    em.style.color = 'var(--text)'
+    notice.appendChild(em)
+    $content.appendChild(notice)
+
+    if (!canSearch) {
+      var hint = document.createElement('div')
+      hint.className = 'pp-placeholder'
+      hint.textContent = 'Open the matching password in Portpass to autofill'
+      $content.appendChild(hint)
+      return
+    }
+
+    var searchWrap = document.createElement('div')
+    searchWrap.className = 'pp-search-wrap'
+    var searchInput = document.createElement('input')
+    searchInput.className = 'pp-search'
+    searchInput.type = 'text'
+    searchInput.placeholder = 'Search all passwords…'
+    searchWrap.appendChild(searchInput)
+    $content.appendChild(searchWrap)
+
+    var hdr = document.createElement('div')
+    hdr.className = 'pp-section-hdr'
+    hdr.textContent = 'RESULTS'
+    hdr.style.display = 'none'
+    $content.appendChild(hdr)
+
+    var placeholder = document.createElement('div')
+    placeholder.className = 'pp-placeholder'
+    placeholder.textContent = 'Type to search all passwords'
+    $content.appendChild(placeholder)
+
+    var debounce = null
+    searchInput.oninput = function() {
+      clearTimeout(debounce)
+      var q = searchInput.value.trim()
+      if (!q) {
+        hdr.style.display = 'none'; placeholder.style.display = ''
+        placeholder.textContent = 'Type to search all passwords'
+        var rows = $content.querySelectorAll('.rec-row')
+        for (var i = 0; i < rows.length; i++) rows[i].parentNode.removeChild(rows[i])
+        return
+      }
+      debounce = setTimeout(function() { doSearch(q) }, 150)
+    }
+    setTimeout(function() { try { searchInput.focus() } catch(_) {} }, 50)
+  }
+
+  function showSearchResults(records) {
+    var hdr = $content.querySelector('.pp-section-hdr')
+    var placeholder = $content.querySelector('.pp-placeholder')
+    var rows = $content.querySelectorAll('.rec-row')
+    for (var i = 0; i < rows.length; i++) rows[i].parentNode.removeChild(rows[i])
+    if (!records || !records.length) {
+      if (hdr) hdr.style.display = 'none'
+      if (placeholder) { placeholder.style.display = ''; placeholder.textContent = 'No matching passwords found' }
+      return
+    }
+    if (hdr) hdr.style.display = ''
+    if (placeholder) placeholder.style.display = 'none'
+    records.forEach(function(rec) {
+      $content.appendChild(buildRecordRow(rec, doSelectSearchResult))
+    })
+  }
+
+  // ── BroadcastChannel path ─────────────────────────────────────────────────
+
+  async function doHello() {
+    try {
+      keyPair = await crypto.subtle.generateKey(
+        { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey']
+      )
+      var pubJwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey)
+      var ecdhSpki = await crypto.subtle.exportKey('spki', keyPair.publicKey)
+      var ecdhSpkiB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(ecdhSpki)))
+      nonce = crypto.randomUUID()
+
+      var sigB64 = null, pubSpkiB64 = null
+      if (cprivKey) {
+        try {
+          var signingKey = await crypto.subtle.importKey(
+            'jwk', cprivKey, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']
+          )
+          var ecdsaPubKey = await crypto.subtle.importKey(
+            'jwk', { kty: cprivKey.kty, crv: cprivKey.crv, x: cprivKey.x, y: cprivKey.y },
+            { name: 'ECDSA', namedCurve: 'P-256' }, true, ['verify']
+          )
+          var ecdsaSpki = await crypto.subtle.exportKey('spki', ecdsaPubKey)
+          pubSpkiB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(ecdsaSpki)))
+          var sigBytes = await crypto.subtle.sign(
+            { name: 'ECDSA', hash: 'SHA-256' }, signingKey,
+            new TextEncoder().encode(JSON.stringify({ nonce: nonce, ecdhSpki: ecdhSpkiB64 }))
+          )
+          sigB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(sigBytes)))
+        } catch(_) {}
+      }
+
+      ch.onmessage = function(e) {
+        var msg = e.data
+        if (!msg || msg.nonce !== nonce) return
+        if (msg.type === 'hello-response') onHelloResponse(msg)
+        else if (msg.type === 'error') sendError(msg.message)
+      }
+      var helloMsg = { type: 'hello', pubkey: pubJwk, ecdhSpki: ecdhSpkiB64, nonce: nonce }
+      if (sigB64 && pubSpkiB64) { helloMsg.sig = sigB64; helloMsg.pub = pubSpkiB64 }
+      ch.postMessage(helloMsg)
+    } catch(_) { sendError('Key exchange failed') }
+  }
+
+  async function onHelloResponse(msg) {
+    try {
+      var ppPub = await crypto.subtle.importKey(
+        'jwk', msg.pubkey, { name: 'ECDH', namedCurve: 'P-256' }, false, []
+      )
+      sessionKey = await crypto.subtle.deriveKey(
+        { name: 'ECDH', public: ppPub }, keyPair.privateKey,
+        { name: 'AES-GCM', length: 256 }, false, ['decrypt']
+      )
+    } catch(_) { sendError('Key exchange failed'); return }
+
+    ch.onmessage = onBCMessage
+    $transport = {
+      search: function(q) {
+        return new Promise(function(resolve) {
+          _pendingSearch = resolve
+          ch.postMessage({ type: 'search', query: q, nonce: nonce })
+        })
+      },
+      fill: function(uuid, vu) {
+        return new Promise(function(resolve) {
+          _pendingFill = resolve
+          ch.postMessage({ type: 'query', uuid: uuid, vaultUuid: vu || null, nonce: nonce })
+        })
+      },
+      viewRecord: function(uuid, vu) {
+        ch.postMessage({ type: 'view-record', uuid: uuid, vaultUuid: vu || null, nonce: nonce })
+      },
+      saveUrl: function(uuid, vu) {
+        ch.postMessage({ type: 'save-url', uuid: uuid, vaultUuid: vu || null, url: saveUrl, nonce: nonce })
+      },
+      notifyFilled: function() {
+        ch.postMessage({ type: 'fill-done' })
+      }
+    }
+    setStatus('Searching for matches…')
+    ch.postMessage({ type: 'query', url: currentUrl, nonce: nonce })
+  }
+
+  function onBCMessage(e) {
+    var msg = e.data
+    if (!msg || msg.nonce !== nonce) return
+    if (msg.type === 'records') {
+      applyTheme(msg.theme === 'dark', msg.accent || 'amber')
+      showPicker(msg.records)
+      return
+    }
+    if (msg.type === 'record') {
+      if (_pendingFill) {
+        var res = _pendingFill; _pendingFill = null
+        ;(async function() {
+          try {
+            var iv = Uint8Array.from(atob(msg.iv), function(c) { return c.charCodeAt(0) })
+            var ct = Uint8Array.from(atob(msg.ciphertext), function(c) { return c.charCodeAt(0) })
+            var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, sessionKey, ct)
+            res({ autotype: msg.autotype, fields: JSON.parse(new TextDecoder().decode(pt)), sensitiveCodes: msg.sensitiveCodes || [] })
+          } catch(_) { res(null) }
+        })()
+      } else {
+        deliverFill(msg)
+      }
+      return
+    }
+    if (msg.type === 'url-saved') return
+    if (msg.type === 'search-results') {
+      if (_pendingSearch) { var res = _pendingSearch; _pendingSearch = null; res(msg.records) }
+      else if (searchOpen) showPickerSearchResults(msg.records)
+      else showSearchResults(msg.records)
+      return
+    }
+    if (msg.type === 'error') sendError(msg.message)
+  }
+
+  async function deliverFill(msg) {
+    try {
+      var iv = Uint8Array.from(atob(msg.iv), function(c) { return c.charCodeAt(0) })
+      var ct = Uint8Array.from(atob(msg.ciphertext), function(c) { return c.charCodeAt(0) })
+      var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, sessionKey, ct)
+      var fields = JSON.parse(new TextDecoder().decode(pt))
+      pendingCredentials = { autotype: msg.autotype, fields: fields, sensitiveCodes: msg.sensitiveCodes || [] }
+      updateWaitingWithAutotype(msg.autotype)
+      pendingFill()
+    } catch(_) { sendError('Failed to decrypt credentials') }
+  }
+
+  // ── Error handling ─────────────────────────────────────────────────────────
+
+  function sendError(message) {
+    var phase = detectErrorPhase(message)
+    showErrorPhase(phase, message)
+    // Also forward to bookmarklet so it can clean up, but no overlay.
+    if (window.opener && bookmarkletOrigin) {
+      try { window.opener.postMessage({ type: 'cancel' }, bookmarkletOrigin) } catch(_) {}
+    }
+  }
+
+  // ── Shared helpers ─────────────────────────────────────────────────────────
+
+  var PORTPASS_URL = (function() {
+    var p = window.location.href
+    return p.slice(0, p.lastIndexOf('/') + 1)
+  }())
+
+  function sequenceHasSensitiveCode(seq, sensitiveCodes) {
+    if (!sensitiveCodes || !sensitiveCodes.length) return false
+    var i = 0
+    while (i < seq.length) {
+      if (seq[i] !== '\\') { i++; continue }
+      var code = seq[i + 1]
+      if (!code) break
+      if (code === '\\') { i += 2; continue }
+      if (code === 'f') {
+        var d = seq[i + 2]
+        var fieldCode = (d && /^[1-9]$/.test(d)) ? 'f' + d : 'f1'
+        if (sensitiveCodes.indexOf(fieldCode) >= 0) return true
+        i += (d && /^[0-9]$/.test(d)) ? 3 : 2
+      } else if (code === 'w' || code === 'W') {
+        var j = i + 2, count = 0
+        while (j < seq.length && count < 3 && /^[0-9]$/.test(seq[j])) { j++; count++ }
+        i = count ? j : i + 2
+      } else {
+        if (sensitiveCodes.indexOf(code) >= 0) return true
+        i += 2
+      }
+    }
+    return false
+  }
+
+  function parseAutotypeTokens(seq) {
+    if (!seq) return []
+    var toks = [], lit = '', i = 0
+    function fl() { if (lit) { toks.push({ type: 'literal', label: lit }); lit = '' } }
+    while (i < seq.length) {
+      if (seq[i] !== '\\') { lit += seq[i++]; continue }
+      if (i + 1 >= seq.length) { fl(); toks.push({ type: 'error', label: 'trailing \\' }); break }
+      var c = seq[i + 1]
+      if (c === '\\') { lit += '\\'; i += 2; continue }
+      fl()
+      if      (c === 'u') { toks.push({ type: 'field', label: 'Username' }); i += 2 }
+      else if (c === 'p') { toks.push({ type: 'field', label: 'Password' }); i += 2 }
+      else if (c === 'm') { toks.push({ type: 'field', label: 'Email' }); i += 2 }
+      else if (c === '2') { toks.push({ type: 'field', label: 'One-time code' }); i += 2 }
+      else if (c === 't') { toks.push({ type: 'nav', label: 'Tab', suffix: '→' }); i += 2 }
+      else if (c === 's') { toks.push({ type: 'nav', label: 'Shift-Tab', suffix: '←' }); i += 2 }
+      else if (c === 'n') { toks.push({ type: 'nav', label: 'Enter', suffix: '↵' }); i += 2 }
+      else if (c === 'f') {
+        var d = seq[i + 2]
+        if (d !== undefined && /^[0-9]$/.test(d)) {
+          var n = parseInt(d)
+          if (n === 0) { toks.push({ type: 'error', label: '\\f0 invalid' }); i += 3 }
+          else { toks.push({ type: 'field', label: 'Custom ' + n }); i += 3 }
+        } else { toks.push({ type: 'field', label: 'Custom 1' }); i += 2 }
+      } else if (c === 'w' || c === 'W') {
+        var j = i + 2, cnt = 0
+        while (j < seq.length && cnt < 3 && /^[0-9]$/.test(seq[j])) { j++; cnt++ }
+        if (cnt === 0) { toks.push({ type: 'error', label: '\\' + c + ' no digits' }); i += 2 }
+        else { toks.push({ type: 'wait', label: 'Wait ' + seq.slice(i + 2, j) + (c === 'w' ? 'ms' : 's') }); i = j }
+      } else { toks.push({ type: 'unknown', label: 'Unknown \\' + c }); i += 2 }
+    }
+    fl()
+    return toks
+  }
+
+  function waitingSubText(seq) {
+    var toks = parseAutotypeTokens(seq)
+    if (!toks.length) return 'Click the field where the autofill will begin'
+    var first = toks[0]
+    if (first.type === 'field') {
+      var names = { 'Username': 'the username', 'Password': 'the password',
+                    'Email': 'the email address', 'One-time code': 'the one-time code' }
+      var name = names[first.label] || first.label.toLowerCase()
+      return 'Click the field to fill in ' + name
+    }
+    return 'Click the field where the autofill will begin'
+  }
+
+  function buildSequenceChips(seq) {
+    var toks = parseAutotypeTokens(seq)
+    if (!toks.length) return null
+    var wrap = document.createElement('div')
+    wrap.className = 'pp-chips-row'
+    toks.forEach(function(tok, idx) {
+      var chip = document.createElement('span')
+      chip.className = 'pp-chip pp-chip-' + tok.type
+      if (tok.type === 'error')   chip.textContent = '✕ ' + tok.label
+      else if (tok.type === 'unknown') chip.textContent = '⚠ ' + tok.label
+      else if (tok.suffix) {
+        chip.appendChild(document.createTextNode(tok.label + ' '))
+        var sfx = document.createElement('span')
+        sfx.className = 'pp-chip-suffix'
+        sfx.textContent = tok.suffix
+        chip.appendChild(sfx)
+      } else {
+        chip.textContent = tok.label
+      }
+      wrap.appendChild(chip)
+      if (idx < toks.length - 1) {
+        var sep = document.createElement('span')
+        sep.className = 'pp-chip-sep'
+        sep.textContent = '→'
+        wrap.appendChild(sep)
+      }
+    })
+    return wrap
+  }
+
+  function updateWaitingWithAutotype(autotype) {
+    var sub = $content.querySelector('.pp-waiting-sub')
+    if (!sub) return
+    sub.textContent = waitingSubText(autotype)
+    var center = $content.querySelector('.pp-phase-center')
+    if (center && !center.querySelector('.pp-chips-row')) {
+      var chips = buildSequenceChips(autotype)
+      if (chips) center.appendChild(chips)
+    }
+  }
+
+  function canonicalURL(href) {
+    var s = href || ''
+    var pfxs = ['https://', 'http://']
+    for (var i = 0; i < pfxs.length; i++) {
+      if (s.toLowerCase().indexOf(pfxs[i]) === 0) { s = s.slice(pfxs[i].length); break }
+    }
+    var h = s.indexOf('#'); if (h >= 0) s = s.slice(0, h)
+    var q = s.indexOf('?'); if (q >= 0) s = s.slice(0, q)
+    s = s.toLowerCase()
+    var sl = s.indexOf('/')
+    if (sl >= 0) s = s.slice(0, sl).replace(/^www\./, '') + s.slice(sl)
+    else s = s.replace(/^www\./, '')
+    return s.replace(/\/+$/, '')
+  }
+
+})()
+</script>
+</body>
+</html>

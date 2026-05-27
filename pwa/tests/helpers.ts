@@ -34,7 +34,7 @@ export async function openVault(
 
     ;(window as any).showOpenFilePicker = async () => [{
       name: 'three.dat',
-      getFile:           async () => new File([bytes], 'three.dat'),
+      getFile:           async () => new File([bytes], 'three.dat', { lastModified: 1000000 }),
       queryPermission:   async () => 'granted',
       requestPermission: async () => 'granted',
       createWritable:    async () => ({ write: async () => {}, close: async () => {}, abort: async () => {} }),

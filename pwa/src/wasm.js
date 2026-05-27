@@ -106,8 +106,9 @@ export function deleteRecord(vaultUuid, recordUuid) {
     if (err) throw new Error(err)
 }
 
-export function searchRecords(vaultUuid, query, namesOnly) {
-    return parseOrThrow(window.searchRecords(vaultUuid, query, namesOnly))
+// mode: 0 = all fields, 1 = names/group only, 2 = URL exact match
+export function searchRecords(vaultUuid, query, mode) {
+    return parseOrThrow(window.searchRecords(vaultUuid, query, mode))
 }
 
 export function getAutocompleteSuggestion(vaultUuid, field, prefix) {

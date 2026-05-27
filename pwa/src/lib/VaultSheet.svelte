@@ -2,11 +2,13 @@
   import { onMount } from 'svelte'
   import { get } from 'svelte/store'
   import { getDatabaseInfo, openDatabase, updateDBFields } from '../wasm.js'
-  import { selectedFile, dbItems, secondaryVaults } from '../store.js'
+  import { selectedFile, dbItems, secondaryVaults, switchboardUrl, switchboardConnected, crossProfileEnabled, delegatesVersion } from '../store.js'
   import { isBiometricSupported, isBiometricEnrolled, enrollBiometric, clearBiometric } from './biometric.js'
+  import { makeDelegateBookmarkletUrl } from './bookmarklet.js'
+  import { getDelegates, addDelegate, revokeDelegate, setSwitchboardUrl, setCrossProfileEnabled } from './delegates.js'
   import Icon from './Icon.svelte'
 
-  let { isDesktop, onback, onlock, onlockall, onlocksecondary, onunlockadditional, ondbsave, ondirtychange, theme, accent, ontheme, onaccent } = $props()
+  let { isDesktop, bookmarkletsSupported = false, onback, onlock, onlockall, onlocksecondary, onunlockadditional, ondbsave, ondirtychange, theme, accent, ontheme, onaccent } = $props()
 
   // ── Biometric ──────────────────────────────────────────────────────────────
   let biometricAvailable = $state(false)
@@ -20,6 +22,17 @@
   onMount(async () => {
     biometricAvailable = await isBiometricSupported()
     biometricEnrolled  = await isBiometricEnrolled(info?.uuid)
+  })
+
+  $effect(() => {
+    void $delegatesVersion
+    getDelegates(_vaultUuid).then(d => {
+      delegates = d
+      if (d.length === 0 && get(crossProfileEnabled)) {
+        setCrossProfileEnabled(_vaultUuid, false)
+        crossProfileEnabled.set(false)
+      }
+    })
   })
 
   async function disableBiometric() {
@@ -147,6 +160,157 @@
     selectedDetailVault = null
   }
 
+  // ── Autofill delegates ─────────────────────────────────────────────────────
+  let delegates = $state([])
+  let newDelegateOpen = $state(false)
+  let newDelegateName = $state('')
+  let newDelegatePrivKeyJwk = $state(null)
+  let newDelegatePubKeySpki = $state(null)
+  let newDelegateId   = $state(null)
+  let newDelegateUrl  = $state('')
+  let newDelegateError = $state('')
+  let newDelegateBusy  = $state(false)
+  let newDelegateBirthAt = $state(null)
+  let chipCopied  = $state(false)
+  let chipCopyTimer = null
+  let chipDragged = $state(false)
+  let chipLinked  = $state(false)  // persistent: set on copy, not reset by the feedback timer
+  let globeTipOpen = $state(false)
+
+  let chipUsed   = $derived(chipDragged || chipLinked)
+  let canUseChip = $derived(!!newDelegateName.trim() && !!newDelegatePrivKeyJwk)
+  let canCommit  = $derived((!!newDelegateName.trim() || chipUsed) && !!newDelegatePrivKeyJwk && !newDelegateBusy)
+
+  function defaultDelegateName() {
+    return 'Bookmarklet created ' + new Date(newDelegateBirthAt ?? Date.now()).toLocaleString(
+      undefined, { month: 'short', day: 'numeric', year: 'numeric',
+                   hour: '2-digit', minute: '2-digit', second: '2-digit' }
+    )
+  }
+
+  async function openNewDelegate() {
+    newDelegateOpen = true
+    newDelegateName = ''
+    newDelegatePrivKeyJwk = null
+    newDelegatePubKeySpki = null
+    newDelegateId   = null
+    newDelegateUrl  = ''
+    newDelegateError = ''
+    newDelegateBusy = false
+    newDelegateBirthAt = Date.now()
+    chipCopied = false
+    chipDragged = false
+    chipLinked  = false
+    globeTipOpen = false
+    try {
+      const keyPair = await crypto.subtle.generateKey(
+        { name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']
+      )
+      newDelegatePrivKeyJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey)
+      newDelegatePubKeySpki = await crypto.subtle.exportKey('spki', keyPair.publicKey)
+      newDelegateId  = crypto.randomUUID()
+      newDelegateUrl = makeDelegateBookmarkletUrl(
+        window.location.origin + import.meta.env.BASE_URL,
+        newDelegatePrivKeyJwk, newDelegateId,
+        get(switchboardUrl)
+      )
+    } catch (e) {
+      newDelegateError = 'Failed to generate key pair'
+    }
+  }
+
+  function closeNewDelegate() {
+    newDelegateOpen = false
+    newDelegateName = ''
+    newDelegatePrivKeyJwk = null
+    newDelegatePubKeySpki = null
+    newDelegateId   = null
+    newDelegateUrl  = ''
+    newDelegateError = ''
+    chipCopied = false
+    chipDragged = false
+    chipLinked  = false
+    globeTipOpen = false
+    clearTimeout(chipCopyTimer)
+  }
+
+  async function commitDelegate() {
+    if (!_vaultUuid || !newDelegatePubKeySpki || !newDelegateId) return
+    const name = newDelegateName.trim() || defaultDelegateName()
+    newDelegateBusy  = true
+    newDelegateError = ''
+    try {
+      const delegate = await addDelegate(_vaultUuid, name, newDelegatePubKeySpki, newDelegateId)
+      delegates = [delegate, ...delegates]
+      closeNewDelegate()
+    } catch (e) {
+      newDelegateError = e.message || 'Failed to save bookmarklet'
+      newDelegateBusy = false
+    }
+  }
+
+  async function cancelOrSave() {
+    if (chipUsed) await commitDelegate()
+    else closeNewDelegate()
+  }
+
+  async function revokeOne(delegateId) {
+    await revokeDelegate(_vaultUuid, delegateId)
+    delegates = delegates.filter(d => d.id !== delegateId)
+  }
+
+  // ── Advanced / switchboard ────────────────────────────────────────────────
+  let advancedOpen        = $state(false)
+  let editSwitchboardUrl  = $state('')
+  let switchboardUrlDirty = $state(false)
+
+  let totalRelayCount = $derived(delegates.reduce((n, d) => n + (d.relayCount ?? 0), 0))
+  let lastRelayUsed   = $derived(
+    delegates.reduce((t, d) => d.relayLastUsed ? Math.max(t, d.relayLastUsed) : t, 0) || null
+  )
+
+  function toggleAdvanced() {
+    advancedOpen = !advancedOpen
+    if (advancedOpen) {
+      editSwitchboardUrl  = get(switchboardUrl)
+      switchboardUrlDirty = false
+    }
+  }
+
+  async function saveRelayUrl() {
+    await setSwitchboardUrl(_vaultUuid, editSwitchboardUrl)
+    switchboardUrl.set(editSwitchboardUrl)
+    switchboardUrlDirty = false
+  }
+
+  function cancelRelayUrlEdit() {
+    editSwitchboardUrl  = get(switchboardUrl)
+    switchboardUrlDirty = false
+  }
+
+  function copyChip() {
+    navigator.clipboard.writeText(newDelegateUrl).then(() => {
+      chipCopied = true
+      chipLinked  = true
+      clearTimeout(chipCopyTimer)
+      chipCopyTimer = setTimeout(() => { chipCopied = false }, 2200)
+    })
+  }
+
+  function fmtDate(ts) {
+    if (!ts) return '—'
+    return new Date(ts).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+  }
+
+  function fmtRelative(ts) {
+    if (!ts) return 'never'
+    const days = Math.floor((Date.now() - ts) / 86400000)
+    if (days === 0) return 'today'
+    if (days === 1) return 'yesterday'
+    if (days < 7) return `${days} days ago`
+    return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  }
+
   // ── Helpers ────────────────────────────────────────────────────────────────
   const appVersion = (__APP_VERSION__.match(/^v?\d+\.\d+\.\d+/) ?? [__APP_VERSION__])[0]
 
@@ -211,17 +375,17 @@
         </div>
         <div class="vault-stat-divider"></div>
       {/if}
-      {#if groupCount > 0}
-        <div class="vault-stat">
-          <span class="vault-stat-num">{groupCount}</span>
-          <span class="vault-stat-label muted">groups</span>
-        </div>
-        <div class="vault-stat-divider"></div>
-      {/if}
       <div class="vault-stat">
         <span class="vault-stat-num">{passwordCount}</span>
         <span class="vault-stat-label muted">passwords</span>
       </div>
+      {#if groupCount > 0}
+        <div class="vault-stat-divider"></div>
+        <div class="vault-stat">
+          <span class="vault-stat-num">{groupCount}</span>
+          <span class="vault-stat-label muted">groups</span>
+        </div>
+      {/if}
     </div>
   </div>
 
@@ -279,6 +443,75 @@
       </button>
     </div>
   </div>
+
+  <!-- Autofill delegates -->
+  {#if bookmarkletsSupported}
+  <div class="vault-section">
+    <div class="vault-section-title">AUTOFILL</div>
+    <p class="muted" style="font-size:14px;margin:0 0 14px;line-height:1.5">
+      Create a uniquely keyed bookmarklet for each browser profile where you want autofill.
+    </p>
+    {#if delegates.length > 0}
+      <div class="delegate-list">
+        {#each delegates as d}
+          {@const total   = (d.bcCount ?? 0) + (d.relayCount ?? 0)}
+          {@const lastTs  = Math.max(d.bcLastUsed ?? 0, d.relayLastUsed ?? 0) || null}
+          <div class="delegate-row">
+            <div class="delegate-info">
+              <span class="delegate-name">{d.name}</span>
+              <span class="delegate-meta muted">Created {fmtDate(d.created)} · {total} {total === 1 ? 'page filled' : 'pages filled'}{lastTs ? ' · Last filled ' + fmtRelative(lastTs) : ''}</span>
+            </div>
+            <button class="delegate-revoke" onclick={() => revokeOne(d.id)}>Revoke</button>
+          </div>
+        {/each}
+      </div>
+    {/if}
+    <button class="vault-unlock-more" onclick={openNewDelegate}>+ New bookmarklet</button>
+
+    <!-- Cross-profile autofill -->
+    <button class="delegate-advanced-toggle muted" onclick={toggleAdvanced}>
+      Cross-profile autofill {advancedOpen ? '▲' : '▼'}
+    </button>
+    {#if advancedOpen}
+      <div class="delegate-advanced-body">
+        <div class="vault-row" style="margin-bottom:4px">
+          <span class="vault-label muted" style="font-size:13px">Enable cross-profile autofill</span>
+          <div class="vault-segmented">
+            <button class:on={!$crossProfileEnabled} disabled={!delegates.length} onclick={async () => { await setCrossProfileEnabled(_vaultUuid, false); crossProfileEnabled.set(false) }}>Off</button>
+            <button class:on={$crossProfileEnabled}  disabled={!delegates.length} onclick={async () => { await setCrossProfileEnabled(_vaultUuid, true);  crossProfileEnabled.set(true)  }}>On</button>
+          </div>
+        </div>
+        {#if $crossProfileEnabled}
+          <label class="vault-label muted" style="font-size:12px;display:block;margin-bottom:4px">
+            WebSocket Relay URL
+            <input
+              class="input"
+              style="font-size:13px;display:block;width:100%;margin-top:4px"
+              bind:value={editSwitchboardUrl}
+              oninput={() => { switchboardUrlDirty = editSwitchboardUrl !== get(switchboardUrl) }}
+              placeholder="ws://localhost:7577"
+            />
+          </label>
+          {#if switchboardUrlDirty}
+            <div class="switchboard-url-actions">
+              <button class="btn btn-ghost" style="font-size:13px" onclick={cancelRelayUrlEdit}>Cancel</button>
+              <button class="btn btn-primary" style="font-size:13px" onclick={saveRelayUrl}>Save</button>
+            </div>
+          {/if}
+          <div class="switchboard-status-row">
+            <span class="switchboard-status-dot" class:switchboard-ok={$switchboardConnected} class:switchboard-error={!$switchboardConnected}></span>
+            <span class="muted" style="font-size:13px">
+              {$switchboardConnected ? 'Cross-profile autofill ready' : 'websocket relay not connected'}
+            </span>
+          </div>
+          <div class="muted" style="font-size:12px">
+            Count of cross-profile autofill uses: {totalRelayCount}{#if lastRelayUsed} · Last {fmtRelative(lastRelayUsed)}{/if}
+          </div>
+        {/if}
+      </div>
+    {/if}
+  </div>
+  {/if}
 
   <!-- Appearance -->
   <div class="vault-section">
@@ -458,6 +691,79 @@
   </div>
 
 </div>
+{/if}
+
+<!-- ── New delegate modal ─────────────────────────────────────────────────── -->
+{#if newDelegateOpen}
+  <div class="modal-overlay" role="presentation"
+    onclick={e => { e.stopPropagation(); if (!newDelegateBusy) cancelOrSave() }}
+    onkeydown={e => { if (e.key === 'Escape' && !newDelegateBusy) cancelOrSave() }}>
+    <div class="modal modal-install" role="dialog" aria-modal="true" tabindex="-1" onclick={e => e.stopPropagation()} onkeydown={e => e.stopPropagation()}>
+      <div class="vs-modal-header">
+        <div class="modal-title">New autofill bookmarklet</div>
+        <button class="vs-modal-x" onclick={() => { if (!newDelegateBusy) cancelOrSave() }} aria-label="Cancel">
+          <Icon name="x" size={18}/>
+        </button>
+      </div>
+      <label class="vault-field" style="margin-bottom:4px">
+        <span class="vault-label muted">Name</span>
+        <input
+          class="input"
+          bind:value={newDelegateName}
+          placeholder="e.g. Chrome — work profile"
+          onkeydown={e => { if (e.key === 'Enter' && canCommit) commitDelegate() }}
+          use:focusOnMount
+        />
+      </label>
+      {#if newDelegateError}<div class="unlock-error" style="font-size:13px">{newDelegateError}</div>{/if}
+      <div class="vs-install-grid">
+        <div class="vs-install-col vs-install-col-drag">
+          <span class="vs-install-col-label">BOOKMARKS BAR VISIBLE</span>
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <a
+            class="vs-bookmarklet-chip"
+            class:chip-inactive={!canUseChip}
+            href={newDelegateUrl || '#'}
+            draggable={canUseChip ? 'true' : 'false'}
+            onclick={e => e.preventDefault()}
+            ondragstart={() => { chipDragged = true }}
+            title={canUseChip ? 'Drag to your bookmarks bar' : 'Enter a name first'}
+            aria-label="Portpass autofill bookmarklet — drag to your bookmarks bar"
+          >
+            <img src="{import.meta.env.BASE_URL}icon.svg" width="16" height="16" alt="" aria-hidden="true" draggable="false">
+            {newDelegateName || 'Enter a name above'}
+          </a>
+          <span class="vs-install-col-hint">Drag to your bookmarks bar</span>
+        </div>
+        <div class="vs-install-col vs-install-col-copy">
+          <span class="vs-install-col-label">BAR HIDDEN</span>
+          <button class="vs-copy-link-btn" class:copied={chipCopied} disabled={!canUseChip} onclick={copyChip}>
+            <Icon name={chipCopied ? 'check' : 'copy'} size={15}/>
+            {chipCopied ? 'Copied!' : 'Copy link'}
+          </button>
+          <span class="vs-install-col-hint">Add a bookmark manually and paste the link</span>
+        </div>
+      </div>
+      <button class="vs-globe-tip-toggle" onclick={() => globeTipOpen = !globeTipOpen}>
+        <span class="vs-globe-tip-arrow" class:open={globeTipOpen}>▶</span>
+        Bookmark showing a generic icon instead of the Portpass logo?
+      </button>
+      {#if globeTipOpen}
+        <div class="vs-globe-tip-body">
+          Bookmark this page normally first (⌘D / Ctrl+D), then right-click the bookmark → <strong>Edit bookmark</strong> → paste this link as the URL.
+        </div>
+      {/if}
+      <div class="vs-install-warning">
+        <Icon name="alert-triangle" size={28}/>
+        <span>The bookmarklet contains a unique private key that will not be shown again. Drag it to your bookmarks bar or copy the link before closing.</span>
+      </div>
+      <div style="margin-top:8px">
+        <button class="vs-close-btn" disabled={!canCommit} onclick={commitDelegate}>
+          {newDelegateBusy ? 'Saving…' : 'Save and Close'}
+        </button>
+      </div>
+    </div>
+  </div>
 {/if}
 
 <!-- ── Biometric setup modal ───────────────────────────────────────────────── -->
@@ -767,6 +1073,8 @@
     width: fit-content;
   }
 
+  .vault-segmented button:disabled { opacity: 0.4; cursor: not-allowed; }
+
   .vault-segmented button {
     padding: 8px 32px;
     border: none;
@@ -876,4 +1184,265 @@
   }
 
   .about-url:hover { color: var(--accent); }
+
+  /* ── Autofill delegates ──────────────────────────────────────────────────── */
+  .delegate-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+
+  .delegate-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-card);
+  }
+
+  .delegate-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .delegate-name {
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .delegate-meta {
+    font-size: 12px;
+  }
+
+  .delegate-revoke {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--danger);
+    padding: 4px 2px;
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+  .delegate-revoke:hover { text-decoration: underline; }
+
+  .delegate-advanced-toggle {
+    display: block;
+    margin-top: 14px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 0;
+  }
+
+  .delegate-advanced-body {
+    margin-top: 12px;
+    padding: 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-card);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .switchboard-url-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+
+  .switchboard-status-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 20px;
+  }
+
+  .switchboard-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--border);
+    flex-shrink: 0;
+  }
+  .switchboard-status-dot.switchboard-ok    { background: #4caf50; }
+  .switchboard-status-dot.switchboard-error { background: var(--text-soft); }
+
+  /* ── Bookmarklet install modal ───────────────────────────────────────────── */
+  :global(.modal.modal-install) { max-width: 425px; }
+
+  .vs-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .vs-modal-x {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    border-radius: 6px;
+    padding: 0;
+    flex-shrink: 0;
+    font-family: inherit;
+  }
+  .vs-modal-x:hover { color: var(--text); background: var(--surface-2); }
+
+  .vs-bookmarklet-chip.chip-inactive {
+    opacity: 0.4;
+    cursor: default;
+    pointer-events: none;
+  }
+
+  .vs-copy-link-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .vs-close-btn:disabled     { opacity: 0.45; cursor: not-allowed; }
+  .vs-install-warning {
+    display: flex;
+    gap: 9px;
+    align-items: flex-start;
+    background: var(--orange-bg-strong);
+    border: 1px solid var(--orange);
+    border-radius: 8px;
+    padding: 9px 12px;
+    font-size: 13px;
+    color: var(--orange);
+    margin-bottom: 14px;
+    line-height: 1.4;
+  }
+  .vs-install-warning :global(svg) { flex-shrink: 0; margin-top: 1px; }
+
+  .vs-install-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .vs-install-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    border-radius: 11px;
+    background: var(--surface);
+    padding: 16px 12px;
+  }
+  .vs-install-col-drag { border: 1.5px dashed var(--border-strong); }
+  .vs-install-col-copy { border: 1.5px solid var(--border-strong); }
+
+  .vs-install-col-label {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    color: var(--text-soft);
+    text-transform: uppercase;
+  }
+
+  .vs-install-col-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-align: center;
+    line-height: 1.4;
+  }
+
+  .vs-bookmarklet-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    background: var(--surface-2);
+    border: 1.5px dashed var(--border-strong);
+    border-radius: var(--r-pill);
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text);
+    text-decoration: none;
+    cursor: grab;
+    user-select: none;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .vs-bookmarklet-chip:hover {
+    border-color: var(--accent);
+    background: var(--surface);
+    color: var(--accent);
+  }
+  .vs-bookmarklet-chip:active { cursor: grabbing; }
+
+  .vs-copy-link-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 18px;
+    border: 1.5px solid var(--amber);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--amber);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: border-color 0.2s, color 0.2s;
+  }
+  .vs-copy-link-btn:hover { opacity: 0.85; }
+  .vs-copy-link-btn.copied { border-color: var(--success); color: var(--success); }
+
+  .vs-globe-tip-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-soft);
+    padding: 4px 0;
+    font-family: inherit;
+    text-align: left;
+    width: 100%;
+    margin-bottom: 2px;
+  }
+  .vs-globe-tip-arrow {
+    display: inline-block;
+    font-size: 10px;
+    transition: transform 0.15s;
+  }
+  .vs-globe-tip-arrow.open { transform: rotate(90deg); }
+
+  .vs-globe-tip-body {
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 4px 0 12px 16px;
+    line-height: 1.5;
+  }
+
+  .vs-close-btn {
+    width: 100%;
+    padding: 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .vs-close-btn:hover { background: var(--surface); }
 </style>

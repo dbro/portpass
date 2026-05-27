@@ -90,3 +90,57 @@ test.describe('Record write operations', () => {
   })
 
 })
+
+test.describe('Notes reveal in edit view', () => {
+
+  test('notes are masked when opening edit view for a record with notes', async ({ page }) => {
+    await openVault(page)
+    await page.locator('.record-row', { hasText: 'three entry 1' }).click()
+    await page.getByRole('button', { name: 'Edit' }).click()
+
+    await expect(page.locator('.notes-masked')).toBeVisible()
+    const text = await page.locator('.notes-masked').textContent()
+    expect(text).toMatch(/^•+$/)
+  })
+
+  test('reveal button loads and shows actual notes content', async ({ page }) => {
+    await openVault(page)
+    await page.locator('.record-row', { hasText: 'three entry 1' }).click()
+    await page.getByRole('button', { name: 'Edit' }).click()
+
+    await page.getByLabel('Reveal notes').click()
+
+    const textarea = page.locator('textarea')
+    await expect(textarea).toBeVisible()
+    const value = await textarea.inputValue()
+    expect(value.length).toBeGreaterThan(0)
+    expect(value).not.toMatch(/^•+$/)
+  })
+
+  test('hide button returns notes to masked state', async ({ page }) => {
+    await openVault(page)
+    await page.locator('.record-row', { hasText: 'three entry 1' }).click()
+    await page.getByRole('button', { name: 'Edit' }).click()
+
+    await page.getByLabel('Reveal notes').click()
+    await expect(page.locator('textarea')).toBeVisible()
+
+    await page.getByLabel('Hide notes').click()
+    await expect(page.locator('.notes-masked')).toBeVisible()
+    await expect(page.locator('textarea')).not.toBeVisible()
+  })
+
+  test('new record with no notes shows textarea directly with no eye icon', async ({ page }) => {
+    await createVault(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    await page.getByPlaceholder('e.g. Bank of America').fill('No Notes Entry')
+    const pwInput = page.locator('input.mono').first()
+    await pwInput.fill('secret')
+
+    // Notes textarea should be present without any masking or eye icon
+    await expect(page.locator('textarea')).toBeVisible()
+    await expect(page.locator('.notes-masked')).not.toBeVisible()
+    await expect(page.getByLabel('Reveal notes')).not.toBeVisible()
+  })
+
+})

@@ -50,11 +50,18 @@ const (
 	recordEndOfEntry             = 0xff
 )
 
+// customFieldProp holds one raw property from a custom field entry (for unknown IDs).
+type customFieldProp struct {
+	id  byte
+	val string
+}
+
 // CustomField is one entry in a record's custom text fields (field 0x30).
 type CustomField struct {
-	Name      string `json:"Name"`
-	Value     string `json:"Value"`
-	Sensitive bool   `json:"Sensitive"`
+	Name         string            `json:"Name"`
+	Value        string            `json:"Value"`
+	Sensitive    bool              `json:"Sensitive"`
+	UnknownProps []customFieldProp `json:"-"` // forward compatibility: unknown property IDs
 }
 
 // Record The primary type for password DB entries
@@ -290,11 +297,7 @@ func (r *Record) marshal() ([]byte, []byte, error) {
 	}
 
 	if len(r.CustomFields) > 0 {
-		cfs := r.CustomFields
-		if len(cfs) > 9 {
-			cfs = cfs[:9]
-		}
-		appendField(recordCustomTextField, marshalCustomFields(cfs))
+		appendField(recordCustomTextField, marshalCustomFields(r.CustomFields))
 	}
 
 	if len(r.UnknownFields) > 0 {
@@ -349,13 +352,12 @@ func parseCustomFields(s string) []CustomField {
 			cur.Value = v
 		case 0x03:
 			cur.Sensitive = len(v) == 1 && v[0] == '1'
+		default:
+			cur.UnknownProps = append(cur.UnknownProps, customFieldProp{byte(pID), v})
 		}
 	}
 	if cur != nil && cur.Name != "" {
 		fields = append(fields, *cur)
-	}
-	if len(fields) > 9 {
-		fields = fields[:9]
 	}
 	return fields
 }
@@ -373,6 +375,9 @@ func marshalCustomFields(fields []CustomField) []byte {
 			sb.WriteString("0300011")
 		} else {
 			sb.WriteString("0300010")
+		}
+		for _, p := range cf.UnknownProps {
+			sb.WriteString(fmt.Sprintf("%02x%04x%s", p.id, len(p.val), p.val))
 		}
 	}
 	return []byte(sb.String())

@@ -91,27 +91,32 @@ export async function unlockWithBiometric(filename) {
   const stored = enrollments.find(e => e.filename === filename)
   if (!stored) throw new Error('No biometric enrollment found.')
 
-  const assertion = await navigator.credentials.get({
-    publicKey: {
-      challenge: crypto.getRandomValues(new Uint8Array(32)),
-      allowCredentials: [{ type: 'public-key', id: new Uint8Array(stored.credentialId) }],
-      userVerification: 'required',
-      extensions: { prf: { eval: { first: PRF_SALT } } },
-      timeout: 60000,
-    },
-  })
+  try {
+    const assertion = await navigator.credentials.get({
+      publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        allowCredentials: [{ type: 'public-key', id: new Uint8Array(stored.credentialId) }],
+        userVerification: 'required',
+        extensions: { prf: { eval: { first: PRF_SALT } } },
+        timeout: 60000,
+      },
+    });
 
-  const prfResult = assertion.getClientExtensionResults().prf?.results?.first
-  if (!prfResult) throw new Error('PRF extension not available — biometric unlock failed.')
+    const prfResult = assertion.getClientExtensionResults().prf?.results?.first
+    if (!prfResult) throw new Error('PRF extension not available — biometric unlock failed.')
 
-  const key = await deriveKey(prfResult)
-  const plaintext = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: new Uint8Array(stored.iv) },
-    key,
-    new Uint8Array(stored.ciphertext)
-  )
+    const key = await deriveKey(prfResult)
+    const plaintext = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: new Uint8Array(stored.iv) },
+      key,
+      new Uint8Array(stored.ciphertext)
+    )
 
-  return new TextDecoder().decode(plaintext)
+    return new TextDecoder().decode(plaintext)
+
+  } catch (err) {
+    throw err
+  }
 }
 
 // Remove enrollment for a specific vault UUID (used when disabling from vault settings).

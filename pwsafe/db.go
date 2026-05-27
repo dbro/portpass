@@ -25,7 +25,7 @@ type V3 struct {
 	Iter          uint32 //the number of iterations on the hash function to create the stretched key
 	LastMod       time.Time
 	LastSavePath  string
-	Records       map[string]Record //the key is the record title
+	Records       map[string]Record // keyed by UUID hex (see uuidKey)
 	Salt          [32]byte
 	StretchedKey  [sha256.Size]byte
 }
@@ -87,10 +87,52 @@ func (db V3) ListByGroup(group string) []string {
 	return entries
 }
 
-// Search returns titles of records matching all whitespace-separated terms in query.
-// When namesOnly is true only title and group are searched; otherwise username,
-// URL, and notes are included. Password is never searched.
-func (db V3) Search(query string, namesOnly bool) []string {
+// CanonicalURL returns a normalised form suitable for exact-match URL search:
+// scheme stripped, "www." prefix stripped, lowercased, query string and fragment
+// removed, trailing slash removed.
+// E.g. "https://www.Bank.com/Login/?ref=1#top" → "bank.com/login"
+func CanonicalURL(rawURL string) string {
+	s := rawURL
+	for _, pfx := range []string{"https://", "http://"} {
+		if len(s) >= len(pfx) && strings.ToLower(s[:len(pfx)]) == pfx {
+			s = s[len(pfx):]
+			break
+		}
+	}
+	if i := strings.IndexByte(s, '#'); i >= 0 {
+		s = s[:i]
+	}
+	if i := strings.IndexByte(s, '?'); i >= 0 {
+		s = s[:i]
+	}
+	s = strings.ToLower(s)
+	if slash := strings.IndexByte(s, '/'); slash >= 0 {
+		s = strings.TrimPrefix(s[:slash], "www.") + s[slash:]
+	} else {
+		s = strings.TrimPrefix(s, "www.")
+	}
+	return strings.TrimRight(s, "/")
+}
+
+// Search returns UUIDs of records matching query.
+//
+//   - mode 0 (all fields): title, group, username, URL, notes, email, and
+//     non-sensitive custom field names and values.
+//   - mode 1 (names only): title and group.
+//   - mode 2 (URL exact): records whose URL field canonicalises to the same
+//     value as the query. Password is never searched in any mode.
+func (db V3) Search(query string, mode int) []string {
+	if mode == 2 {
+		canonical := CanonicalURL(query)
+		var results []string
+		for key, rec := range db.Records {
+			if CanonicalURL(rec.URL) == canonical {
+				results = append(results, key)
+			}
+		}
+		return results
+	}
+
 	terms := strings.Fields(strings.ToLower(query))
 	if len(terms) == 0 {
 		return db.List()
@@ -98,10 +140,15 @@ func (db V3) Search(query string, namesOnly bool) []string {
 	var results []string
 	for key, rec := range db.Records {
 		var hay string
-		if namesOnly {
+		if mode == 1 {
 			hay = strings.ToLower(rec.Title + "\n" + rec.Group)
 		} else {
 			hay = strings.ToLower(rec.Title + "\n" + rec.Group + "\n" + rec.Username + "\n" + rec.URL + "\n" + rec.Notes + "\n" + rec.Email)
+			for _, cf := range rec.CustomFields {
+				if !cf.Sensitive {
+					hay += "\n" + strings.ToLower(cf.Name) + "\n" + strings.ToLower(cf.Value)
+				}
+			}
 		}
 		match := true
 		for _, t := range terms {

@@ -10,7 +10,7 @@ wasm_exec:
 	cp "$$(go env GOROOT)/lib/wasm/wasm_exec.js" ./pwa/public/
 
 setup: wasm_exec
-	cd pwa && npm install
+	cd pwa && npm ci
 
 build: wasm wasm_exec
 	cd pwa && npm run build

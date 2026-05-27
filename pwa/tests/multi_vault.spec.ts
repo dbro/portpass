@@ -112,11 +112,20 @@ test.describe('Multi-vault', () => {
     await expect(page.locator('.vault-detail-stat-label').first()).toContainText('password')
   })
 
-  test('read-only secondary vault shows no Edit button for its records', async ({ page }) => {
+  test('read-only secondary vault shows Edit button with read-only chip', async ({ page }) => {
     await openWithSecondary(page, /* readonly */ true)
     await page.locator('.record-row', { hasText: 'Test entry' }).click()
     await expect(page.locator('.record-title')).toHaveText('Test entry', { timeout: 3000 })
-    await expect(page.getByRole('button', { name: 'Edit' })).not.toBeVisible()
+    await expect(page.getByRole('button', { name: 'Edit' })).toBeVisible()
+    await expect(page.locator('.record-pane-header .ro-chip')).toBeVisible()
+  })
+
+  test('read-only secondary vault edit form shows Save as button', async ({ page }) => {
+    await openWithSecondary(page, /* readonly */ true)
+    await page.locator('.record-row', { hasText: 'Test entry' }).click()
+    await expect(page.locator('.record-title')).toHaveText('Test entry', { timeout: 3000 })
+    await page.getByRole('button', { name: 'Edit' }).click()
+    await expect(page.getByRole('button', { name: 'Save as' })).toBeVisible()
   })
 
   test('primary vault records remain editable when secondary is read-only', async ({ page }) => {

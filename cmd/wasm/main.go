@@ -58,7 +58,9 @@ func openDB(this js.Value, args []js.Value) interface{} {
 	}
 
 	uuid := vaultUUID(newDB)
-	databases[uuid] = newDB
+	if _, exists := databases[uuid]; !exists {
+		databases[uuid] = newDB
+	}
 
 	result, _ := json.Marshal(map[string]string{"uuid": uuid})
 	return string(result)
@@ -95,6 +97,7 @@ func getDBData(this js.Value, args []js.Value) interface{} {
 		UUID    string `json:"uuid"`
 		Title   string `json:"title"`
 		Group   string `json:"group"`
+		URL     string `json:"url"`
 		HasTOTP bool   `json:"hasTOTP"`
 	}
 
@@ -104,6 +107,7 @@ func getDBData(this js.Value, args []js.Value) interface{} {
 			UUID:    uuidHex,
 			Title:   rec.Title,
 			Group:   rec.Group,
+			URL:     rec.URL,
 			HasTOTP: len(rec.TwoFactorKey) > 0,
 		})
 	}
@@ -128,6 +132,7 @@ type recordView struct {
 	Username        string            `json:"Username"`
 	URL             string            `json:"URL"`
 	Email           string            `json:"Email"`
+	Autotype        string            `json:"Autotype"`
 	ModTime         string            `json:"ModTime"`
 	Password        *string           `json:"Password"`
 	Notes           *string           `json:"Notes"`
@@ -159,7 +164,7 @@ func sensitiveString(s string) *string {
 func recordToView(rec pwsafe.Record) recordView {
 	mt := ""
 	if !rec.ModTime.IsZero() {
-		mt = rec.ModTime.Format("2006-01-02")
+		mt = rec.ModTime.UTC().Format(time.RFC3339)
 	}
 
 	cfViews := make([]customFieldView, len(rec.CustomFields))
@@ -185,6 +190,7 @@ func recordToView(rec pwsafe.Record) recordView {
 		Username:        rec.Username,
 		URL:             rec.URL,
 		Email:           rec.Email,
+		Autotype:        rec.Autotype,
 		ModTime:         mt,
 		Password:        sensitiveString(rec.Password),
 		Notes:           sensitiveString(rec.Notes),
@@ -232,21 +238,8 @@ func getDBInfo(this js.Value, args []js.Value) interface{} {
 		Iter        uint32 `json:"iter"`
 	}
 
-	versionMap := map[uint16]string{
-		0x0300: "3.01", 0x0301: "3.03", 0x0302: "3.09", 0x0303: "3.12",
-		0x0304: "3.13", 0x0305: "3.14", 0x0306: "3.19", 0x0307: "3.22",
-		0x0308: "3.25", 0x0309: "3.26", 0x030A: "3.28", 0x030B: "3.29",
-		0x030C: "3.29", 0x030D: "3.30", 0x030E: "3.47", 0x030F: "3.68",
-		0x0310: "3.69",
-	}
-
 	versionVal := binary.LittleEndian.Uint16(db.Header.Version[:])
-	versionStr := versionMap[versionVal]
-	if versionStr == "" {
-		versionStr = fmt.Sprintf("Format 0x%04x", versionVal)
-	} else {
-		versionStr = "v" + versionStr
-	}
+	versionStr := fmt.Sprintf("0x%04X", versionVal)
 
 	info := DBInfo{
 		Version:     versionStr,
@@ -306,6 +299,8 @@ func updateRecordFields(this js.Value, args []js.Value) interface{} {
 			rec.Email = value
 		case "Notes":
 			rec.Notes = value
+		case "Autotype":
+			rec.Autotype = value
 		case "TwoFactorKey":
 			if value == "" {
 				rec.TwoFactorKey = nil
@@ -354,13 +349,14 @@ func updateRecordFields(this js.Value, args []js.Value) interface{} {
 					cfs[i] = pwsafe.CustomField{Name: inp.Name, Sensitive: inp.Sensitive}
 					if inp.Value != nil {
 						cfs[i].Value = *inp.Value
-					} else {
-						// null = preserve existing value for this field name
-						for _, ex := range rec.CustomFields {
-							if ex.Name == inp.Name {
+					}
+					for _, ex := range rec.CustomFields {
+						if ex.Name == inp.Name {
+							if inp.Value == nil {
 								cfs[i].Value = ex.Value
-								break
 							}
+							cfs[i].UnknownProps = ex.UnknownProps
+							break
 						}
 					}
 				}
@@ -439,11 +435,11 @@ func searchRecords(this js.Value, args []js.Value) interface{} {
 		return "database not open"
 	}
 	if len(args) != 3 {
-		return "invalid arguments: expected (vaultUuid, query, namesOnly)"
+		return "invalid arguments: expected (vaultUuid, query, mode)"
 	}
 	query := args[1].String()
-	namesOnly := args[2].Bool()
-	uuids := db.Search(query, namesOnly)
+	mode := args[2].Int() // 0=all fields, 1=names only, 2=URL exact match
+	uuids := db.Search(query, mode)
 	jsonData, err := json.Marshal(uuids)
 	if err != nil {
 		return fmt.Sprintf("json marshal error: %s", err)

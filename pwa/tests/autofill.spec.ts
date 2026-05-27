@@ -1,0 +1,199 @@
+import { test, expect } from '@playwright/test'
+import { createVault } from './helpers'
+
+async function switchToRawMode(page: any) {
+  await page.locator('.mode-toggle').getByText('Raw').click()
+}
+
+// Helper: create a new record with an autofill sequence and open its detail view.
+async function createRecordWithAutotype(page: any, autotype: string) {
+  await page.getByRole('button', { name: 'New', exact: true }).click()
+  await page.getByPlaceholder('e.g. Bank of America').fill('Autofill Test')
+  await page.locator('input.mono').first().fill('testpassword')
+  await switchToRawMode(page)
+  await page.locator('.autotype-input').fill(autotype)
+  await page.getByRole('button', { name: 'Save' }).click()
+  await expect(page.locator('.record-row', { hasText: 'Autofill Test' })).toBeVisible()
+  await page.locator('.record-row', { hasText: 'Autofill Test' }).click()
+}
+
+test.describe('Autofill sequence — edit form', () => {
+
+  test('"Autofill sequence" field label visible in edit form', async ({ page }) => {
+    await createVault(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    await expect(page.locator('.field-label', { hasText: 'Autofill sequence' })).toBeVisible()
+  })
+
+  test('autofill input has placeholder \\u\\t\\p\\n', async ({ page }) => {
+    await createVault(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    await switchToRawMode(page)
+    await expect(page.locator('.autotype-input')).toHaveAttribute('placeholder', '\\u\\t\\p\\n')
+  })
+
+  test('valid sequence enables Save', async ({ page }) => {
+    await createVault(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    await page.getByPlaceholder('e.g. Bank of America').fill('Test')
+    await page.locator('input.mono').first().fill('pass')
+    await switchToRawMode(page)
+    await page.locator('.autotype-input').fill('\\u\\t\\p\\n')
+    await expect(page.locator('.banner-error')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Save' })).not.toBeDisabled()
+  })
+
+  test('unknown code shows warning but does not block Save', async ({ page }) => {
+    await createVault(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    await page.getByPlaceholder('e.g. Bank of America').fill('Test')
+    await page.locator('input.mono').first().fill('pass')
+    await switchToRawMode(page)
+    await page.locator('.autotype-input').fill('\\u\\x\\p')
+    await expect(page.locator('.banner-warn')).toBeVisible()
+    await expect(page.locator('.banner-warn')).toContainText('\\x')
+    await expect(page.getByRole('button', { name: 'Save' })).not.toBeDisabled()
+  })
+
+  test('trailing backslash blocks Save and shows error', async ({ page }) => {
+    await createVault(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    await page.getByPlaceholder('e.g. Bank of America').fill('Test')
+    await page.locator('input.mono').first().fill('pass')
+    await switchToRawMode(page)
+    await page.locator('.autotype-input').fill('\\u\\')
+    await expect(page.locator('.banner-error')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled()
+  })
+
+  test('\\f0 blocks Save and shows error', async ({ page }) => {
+    await createVault(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    await page.getByPlaceholder('e.g. Bank of America').fill('Test')
+    await page.locator('input.mono').first().fill('pass')
+    await switchToRawMode(page)
+    await page.locator('.autotype-input').fill('\\f0')
+    await expect(page.locator('.banner-error')).toBeVisible()
+    await expect(page.locator('.banner-error')).toContainText('\\f0')
+    await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled()
+  })
+
+  test('\\w with no digits blocks Save and shows error', async ({ page }) => {
+    await createVault(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    await page.getByPlaceholder('e.g. Bank of America').fill('Test')
+    await page.locator('input.mono').first().fill('pass')
+    await switchToRawMode(page)
+    await page.locator('.autotype-input').fill('\\w')
+    await expect(page.locator('.banner-error')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled()
+  })
+
+  test('literal text in sequence is valid', async ({ page }) => {
+    await createVault(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    await page.getByPlaceholder('e.g. Bank of America').fill('Test')
+    await page.locator('input.mono').first().fill('pass')
+    await switchToRawMode(page)
+    await page.locator('.autotype-input').fill('\\u\\tabc123\\t\\p')
+    await expect(page.locator('.banner-error')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Save' })).not.toBeDisabled()
+  })
+
+  test('empty sequence does not block save', async ({ page }) => {
+    await createVault(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    await page.getByPlaceholder('e.g. Bank of America').fill('Test')
+    await page.locator('input.mono').first().fill('pass')
+    await expect(page.locator('.banner-error')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Save' })).not.toBeDisabled()
+  })
+
+  test('correcting a structural error clears it', async ({ page }) => {
+    await createVault(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    await page.getByPlaceholder('e.g. Bank of America').fill('Test')
+    await page.locator('input.mono').first().fill('pass')
+    await switchToRawMode(page)
+    await page.locator('.autotype-input').fill('\\f0')
+    await expect(page.locator('.banner-error')).toBeVisible()
+    await page.locator('.autotype-input').fill('\\u\\p')
+    await expect(page.locator('.banner-error')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Save' })).not.toBeDisabled()
+  })
+
+})
+
+test.describe('Autofill sequence — read view', () => {
+
+  test('sequence shown in read view after save', async ({ page }) => {
+    await createVault(page)
+    await createRecordWithAutotype(page, '\\u\\t\\p\\n')
+    await expect(page.locator('.copy-row-label', { hasText: 'Autofill sequence' })).toBeVisible()
+    await switchToRawMode(page)
+    await expect(page.locator('.autotype-value')).toHaveText('\\u\\t\\p\\n')
+  })
+
+  test('default sequence shown when autotype is empty', async ({ page }) => {
+    await createVault(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    await page.getByPlaceholder('e.g. Bank of America').fill('No Autofill')
+    await page.locator('input.mono').first().fill('testpassword')
+    await page.getByRole('button', { name: 'Save' }).click()
+    await page.locator('.record-row', { hasText: 'No Autofill' }).click()
+    await expect(page.locator('.autofill-default-badge')).toBeVisible()
+    await expect(page.locator('.chip-area')).toBeVisible()
+  })
+
+  test('default sequence shown after clearing autotype in edit', async ({ page }) => {
+    await createVault(page)
+    await createRecordWithAutotype(page, '\\u\\t\\p\\n')
+    await expect(page.locator('.chip-area')).toBeVisible()
+    await page.getByRole('button', { name: 'Edit' }).click()
+    await switchToRawMode(page)
+    await page.locator('.autotype-input').fill('')
+    await page.getByRole('button', { name: 'Save' }).click()
+    await expect(page.locator('.autofill-default-badge')).toBeVisible()
+  })
+
+})
+
+test.describe('Autofill sequence — round-trip persistence', () => {
+
+  test('autotype value preserved when re-opening edit form', async ({ page }) => {
+    await createVault(page)
+    await createRecordWithAutotype(page, '\\u\\t\\p\\n')
+    await page.getByRole('button', { name: 'Edit' }).click()
+    await switchToRawMode(page)
+    await expect(page.locator('.autotype-input')).toHaveValue('\\u\\t\\p\\n')
+  })
+
+  test('updated sequence reflected in read view', async ({ page }) => {
+    await createVault(page)
+    await createRecordWithAutotype(page, '\\u\\t\\p\\n')
+    await page.getByRole('button', { name: 'Edit' }).click()
+    await switchToRawMode(page)
+    await page.locator('.autotype-input').fill('\\u\\t\\p')
+    await page.getByRole('button', { name: 'Save' }).click()
+    await switchToRawMode(page)
+    await expect(page.locator('.autotype-value')).toHaveText('\\u\\t\\p')
+  })
+
+  test('each valid token combination passes validation', async ({ page }) => {
+    await createVault(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    await page.getByPlaceholder('e.g. Bank of America').fill('Test')
+    await page.locator('input.mono').first().fill('pass')
+    await switchToRawMode(page)
+    for (const seq of [
+      '\\u', '\\p', '\\t', '\\n', '\\m', '\\2', '\\s', '\\\\',
+      '\\f', '\\f1', '\\f9',
+      '\\w1', '\\w100', '\\w999', '\\W1', '\\W999',
+      '\\u\\t\\p\\n', 'abc', '\\u\\tabc123\\t\\p',
+    ]) {
+      await page.locator('.autotype-input').fill(seq)
+      await expect(page.locator('.banner-error')).toHaveCount(0)
+    }
+  })
+
+})

@@ -8,10 +8,10 @@
     enrollBiometric, unlockWithBiometric, clearBiometricForFile,
   } from './biometric.js'
   import { getSecondaryCredentials } from './secondaryVaults.js'
-  import { getRecentHandles, pushRecentHandle } from './recentHandles.js'
+  import { getRecentHandles, pushRecentHandle, pushRecentName } from './recentHandles.js'
   import Icon from './Icon.svelte'
 
-  let { onopened, autoBiometric = true } = $props()
+  let { onopened, autoBiometric = true, isPopup = false } = $props()
 
   function focusOnMount(node, condition = true) {
     if (condition) setTimeout(() => node.focus(), 0)
@@ -28,22 +28,39 @@
   let biometricAvailable = $state(false)
   let biometricEnrolled  = $state(false)
 
-  const supportsFilePicker = typeof window !== 'undefined' && 'showOpenFilePicker' in window
+  const supportsFilePicker = typeof window !== 'undefined' && typeof window.showOpenFilePicker === 'function'
+
+  let fallbackFile   = $state(null)  // File object when supportsFilePicker is false
+  let fileInputEl    = $state(null)
+  let rememberedName = $state(null)  // filename remembered from IDB when no handle is available
+  let awaitingFilePick = $state(false) // true when unlock() is waiting for file picker
 
   onMount(async () => {
     biometricAvailable = await isBiometricSupported()
 
-    if (!supportsFilePicker) return
     try {
       const handles = await getRecentHandles()
       if (!handles.length) return
       const entry = handles[0]
+
+      if (!entry.handle) {
+        // Fallback path (no File System Access API): show remembered filename and
+        // let the user pick the file again when they click Unlock.
+        if (entry.name) { rememberedName = entry.name; mode = 'unlock' }
+        return
+      }
+
+      if (!supportsFilePicker) return
       fileHandle = entry.handle
       mode = 'unlock'
       biometricEnrolled = entry.uuid
         ? await isBiometricEnrolled(entry.uuid)
         : await isBiometricEnrolledForFile(fileHandle.name)
-      if (biometricEnrolled && autoBiometric) unlockBiometric()
+      // queryPermission is a Chrome extension; guard for Firefox.
+      const status = fileHandle.queryPermission
+        ? await fileHandle.queryPermission({ mode: 'read' })
+        : 'prompt'
+      if (status == 'granted' && biometricEnrolled && autoBiometric) unlockBiometric()
     } catch {}
   })
 
@@ -61,11 +78,32 @@
     }
   }
 
+  function pickFileFallback() {
+    fileInputEl.click()
+  }
+
+  async function onFileInputChange(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    fallbackFile = file
+    mode = 'unlock'
+    error = ''
+    if (awaitingFilePick) {
+      awaitingFilePick = false
+      await unlock()
+    } else {
+      password = ''
+      biometricEnrolled = await isBiometricEnrolledForFile(file.name)
+    }
+  }
+
   // After a successful vault open, check whether to offer biometric enrollment.
   // The offer is shown at most once per vault file — if dismissed, the user can
   // enable biometric/PIN unlock later from the vault settings sheet.
   function afterUnlock() {
-    const offerKey = `biometric-offered-${fileHandle?.name}`
+    const fname = fallbackFile?.name ?? fileHandle?.name
+    const offerKey = `biometric-offered-${fname}`
     if (biometricAvailable && !biometricEnrolled && !localStorage.getItem(offerKey)) {
       localStorage.setItem(offerKey, '1')
       mode = 'offer-biometric'
@@ -75,24 +113,42 @@
   }
 
   async function unlock() {
-    if (!password || !fileHandle) return
+    if (!password) return
+    if (!fileHandle && !fallbackFile) {
+      // No file loaded yet (remembered name only) — open picker first, then resume.
+      awaitingFilePick = true
+      fileInputEl.click()
+      return
+    }
     busy = true; error = ''
     try {
-      const perm = await fileHandle.requestPermission({ mode: 'read' })
-      if (perm !== 'granted') { error = 'File access was denied.'; return }
-      let file
-      try { file = await fileHandle.getFile() } catch (e) {
-        if (e.name === 'NotFoundError') { await handleFileMissing(); return }
-        throw e
+      let buf
+      if (fallbackFile) {
+        buf = await fallbackFile.arrayBuffer()
+      } else {
+        // requestPermission is a Chrome extension; guard for Firefox.
+        const perm = fileHandle.requestPermission
+          ? await fileHandle.requestPermission({ mode: 'read' })
+          : 'granted'
+        if (perm !== 'granted') { error = 'File access was denied.'; return }
+        let file
+        try { file = await fileHandle.getFile() } catch (e) {
+          if (e.name === 'NotFoundError') { await handleFileMissing(); return }
+          throw e
+        }
+        buf = await file.arrayBuffer()
       }
-      const buf  = await file.arrayBuffer()
       const vaultUuid = openDatabase(new Uint8Array(buf), password)
       dbItems.set(getDatabaseData(vaultUuid))
-      const info     = getDatabaseInfo(vaultUuid)
-      const writable = await probeWriteAccess(fileHandle)
-      selectedFile.set({ handle: fileHandle, name: fileHandle.name, readonly: !writable, uuid: vaultUuid })
-      try { await pushRecentHandle(fileHandle, vaultUuid) } catch {}
-      await autoUnlockSecondaries(vaultUuid)
+      if (fallbackFile) {
+        selectedFile.set({ handle: null, name: fallbackFile.name, readonly: true, uuid: vaultUuid })
+        try { await pushRecentName(fallbackFile.name, vaultUuid) } catch {}
+      } else {
+        const writable = await probeWriteAccess(fileHandle)
+        selectedFile.set({ handle: fileHandle, name: fileHandle.name, readonly: !writable, uuid: vaultUuid })
+        try { await pushRecentHandle(fileHandle, vaultUuid) } catch {}
+        await autoUnlockSecondaries(vaultUuid)
+      }
       afterUnlock()
     } catch (e) {
       error = 'Wrong password or invalid file.'
@@ -103,43 +159,78 @@
   }
 
   async function unlockBiometric() {
-    busy = true; error = ''
+    // 1. Guard against re-entry
+    if (busy) return; busy = true
+    error = ''
+
     try {
-      // Retrieve the master password from biometric, use it immediately, let it go out of scope.
+      const fname = fileHandle?.name ?? fallbackFile?.name
+
+      // 2. Request file permission (file handle path only — user activation requirement)
+      if (fileHandle) {
+        const perm = fileHandle.requestPermission
+          ? await fileHandle.requestPermission({ mode: 'read' })
+          : 'granted'
+        if (perm !== 'granted') {
+          error = 'File access was denied.'
+          return
+        }
+      }
+
+      // 3. Authenticate with Biometric
       let biometricPassword
       try {
-        biometricPassword = await unlockWithBiometric(fileHandle.name)
+        biometricPassword = await unlockWithBiometric(fname)
       } catch (e) {
         error = e.name === 'NotAllowedError' ? 'Biometric authentication cancelled.' : e.message
         console.error(e)
         return
       }
-      const perm = await fileHandle.requestPermission({ mode: 'read' })
-      if (perm !== 'granted') { biometricPassword = null; error = 'File access was denied.'; return }
-      let file
-      try { file = await fileHandle.getFile() } catch (e) {
-        if (e.name === 'NotFoundError') { biometricPassword = null; await handleFileMissing(); return }
-        throw e
+
+      // 4. Read file bytes
+      let buf
+      if (fileHandle) {
+        let file
+        try {
+          file = await fileHandle.getFile()
+        } catch (e) {
+          if (e.name === 'NotFoundError') { await handleFileMissing(); return }
+          throw e
+        }
+        buf = await file.arrayBuffer()
+      } else {
+        buf = await fallbackFile.arrayBuffer()
       }
-      const buf  = await file.arrayBuffer()
+
+      // 5. Decrypt and Open
       let vaultUuid
       try {
         vaultUuid = openDatabase(new Uint8Array(buf), biometricPassword)
-      } catch {
+      } catch (e) {
+        console.error("[DEBUG] Decryption failed. Error:", e)
         biometricPassword = null
-        await clearBiometricForFile(fileHandle.name)
+        await clearBiometricForFile(fname)
         biometricEnrolled = false
         error = 'Biometric/PIN unlock is out of date — please enter your master password.'
         return
       }
       biometricPassword = null
+
+      // 6. UI/State updates
       dbItems.set(getDatabaseData(vaultUuid))
-      const info     = getDatabaseInfo(vaultUuid)
-      const writable = await probeWriteAccess(fileHandle)
-      selectedFile.set({ handle: fileHandle, name: fileHandle.name, readonly: !writable, uuid: vaultUuid })
-      await pushRecentHandle(fileHandle, vaultUuid)
-      await autoUnlockSecondaries(vaultUuid)
+      if (fileHandle) {
+        const writable = await probeWriteAccess(fileHandle)
+        selectedFile.set({ handle: fileHandle, name: fileHandle.name, readonly: !writable, uuid: vaultUuid })
+        await pushRecentHandle(fileHandle, vaultUuid)
+        await autoUnlockSecondaries(vaultUuid)
+      } else {
+        selectedFile.set({ handle: null, name: fname, readonly: true, uuid: vaultUuid })
+      }
       onopened()
+
+    } catch (e) {
+      console.error(e)
+      error = 'An unexpected error occurred.'
     } finally {
       busy = false
     }
@@ -149,7 +240,8 @@
     busy = true; error = ''
     try {
       const info = getDatabaseInfo($selectedFile?.uuid ?? '')
-      await enrollBiometric(password, info?.uuid, fileHandle?.name)
+      const fname = fallbackFile?.name ?? fileHandle?.name
+      await enrollBiometric(password, info?.uuid, fname)
       biometricEnrolled = true
       onopened()
     } catch (e) {
@@ -184,7 +276,9 @@
         const handle = cred.handle
         if (!handle) continue // no stored handle; user must manually re-link
         try {
-          const perm = await handle.requestPermission({ mode: 'read' })
+          const perm = handle.requestPermission
+            ? await handle.requestPermission({ mode: 'read' })
+            : 'granted'
           if (perm !== 'granted') continue
           const vaultUuid = await loadVaultFile(handle, cred.masterPassword)
           if (vaultUuid !== cred.vaultUuid) { closeDatabase(vaultUuid); continue }
@@ -215,7 +309,7 @@
   }
 
   function switchFile() {
-    fileHandle = null; password = ''; error = ''; mode = 'landing'
+    fileHandle = null; fallbackFile = null; rememberedName = null; password = ''; error = ''; mode = 'landing'
     secondaryVaults.set([])
   }
 
@@ -228,6 +322,10 @@
     error = 'Vault file not found — it may have been moved or deleted.'
   }
 </script>
+
+{#if !supportsFilePicker}
+  <input bind:this={fileInputEl} type="file" accept=".psafe3,.dat" style="display:none" onchange={onFileInputChange} />
+{/if}
 
 {#if mode === 'landing'}
   <div class="start-landing">
@@ -243,9 +341,8 @@
       {#if supportsFilePicker}
         <button class="btn btn-primary" onclick={pickFile}>Open vault file</button>
       {:else}
-        <div class="unlock-error" style="font-size:13px;text-align:center">
-          Your browser doesn't support file picker.<br>Try Chrome or Safari.
-        </div>
+        <button class="btn btn-primary" onclick={pickFileFallback}>Open vault file</button>
+        <div class="muted" style="font-size:12px;text-align:center;margin-top:4px">Read-only — your browser can't save changes back to the file</div>
       {/if}
     </div>
 
@@ -261,10 +358,13 @@
       <div class="unlock-mark">
         <img src="{import.meta.env.BASE_URL}icon.svg" alt="Portpass" style="width:64px;height:64px" />
       </div>
-      <div class="unlock-vault">{fileHandle?.name ?? 'Vault'}</div>
+      <div class="unlock-vault">{(fallbackFile ?? fileHandle)?.name ?? rememberedName ?? 'Vault'}</div>
       <div class="unlock-sub" class:muted={!busy} class:unlock-busy={busy}>
-        {busy ? 'Unlocking…' : 'Vault is locked'}
+        {busy ? 'Unlocking…' : isPopup ? 'Unlock to use Autofill' : 'Vault is locked'}
       </div>
+      {#if fallbackFile && !busy}
+        <div class="muted" style="font-size:12px">Read-only (your browser can't save changes)</div>
+      {/if}
 
       {#if busy}
         <div class="unlock-shimmer-wrap"><div class="unlock-shimmer"></div></div>

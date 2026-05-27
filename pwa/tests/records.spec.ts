@@ -1,5 +1,5 @@
-import { test, expect } from '@playwright/test'
-import { openVault } from './helpers'
+import { test, expect, type Page } from '@playwright/test'
+import { openVault, createVault } from './helpers'
 
 test.describe('Record list', () => {
 
@@ -218,6 +218,51 @@ test.describe('Context menu', () => {
     // "three entry 1" has a URL
     await page.locator('.record-row', { hasText: 'three entry 1' }).click({ button: 'right' })
     await expect(page.locator('.ctx-menu').getByText('Visit URL')).toBeVisible()
+  })
+
+})
+
+test.describe('URL scheme normalization', () => {
+
+  async function createBareUrlRecord(page: Page) {
+    await createVault(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    await page.getByPlaceholder('e.g. Bank of America').fill('Bare URL Entry')
+    await page.getByLabel('URL').fill('yahoo.com')
+    await page.locator('input.mono').first().fill('secret')
+    await page.getByRole('button', { name: 'Save' }).click()
+  }
+
+  test('"Open URL" link in record detail prepends https:// to schemeless URL', async ({ page }) => {
+    await createBareUrlRecord(page)
+    await page.locator('.record-row', { hasText: 'Bare URL Entry' }).click()
+    await expect(page.getByRole('link', { name: 'Open URL' }))
+      .toHaveAttribute('href', 'https://yahoo.com')
+  })
+
+  test('context menu "Visit URL" opens schemeless URL with https://', async ({ page, context }) => {
+    await createBareUrlRecord(page)
+    await page.locator('.record-row', { hasText: 'Bare URL Entry' }).click({ button: 'right' })
+    await expect(page.locator('.ctx-menu')).toBeVisible()
+    const [newPage] = await Promise.all([
+      context.waitForEvent('page'),
+      page.locator('.ctx-menu').getByText('Visit URL').click(),
+    ])
+    expect(newPage.url()).toContain('yahoo.com')
+    await newPage.close()
+  })
+
+  test('Enter key on selected record opens schemeless URL with https://', async ({ page, context }) => {
+    await createBareUrlRecord(page)
+    await page.getByPlaceholder('Search vault').click()
+    await page.keyboard.press('ArrowDown')
+    await expect(page.locator('.record-title')).toHaveText('Bare URL Entry')
+    const [newPage] = await Promise.all([
+      context.waitForEvent('page'),
+      page.keyboard.press('Enter'),
+    ])
+    expect(newPage.url()).toContain('yahoo.com')
+    await newPage.close()
   })
 
 })
