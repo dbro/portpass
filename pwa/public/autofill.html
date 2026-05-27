@@ -466,7 +466,7 @@ body {
       setupWsTransport()
 
       var ts = Date.now()
-      var signedPayload = JSON.stringify({ url: currentUrl, nonce: pingNonce, ecdh: cpEcdhSpkiB64, ts: ts })
+      var signedPayload = JSON.stringify({ url: currentUrl, nonce: pingNonce, ecdh: cpEcdhSpkiB64, ts: ts, msgType: '', uuid: '', vaultUuid: '', query: '' })
       var sigBytes = await crypto.subtle.sign(
         { name: 'ECDSA', hash: 'SHA-256' }, cpSigningKey, new TextEncoder().encode(signedPayload)
       )
@@ -592,7 +592,8 @@ body {
   async function cpSignAndSend(msgType, extraFields) {
     var ts = Date.now()
     var reqNonce = crypto.randomUUID()
-    var signedPayload = JSON.stringify({ url: extraFields.url || '', nonce: reqNonce, ecdh: cpEcdhSpkiB64, ts: ts })
+    var signedPayload = JSON.stringify({ url: extraFields.url || '', nonce: reqNonce, ecdh: cpEcdhSpkiB64, ts: ts,
+      msgType: msgType, uuid: extraFields.uuid || '', vaultUuid: extraFields.vaultUuid || '', query: extraFields.query || '' })
     var sigBytes = await crypto.subtle.sign(
       { name: 'ECDSA', hash: 'SHA-256' }, cpSigningKey, new TextEncoder().encode(signedPayload)
     )
@@ -622,7 +623,7 @@ body {
     if (!cpSigningKey || !cpPubSpkiB64) return
     var nonce = crypto.randomUUID()
     var ts = Date.now()
-    var payload = JSON.stringify({ url: '', nonce: nonce, ecdh: '', ts: ts })
+    var payload = JSON.stringify({ url: '', nonce: nonce, ecdh: '', ts: ts, msgType: 'fill-done', uuid: '', vaultUuid: '', query: '' })
     crypto.subtle.sign(
       { name: 'ECDSA', hash: 'SHA-256' }, cpSigningKey, new TextEncoder().encode(payload)
     ).then(function(sigBytes) {
@@ -644,7 +645,7 @@ body {
     if (!cpSigningKey || !cpPubSpkiB64) return
     var saveNonce = crypto.randomUUID()
     var ts = Date.now()
-    var payload = JSON.stringify({ url: saveUrl, nonce: saveNonce, ecdh: '', ts: ts })
+    var payload = JSON.stringify({ url: saveUrl, nonce: saveNonce, ecdh: '', ts: ts, msgType: 'save-url', uuid: uuid || '', vaultUuid: vaultUuid || '', query: '' })
     crypto.subtle.sign(
       { name: 'ECDSA', hash: 'SHA-256' }, cpSigningKey, new TextEncoder().encode(payload)
     ).then(function(sigBytes) {

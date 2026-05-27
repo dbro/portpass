@@ -410,7 +410,8 @@
         if (age > 60000 || age < -5000) return
         const spkiBytes = Uint8Array.from(atob(msg.pub), c => c.charCodeAt(0))
         const sigBytes  = Uint8Array.from(atob(msg.sig), c => c.charCodeAt(0))
-        const message   = new TextEncoder().encode(JSON.stringify({ url: msg.url, nonce: msg.replyTo, ecdh: msg.ecdh, ts: msg.ts }))
+        const message   = new TextEncoder().encode(JSON.stringify({ url: msg.url || '', nonce: msg.replyTo, ecdh: msg.ecdh || '', ts: msg.ts,
+          msgType: msg.msgType || '', uuid: msg.uuid || '', vaultUuid: msg.vaultUuid || '', query: msg.query || '' }))
         const verified  = await verifyDelegate(dbKey, spkiBytes, message, sigBytes)
         if (!verified) return
         if (msg.msgType === 'fill-done') {
@@ -512,96 +513,6 @@
     return ''
   }
 
-  $effect(() => {
-    if (!isPopup) return
-
-    let sessionKey = null  // AES-256-GCM key derived from ECDH; null until hello exchange
-    let helloInProgress = false  // guard against duplicate hellos overwriting the session key
-
-    async function handleMessage(event) {
-      if (!event.source) return
-      const msg = event.data
-      if (!msg?.type) return
-
-      if (msg.type === 'hello') {
-        // Ignore a second hello while we're still processing the first one.
-        // Without this guard, a retry from the bookmarklet could overwrite sessionKey
-        // after the bookmarklet has already derived its key from the first response.
-        if (helloInProgress) return
-        helloInProgress = true
-        try {
-          const openerPub = await crypto.subtle.importKey(
-            'jwk', msg.pubkey,
-            { name: 'ECDH', namedCurve: 'P-256' }, false, []
-          )
-          const pair = await crypto.subtle.generateKey(
-            { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey']
-          )
-          sessionKey = await crypto.subtle.deriveKey(
-            { name: 'ECDH', public: openerPub },
-            pair.privateKey,
-            { name: 'AES-GCM', length: 256 }, false, ['encrypt']
-          )
-          const pubJwk = await crypto.subtle.exportKey('jwk', pair.publicKey)
-          event.source.postMessage({ type: 'hello', pubkey: pubJwk }, event.origin)
-        } catch {
-          sessionKey = null
-          event.source.postMessage({ type: 'error', message: 'Key exchange failed' }, event.origin)
-        } finally {
-          helloInProgress = false
-        }
-        return
-      }
-
-      if (msg.type === 'query') {
-        if (!sessionKey) {
-          event.source.postMessage(
-            { type: 'error', message: 'No secure session — click the bookmarklet again' },
-            event.origin
-          )
-          return
-        }
-
-        // URL search: return list of candidate records for the bookmarklet picker.
-        if (msg.url !== undefined) {
-          event.source.postMessage({ type: 'records', records: autofillFindRecords(msg.url) }, event.origin)
-          return
-        }
-
-        // Targeted fetch: return encrypted credentials for the specified (or selected) record.
-        const uuid = msg.uuid || selectedUUID
-        const vaultUuid = msg.uuid ? (msg.vaultUuid || null) : selectedVaultUuid
-        if (!uuid) {
-          event.source.postMessage({ type: 'error', message: 'Open a record in Portpass first' }, event.origin)
-          return
-        }
-        try {
-          const result = await autofillEncryptRecord(sessionKey, uuid, vaultUuid)
-          event.source.postMessage({ type: 'record', ...result }, event.origin)
-        } catch (e) {
-          event.source.postMessage({ type: 'error', message: e.message }, event.origin)
-        }
-        return
-      }
-
-      if (msg.type === 'save-url') {
-        if (!sessionKey) {
-          event.source.postMessage({ type: 'error', message: 'No secure session' }, event.origin)
-          return
-        }
-        try {
-          await autofillSaveURL(msg.uuid, msg.vaultUuid || null, msg.url)
-          event.source.postMessage({ type: 'url-saved' }, event.origin)
-        } catch (e) {
-          event.source.postMessage({ type: 'error', message: e.message }, event.origin)
-        }
-      }
-    }
-
-    window.addEventListener('message', handleMessage)
-    return () => { window.removeEventListener('message', handleMessage); sessionKey = null }
-  })
-
   // BroadcastChannel handler — lets the autofill popup (opened by the bookmarklet) reach this
   // unlocked tab across browsing-context-group boundaries. Only the main (non-popup) tab
   // handles these messages so the popup's own dashboard (when unlocked directly) is unaffected.
@@ -649,8 +560,9 @@
             return
           }
           bcSessionDelegateId = verified.id
+          const ecdhSpkiBytes = Uint8Array.from(atob(msg.ecdhSpki), c => c.charCodeAt(0))
           const openerPub = await crypto.subtle.importKey(
-            'jwk', msg.pubkey, { name: 'ECDH', namedCurve: 'P-256' }, false, []
+            'spki', ecdhSpkiBytes, { name: 'ECDH', namedCurve: 'P-256' }, false, []
           )
           const pair = await crypto.subtle.generateKey(
             { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey']
