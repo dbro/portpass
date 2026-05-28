@@ -295,7 +295,7 @@ body {
   var saveUrl = ''
 
   // Mode detection
-  var cprivKey = null
+  var pairedProfile = null
   var delegateId = null
   var bcPongCount = 0
   var wsProbeReplies = []
@@ -404,7 +404,6 @@ body {
     currentUrl = msg.url || ''
     saveUrl = msg.saveUrl || currentUrl
     isSecure = !!msg.isSecure
-    cprivKey = msg.privKey || null
     delegateId = msg.delegateId || null
     hasActiveField = !!msg.hasActiveField
     if (msg.relayUrl) wsRelayUrl = msg.relayUrl.replace(/^http/, 'ws').replace(/\/ws$/, '') + '/ws'
@@ -419,7 +418,14 @@ body {
       } catch(_) {}
     }
 
-    startProbe()
+    loadPairedProfile(delegateId).then(function(profile) {
+      pairedProfile = profile
+      if (!pairedProfile) { sendError('Autofill profile is not paired — create a new bookmarklet in Portpass'); return }
+      cpPubSpkiB64 = pairedProfile.publicKeyB64 || btoa(String.fromCharCode.apply(null, new Uint8Array(pairedProfile.publicKey || [])))
+      startProbe()
+    }).catch(function() {
+      sendError('Autofill profile is not paired — create a new bookmarklet in Portpass')
+    })
   }
 
   // ── Messages from bookmarklet (field-clicked, fill-done, fill-error) ──────
@@ -452,21 +458,13 @@ body {
   }
 
   async function startWsProbe() {
-    if (!cprivKey) return
+    if (!pairedProfile || !pairedProfile.signingKey) return
     try {
-      cpSigningKey = await crypto.subtle.importKey(
-        'jwk', cprivKey, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']
-      )
-      var pubJwk = { kty: cprivKey.kty, crv: cprivKey.crv, x: cprivKey.x, y: cprivKey.y }
-      var pubKey = await crypto.subtle.importKey(
-        'jwk', pubJwk, { name: 'ECDSA', namedCurve: 'P-256' }, true, ['verify']
-      )
-      var pubSpki = await crypto.subtle.exportKey('spki', pubKey)
-      cpPubSpkiB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(pubSpki)))
+      cpSigningKey = pairedProfile.signingKey
       setupWsTransport()
 
       var ts = Date.now()
-      var signedPayload = JSON.stringify({ url: currentUrl, nonce: pingNonce, ecdh: cpEcdhSpkiB64, ts: ts, msgType: '', uuid: '', vaultUuid: '', query: '' })
+      var signedPayload = JSON.stringify({ version: 1, sender: delegateId || '', recipient: pairedProfile.dashboardId || '', url: currentUrl, nonce: pingNonce, ecdh: cpEcdhSpkiB64, ts: ts, msgType: '', uuid: '', vaultUuid: '', query: '' })
       var sigBytes = await crypto.subtle.sign(
         { name: 'ECDSA', hash: 'SHA-256' }, cpSigningKey, new TextEncoder().encode(signedPayload)
       )
@@ -476,7 +474,7 @@ body {
       wsProbeWs.onopen = function() {
         wsProbeWs.send(JSON.stringify({
           type: 'publish', channel: 'portpass-autofill', replyTo: pingNonce,
-          url: currentUrl, ecdh: cpEcdhSpkiB64, ts: ts, sig: sigB64, pub: cpPubSpkiB64
+          delegateId: delegateId, url: currentUrl, ecdh: cpEcdhSpkiB64, ts: ts, sig: sigB64, pub: cpPubSpkiB64
         }))
       }
       wsProbeWs.onmessage = function(e) {
@@ -506,7 +504,7 @@ body {
         return decryptReply(blob)
       },
       fill: async function(uuid, vu) {
-        var blob = await cpSignAndSend('fill-uuid', { url: uuid, uuid: uuid, vaultUuid: vu || null })
+        var blob = await cpSignAndSend('fill-uuid', { url: currentUrl, uuid: uuid, vaultUuid: vu || null })
         var results = await decryptReply(blob)
         if (!results || !results.length) throw new Error('Could not get credentials')
         return results[0]
@@ -554,6 +552,7 @@ body {
       ws.onmessage = function(e) {
         try {
           var msg = JSON.parse(e.data)
+          if (msg._switchboard_origin !== location.origin) return
           if (msg.type === 'error') done(reject, new Error(msg.message || 'Autofill failed'))
           else if (msg.type === 'reply') done(resolve, msg)
         } catch(_) { done(reject, new Error('Invalid relay message')) }
@@ -582,7 +581,8 @@ body {
       var data = await decryptReply(blob)
       if (data && data.records) {
         applyTheme(data.theme === 'dark', data.accent || 'amber')
-        showPicker(data.records)
+        if ((!data.records || !data.records.length) && data.nearMatchCount !== undefined) showNearMatchSummary(data.nearMatchCount)
+        else showPicker(data.records)
       } else {
         showPicker(data || [])
       }
@@ -592,7 +592,7 @@ body {
   async function cpSignAndSend(msgType, extraFields) {
     var ts = Date.now()
     var reqNonce = crypto.randomUUID()
-    var signedPayload = JSON.stringify({ url: extraFields.url || '', nonce: reqNonce, ecdh: cpEcdhSpkiB64, ts: ts,
+    var signedPayload = JSON.stringify({ version: 1, sender: delegateId || '', recipient: pairedProfile?.dashboardId || '', url: extraFields.url || '', nonce: reqNonce, ecdh: cpEcdhSpkiB64, ts: ts,
       msgType: msgType, uuid: extraFields.uuid || '', vaultUuid: extraFields.vaultUuid || '', query: extraFields.query || '' })
     var sigBytes = await crypto.subtle.sign(
       { name: 'ECDSA', hash: 'SHA-256' }, cpSigningKey, new TextEncoder().encode(signedPayload)
@@ -600,7 +600,7 @@ body {
     var sigB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(sigBytes)))
     return wsPost(Object.assign({
       type: 'publish', channel: 'portpass-autofill', replyTo: reqNonce,
-      msgType: msgType, ecdh: cpEcdhSpkiB64, ts: ts, sig: sigB64, pub: cpPubSpkiB64
+      delegateId: delegateId, msgType: msgType, ecdh: cpEcdhSpkiB64, ts: ts, sig: sigB64, pub: cpPubSpkiB64
     }, extraFields))
   }
 
@@ -623,7 +623,7 @@ body {
     if (!cpSigningKey || !cpPubSpkiB64) return
     var nonce = crypto.randomUUID()
     var ts = Date.now()
-    var payload = JSON.stringify({ url: '', nonce: nonce, ecdh: '', ts: ts, msgType: 'fill-done', uuid: '', vaultUuid: '', query: '' })
+    var payload = JSON.stringify({ version: 1, sender: delegateId || '', recipient: pairedProfile?.dashboardId || '', url: '', nonce: nonce, ecdh: '', ts: ts, msgType: 'fill-done', uuid: '', vaultUuid: '', query: '' })
     crypto.subtle.sign(
       { name: 'ECDSA', hash: 'SHA-256' }, cpSigningKey, new TextEncoder().encode(payload)
     ).then(function(sigBytes) {
@@ -633,7 +633,7 @@ body {
       ws.onopen = function() {
         ws.send(JSON.stringify({
           type: 'publish', channel: 'portpass-autofill', replyTo: nonce,
-          msgType: 'fill-done', url: '', ecdh: '', ts: ts, sig: sigB64, pub: cpPubSpkiB64
+          delegateId: delegateId, msgType: 'fill-done', url: '', ecdh: '', ts: ts, sig: sigB64, pub: cpPubSpkiB64
         }))
       }
       ws.onmessage = function() { ws.close() }
@@ -645,7 +645,7 @@ body {
     if (!cpSigningKey || !cpPubSpkiB64) return
     var saveNonce = crypto.randomUUID()
     var ts = Date.now()
-    var payload = JSON.stringify({ url: saveUrl, nonce: saveNonce, ecdh: '', ts: ts, msgType: 'save-url', uuid: uuid || '', vaultUuid: vaultUuid || '', query: '' })
+    var payload = JSON.stringify({ version: 1, sender: delegateId || '', recipient: pairedProfile?.dashboardId || '', url: saveUrl, nonce: saveNonce, ecdh: '', ts: ts, msgType: 'save-url', uuid: uuid || '', vaultUuid: vaultUuid || '', query: '' })
     crypto.subtle.sign(
       { name: 'ECDSA', hash: 'SHA-256' }, cpSigningKey, new TextEncoder().encode(payload)
     ).then(function(sigBytes) {
@@ -655,7 +655,7 @@ body {
       ws.onopen = function() {
         ws.send(JSON.stringify({
           type: 'publish', channel: 'portpass-autofill', replyTo: saveNonce,
-          msgType: 'save-url', uuid: uuid, vaultUuid: vaultUuid,
+          delegateId: delegateId, msgType: 'save-url', uuid: uuid, vaultUuid: vaultUuid,
           url: saveUrl, ecdh: '', ts: ts, sig: sigB64, pub: cpPubSpkiB64
         }))
       }
@@ -666,6 +666,27 @@ body {
 
   function doSaveUrl(uuid, vaultUuid) {
     $transport.saveUrl(uuid, vaultUuid || null)
+  }
+
+  function loadPairedProfile(id) {
+    return new Promise(function(resolve, reject) {
+      var req = indexedDB.open('keyval-store')
+      req.onerror = function() { reject(req.error || new Error('IndexedDB unavailable')) }
+      req.onsuccess = function() {
+        var db = req.result
+        try {
+          var tx = db.transaction('keyval', 'readonly')
+          var store = tx.objectStore('keyval')
+          var gr = store.get('paired-autofill-profiles-v1')
+          gr.onerror = function() { reject(gr.error || new Error('Pairing storage unavailable')) }
+          gr.onsuccess = function() {
+            var all = gr.result || {}
+            var delegateKey = id || all.defaultDelegateId
+            resolve(delegateKey ? (all[delegateKey] || null) : null)
+          }
+        } catch(e) { reject(e) }
+      }
+    })
   }
 
   // ── Record selection — shared entry point ──────────────────────────────────
@@ -1147,6 +1168,35 @@ body {
     setTimeout(function() { try { searchInput.focus() } catch(_) {} }, 50)
   }
 
+  function showNearMatchSummary(count) {
+    hideSearchUI()
+    $subheader.style.display = 'none'
+    $content.innerHTML = ''
+
+    var notice = document.createElement('div')
+    notice.className = 'pp-notice'
+    notice.innerHTML = SVG_WARN + ' No exact password match for '
+    var em = document.createElement('strong')
+    em.textContent = currentUrl
+    em.style.color = 'var(--text)'
+    notice.appendChild(em)
+    $content.appendChild(notice)
+
+    var ph = document.createElement('div')
+    ph.className = 'pp-placeholder'
+    var line1 = document.createElement('div')
+    line1.textContent = count
+      ? count + ' near ' + (count === 1 ? 'match was' : 'matches were') + ' found.'
+      : 'No near matches were found.'
+    var line2 = document.createElement('button')
+    line2.className = 'pp-footer-btn'
+    line2.textContent = 'View in Portpass'
+    line2.onclick = function() { window.open(PORTPASS_URL, '_blank', 'noopener'); window.close() }
+    ph.appendChild(line1)
+    ph.appendChild(line2)
+    $content.appendChild(ph)
+  }
+
   function showSearchResults(records) {
     var hdr = $content.querySelector('.pp-section-hdr')
     var placeholder = $content.querySelector('.pp-placeholder')
@@ -1176,21 +1226,14 @@ body {
       var ecdhSpkiB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(ecdhSpki)))
       nonce = crypto.randomUUID()
 
-      var sigB64 = null, pubSpkiB64 = null
-      if (cprivKey) {
+      var sigB64 = null, pubSpkiB64 = null, helloTs = Date.now()
+      if (pairedProfile && pairedProfile.signingKey) {
         try {
-          var signingKey = await crypto.subtle.importKey(
-            'jwk', cprivKey, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']
-          )
-          var ecdsaPubKey = await crypto.subtle.importKey(
-            'jwk', { kty: cprivKey.kty, crv: cprivKey.crv, x: cprivKey.x, y: cprivKey.y },
-            { name: 'ECDSA', namedCurve: 'P-256' }, true, ['verify']
-          )
-          var ecdsaSpki = await crypto.subtle.exportKey('spki', ecdsaPubKey)
-          pubSpkiB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(ecdsaSpki)))
+          var signingKey = pairedProfile.signingKey
+          pubSpkiB64 = cpPubSpkiB64
           var sigBytes = await crypto.subtle.sign(
             { name: 'ECDSA', hash: 'SHA-256' }, signingKey,
-            new TextEncoder().encode(JSON.stringify({ nonce: nonce, ecdhSpki: ecdhSpkiB64 }))
+            new TextEncoder().encode(JSON.stringify({ version: 1, sender: delegateId || '', recipient: pairedProfile.dashboardId || '', nonce: nonce, ecdhSpki: ecdhSpkiB64, ts: helloTs }))
           )
           sigB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(sigBytes)))
         } catch(_) {}
@@ -1202,7 +1245,7 @@ body {
         if (msg.type === 'hello-response') onHelloResponse(msg)
         else if (msg.type === 'error') sendError(msg.message)
       }
-      var helloMsg = { type: 'hello', pubkey: pubJwk, ecdhSpki: ecdhSpkiB64, nonce: nonce }
+      var helloMsg = { type: 'hello', pubkey: pubJwk, ecdhSpki: ecdhSpkiB64, nonce: nonce, delegateId: delegateId, ts: helloTs }
       if (sigB64 && pubSpkiB64) { helloMsg.sig = sigB64; helloMsg.pub = pubSpkiB64 }
       ch.postMessage(helloMsg)
     } catch(_) { sendError('Key exchange failed') }

@@ -13,7 +13,7 @@
   import { addSecondaryCredential, removeSecondaryCredential } from './secondaryVaults.js'
   import { getSwitchboardUrl, getCrossProfileEnabled } from './delegates.js'
   import { isBiometricEnrolledForFile, unlockWithBiometric } from './biometric.js'
-  import { getDelegates, verifyDelegate, recordFill } from './delegates.js'
+  import { getDelegates, verifyDelegateById, recordFill } from './delegates.js'
   import Icon from './Icon.svelte'
   import RecordList from './RecordList.svelte'
   import RecordRead from './RecordRead.svelte'
@@ -382,6 +382,15 @@
 
   let _sbWs = null
   let _sbConnecting = false
+  const sbSeenNonces = new Set()
+  const bcSeenNonces = new Set()
+
+  function rememberNonce(seen, nonce) {
+    if (!nonce || seen.has(nonce)) return false
+    seen.add(nonce)
+    setTimeout(() => seen.delete(nonce), 120000)
+    return true
+  }
 
   function sbWsUrl() {
     // Accept both ws:// and http:// stored formats
@@ -405,14 +414,15 @@
     ws.onmessage = async (event) => {
       try {
         const msg = JSON.parse(event.data)
+        if (msg._switchboard_origin !== location.origin) return
         if (msg.type !== 'publish') return
         const age = Date.now() - msg.ts
         if (age > 60000 || age < -5000) return
-        const spkiBytes = Uint8Array.from(atob(msg.pub), c => c.charCodeAt(0))
         const sigBytes  = Uint8Array.from(atob(msg.sig), c => c.charCodeAt(0))
-        const message   = new TextEncoder().encode(JSON.stringify({ url: msg.url || '', nonce: msg.replyTo, ecdh: msg.ecdh || '', ts: msg.ts,
+        if (!rememberNonce(sbSeenNonces, msg.replyTo)) return
+        const message   = new TextEncoder().encode(JSON.stringify({ version: 1, sender: msg.delegateId || '', recipient: 'local-dashboard', url: msg.url || '', nonce: msg.replyTo, ecdh: msg.ecdh || '', ts: msg.ts,
           msgType: msg.msgType || '', uuid: msg.uuid || '', vaultUuid: msg.vaultUuid || '', query: msg.query || '' }))
-        const verified  = await verifyDelegate(dbKey, spkiBytes, message, sigBytes)
+        const verified  = await verifyDelegateById(dbKey, msg.delegateId || '', message, sigBytes)
         if (!verified) return
         if (msg.msgType === 'fill-done') {
           await recordFill(dbKey, verified.id, 'relay')
@@ -431,26 +441,16 @@
           return
         }
         if (msg.msgType === 'search') {
-          const allVaults = [
-            { uuid: dbKey, readonly: get(selectedFile)?.readonly || false },
-            ...get(secondaryVaults).map(v => ({ uuid: v.uuid, readonly: v.readonly || false })),
-          ]
-          const results = []
-          for (const { uuid: vaultUuid, readonly } of allVaults) {
-            try {
-              for (const recUuid of searchRecords(vaultUuid, msg.query || '', 0)) {
-                const rec = getRecordData(vaultUuid, recUuid)
-                results.push({ uuid: recUuid, vaultUuid: vaultUuid === dbKey ? null : vaultUuid,
-                  title: rec.Title, existingUrl: rec.URL || '', matchType: 'search', readonly })
-              }
-            } catch {}
-          }
-          try { await sbEncryptReply(msg.replyTo, msg.ecdh, results) } catch {}
+          try { await sbEncryptReply(msg.replyTo, msg.ecdh, []) } catch {}
           return
         }
         if (msg.msgType === 'fill-uuid') {
           try {
             const rec = getRecordData(msg.vaultUuid || dbKey, msg.uuid)
+            if (canonicalURL(rec.URL || '') !== canonicalURL(msg.url || '')) {
+              if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo, error: 'Credentials require an exact saved URL match' }))
+              return
+            }
             const rf = buildRecordFields(msg.uuid, msg.vaultUuid || null)
             await sbEncryptReply(msg.replyTo, msg.ecdh, [{
               uuid: msg.uuid, vaultUuid: msg.vaultUuid || null,
@@ -462,7 +462,12 @@
           }
           return
         }
-        await processAutofillIntent({ url: msg.url, nonce: msg.replyTo, ecdhSpkiB64: msg.ecdh })
+        const records = autofillFindRecords(msg.url)
+        const exact = records.filter(r => r.matchType === 'exact')
+        const payload = exact.length
+          ? { records: exact, theme: localStorage.getItem('theme') || 'dark', accent: localStorage.getItem('accent') || 'amber' }
+          : { records: [], nearMatchCount: records.length, theme: localStorage.getItem('theme') || 'dark', accent: localStorage.getItem('accent') || 'amber' }
+        await sbEncryptReply(msg.replyTo, msg.ecdh, payload)
       } catch(e) {}
     }
     let closed = false
@@ -551,10 +556,14 @@
             ch.postMessage({ type: 'error', message: 'Autofill request not authorized — reinstall the bookmarklet', nonce: msg.nonce })
             return
           }
-          const spkiBytes = Uint8Array.from(atob(msg.pub), c => c.charCodeAt(0))
           const sigBytes  = Uint8Array.from(atob(msg.sig),  c => c.charCodeAt(0))
-          const sigMsg    = new TextEncoder().encode(JSON.stringify({ nonce: msg.nonce, ecdhSpki: msg.ecdhSpki }))
-          const verified  = await verifyDelegate(dbKey, spkiBytes, sigMsg, sigBytes)
+          const age = Date.now() - (msg.ts || 0)
+          if (age > 60000 || age < -5000 || !rememberNonce(bcSeenNonces, msg.nonce)) {
+            ch.postMessage({ type: 'error', message: 'Autofill request expired — click the bookmarklet again', nonce: msg.nonce })
+            return
+          }
+          const sigMsg    = new TextEncoder().encode(JSON.stringify({ version: 1, sender: msg.delegateId || '', recipient: 'local-dashboard', nonce: msg.nonce, ecdhSpki: msg.ecdhSpki, ts: msg.ts }))
+          const verified  = await verifyDelegateById(dbKey, msg.delegateId || '', sigMsg, sigBytes)
           if (!verified) {
             ch.postMessage({ type: 'error', message: 'Autofill request not authorized', nonce: msg.nonce })
             return

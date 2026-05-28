@@ -6,6 +6,7 @@
   import { isBiometricSupported, isBiometricEnrolled, enrollBiometric, clearBiometric } from './biometric.js'
   import { makeDelegateBookmarkletUrl } from './bookmarklet.js'
   import { getDelegates, addDelegate, revokeDelegate, setSwitchboardUrl, setCrossProfileEnabled } from './delegates.js'
+  import { createPairedAutofillProfile, removePairedAutofillProfile } from './pairedAutofill.js'
   import Icon from './Icon.svelte'
 
   let { isDesktop, bookmarkletsSupported = false, onback, onlock, onlockall, onlocksecondary, onunlockadditional, ondbsave, onsvdbsave, ondirtychange, theme, accent, ontheme, onaccent } = $props()
@@ -165,7 +166,6 @@
   let delegates = $state([])
   let newDelegateOpen = $state(false)
   let newDelegateName = $state('')
-  let newDelegatePrivKeyJwk = $state(null)
   let newDelegatePubKeySpki = $state(null)
   let newDelegateId   = $state(null)
   let newDelegateUrl  = $state('')
@@ -179,8 +179,8 @@
   let globeTipOpen = $state(false)
 
   let chipUsed   = $derived(chipDragged || chipLinked)
-  let canUseChip = $derived(!!newDelegateName.trim() && !!newDelegatePrivKeyJwk)
-  let canCommit  = $derived((!!newDelegateName.trim() || chipUsed) && !!newDelegatePrivKeyJwk && !newDelegateBusy)
+  let canUseChip = $derived(!!newDelegateName.trim() && !!newDelegatePubKeySpki)
+  let canCommit  = $derived((!!newDelegateName.trim() || chipUsed) && !!newDelegatePubKeySpki && !newDelegateBusy)
 
   function defaultDelegateName() {
     return 'Bookmarklet created ' + new Date(newDelegateBirthAt ?? Date.now()).toLocaleString(
@@ -192,7 +192,6 @@
   async function openNewDelegate() {
     newDelegateOpen = true
     newDelegateName = ''
-    newDelegatePrivKeyJwk = null
     newDelegatePubKeySpki = null
     newDelegateId   = null
     newDelegateUrl  = ''
@@ -204,15 +203,14 @@
     chipLinked  = false
     globeTipOpen = false
     try {
-      const keyPair = await crypto.subtle.generateKey(
-        { name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']
-      )
-      newDelegatePrivKeyJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey)
-      newDelegatePubKeySpki = await crypto.subtle.exportKey('spki', keyPair.publicKey)
-      newDelegateId  = crypto.randomUUID()
+      const profile = await createPairedAutofillProfile({
+        relayUrl: get(switchboardUrl),
+      })
+      newDelegateId = profile.delegateId
+      newDelegatePubKeySpki = new Uint8Array(profile.publicKey).buffer
       newDelegateUrl = makeDelegateBookmarkletUrl(
         window.location.origin + import.meta.env.BASE_URL,
-        newDelegatePrivKeyJwk, newDelegateId,
+        newDelegateId,
         get(switchboardUrl)
       )
     } catch (e) {
@@ -223,7 +221,6 @@
   function closeNewDelegate() {
     newDelegateOpen = false
     newDelegateName = ''
-    newDelegatePrivKeyJwk = null
     newDelegatePubKeySpki = null
     newDelegateId   = null
     newDelegateUrl  = ''
@@ -252,7 +249,10 @@
 
   async function cancelOrSave() {
     if (chipUsed) await commitDelegate()
-    else closeNewDelegate()
+    else {
+      if (newDelegateId) await removePairedAutofillProfile(newDelegateId).catch(() => {})
+      closeNewDelegate()
+    }
   }
 
   async function revokeOne(delegateId) {
@@ -460,7 +460,7 @@
           <div class="delegate-row">
             <div class="delegate-info">
               <span class="delegate-name">{d.name}</span>
-              <span class="delegate-meta muted">Created {fmtDate(d.created)} · {total} {total === 1 ? 'page filled' : 'pages filled'}{lastTs ? ' · Last filled ' + fmtRelative(lastTs) : ''}</span>
+              <span class="delegate-meta muted">Created {fmtDate(d.created)}{d.displayCode ? ' · ' + d.displayCode : ''} · {total} {total === 1 ? 'page filled' : 'pages filled'}{lastTs ? ' · Last filled ' + fmtRelative(lastTs) : ''}</span>
             </div>
             <button class="delegate-revoke" onclick={() => revokeOne(d.id)}>Revoke</button>
           </div>
@@ -756,7 +756,7 @@
       {/if}
       <div class="vs-install-warning">
         <Icon name="alert-triangle" size={28}/>
-        <span>The bookmarklet contains a unique private key that will not be shown again. Drag it to your bookmarks bar or copy the link before closing.</span>
+        <span>The bookmarklet contains no private key. Its paired signing key stays in this browser profile's Portpass storage and can be revoked here.</span>
       </div>
       <div style="margin-top:8px">
         <button class="vs-close-btn" disabled={!canCommit} onclick={commitDelegate}>

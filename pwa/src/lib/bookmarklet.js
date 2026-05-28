@@ -1,18 +1,18 @@
-// Portpass autofill bookmarklet — delegate (cross-profile) variant.
-// makeDelegateBookmarkletUrl(portpassUrl, privKeyJwk) returns the javascript: URL
-// for a named delegate. privKeyJwk is a Web Crypto JWK export of the ECDSA P-256 private key.
+// Portpass autofill bookmarklet page agent.
+// The bookmarklet intentionally contains no durable private key. It only carries
+// Portpass routing data; autofill.html signs requests using Portpass-origin storage.
 
-export function makeDelegateBookmarkletUrl(portpassUrl, privKeyJwk, delegateId, relayUrl) {
+export function makeDelegateBookmarkletUrl(portpassUrl, delegateId, relayUrl) {
   const origin = new URL(portpassUrl).origin
   return 'javascript:' + encodeURIComponent(
-    `(${DELEGATE_BOOKMARKLET_IIFE.toString()})(${JSON.stringify(portpassUrl)},${JSON.stringify(origin)},${JSON.stringify(privKeyJwk)},${JSON.stringify(delegateId)},${JSON.stringify(relayUrl)})`
+    `(${DELEGATE_BOOKMARKLET_IIFE.toString()})(${JSON.stringify(portpassUrl)},${JSON.stringify(origin)},${JSON.stringify(delegateId)},${JSON.stringify(relayUrl)})`
   )
 }
 
 // Self-contained IIFE embedded in the javascript: URL.
 // PORTPASS_URL and PORTPASS_ORIGIN are baked in at install time via JSON.stringify.
-// PRIV_KEY_JWK is the ECDSA P-256 private key; DELEGATE_ID identifies the delegate on the switchboard.
-function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, PRIV_KEY_JWK, DELEGATE_ID, RELAY_URL) {
+// DELEGATE_ID identifies the paired autofill popup profile.
+function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, RELAY_URL) {
   'use strict'
 
   if (window.__ppRunning) return
@@ -89,7 +89,6 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, PRIV_KEY_JWK, 
         url: currentCanonical,
         saveUrl: saveUrl,
         isSecure: isSecure,
-        privKey: PRIV_KEY_JWK,
         delegateId: DELEGATE_ID,
         relayUrl: RELAY_URL,
         hasActiveField: !!activeEl,

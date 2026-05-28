@@ -15,8 +15,8 @@ const LOGIN_FORM_HTML = `<!doctype html><html><body>
 <script>document.getElementById('f').onsubmit=e=>e.preventDefault()</script>
 </body></html>`
 
-// Creates a delegate via the VaultSheet UI and returns its bookmarklet URL.
-// The private key is embedded in the returned javascript: URL by the app.
+// Creates a paired autofill profile via the VaultSheet UI and returns its
+// bookmarklet URL. The URL must not contain private key material.
 async function createDelegateBookmarklet(portpass: Page): Promise<string> {
   await portpass.locator('.vault-pill').click()
   await expect(portpass.locator('.vault-settings-body')).toBeVisible()
@@ -123,6 +123,36 @@ async function activateBookmarklet(
 test.setTimeout(30000)
 
 test.describe('Bookmarklet — autofill popup phases', () => {
+
+  test('generated bookmarklet contains routing data but no private key material', async ({ context }) => {
+    const { bookmarkletUrl } = await setupAutofillTest(context)
+    const decoded = decodeURIComponent(bookmarkletUrl)
+
+    expect(decoded).toContain('autofill.html')
+    expect(decoded).toContain('delegateId')
+    expect(decoded).toMatch(/afp1_[a-z2-7]{26}/)
+    expect(decoded).not.toContain('privKey')
+    expect(decoded).not.toContain('d":"')
+    expect(decoded).not.toContain('"key_ops":["sign"]')
+  })
+
+  test('revoked paired delegate is rejected even if bookmarklet URL is stolen', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await createRecord(portpass, {
+      title: 'Revoked Site', username: 'alice', password: 'hunter2',
+      autotype: '\\u\\t\\p', url: LOGIN_URL,
+    })
+
+    await portpass.locator('.vault-pill').click()
+    await portpass.getByRole('button', { name: 'Revoke', exact: true }).click()
+    await portpass.keyboard.press('Escape')
+    await expect(portpass.locator('.vault-settings-body')).not.toBeVisible({ timeout: 3000 })
+
+    const popup = await activateBookmarklet(login, bookmarkletUrl, { clickRow: false })
+    await expect(popup.locator('.pp-error-title')).toBeVisible({ timeout: 5000 })
+    await expect(login.locator('#user')).toHaveValue('')
+    await expect(login.locator('#pass')).toHaveValue('')
+  })
 
   test('waiting phase shows selected record title', async ({ context }) => {
     const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)

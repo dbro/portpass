@@ -3,6 +3,12 @@ import { get, set, del } from 'idb-keyval'
 const STORAGE_KEY = 'delegates-v1'
 const SWITCHBOARD_URL_DEFAULT = 'ws://localhost:7577'
 
+function delegateDisplayCode(id) {
+  if (!id?.startsWith('afp1_')) return null
+  const fp = id.slice(5)
+  return fp.slice(-8).replace(/(.{4})/g, '$1-').replace(/-$/, '').toUpperCase()
+}
+
 async function load() {
   return (await get(STORAGE_KEY)) ?? {}
 }
@@ -26,12 +32,19 @@ export async function getDelegates(vaultUuid) {
   return (all[vaultUuid] ?? []).map(migrate)
 }
 
+export async function getDelegate(vaultUuid, delegateId) {
+  if (!vaultUuid || !delegateId) return null
+  const all = await load()
+  return (all[vaultUuid] ?? []).map(migrate).find(d => d.id === delegateId) ?? null
+}
+
 export async function addDelegate(vaultUuid, name, publicKeySpki, id = crypto.randomUUID()) {
   const all = await load()
   const delegate = {
     id,
     name,
     publicKey: Array.from(new Uint8Array(publicKeySpki)),
+    displayCode: delegateDisplayCode(id),
     created: Date.now(),
     bcCount: 0,
     bcLastUsed: null,
@@ -71,6 +84,23 @@ export async function verifyDelegate(vaultUuid, spkiBytes, message, signatureByt
     } catch { continue }
   }
   return null
+}
+
+export async function verifyDelegateById(vaultUuid, delegateId, message, signatureBytes) {
+  const d = await getDelegate(vaultUuid, delegateId)
+  if (!d) return null
+  try {
+    const spkiBytes = new Uint8Array(d.publicKey)
+    const key = await crypto.subtle.importKey(
+      'spki', spkiBytes, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']
+    )
+    const valid = await crypto.subtle.verify(
+      { name: 'ECDSA', hash: 'SHA-256' }, key, signatureBytes, message
+    )
+    return valid ? d : null
+  } catch {
+    return null
+  }
 }
 
 // Record a successful page fill for a delegate. Called when autofill.html shows
