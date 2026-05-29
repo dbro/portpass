@@ -529,7 +529,7 @@
   <div class="vault-section">
     <div class="vault-section-title">AUTOFILL</div>
     <p class="muted" style="font-size:14px;margin:0 0 14px;line-height:1.5">
-      Create a uniquely keyed bookmarklet for each browser profile where you want autofill.
+      Use same-profile autofill when Portpass and login pages are in this browser profile. Use cross-profile autofill when this is your clean Portpass profile and login pages are opened from another profile.
     </p>
     {#if delegates.length > 0}
       <div class="delegate-list">
@@ -546,8 +546,7 @@
         {/each}
       </div>
     {/if}
-    <button class="vault-unlock-more" onclick={openNewDelegate}>+ New bookmarklet</button>
-    <button class="vault-unlock-more" onclick={openPairDelegate}>+ Add autofill profile</button>
+    <button class="vault-unlock-more" onclick={openNewDelegate}>+ Same-profile bookmarklet</button>
 
     <!-- Cross-profile autofill -->
     <button class="delegate-advanced-toggle muted" onclick={toggleAdvanced}>
@@ -555,45 +554,53 @@
     </button>
     {#if advancedOpen}
       <div class="delegate-advanced-body">
+        <div class="muted" style="font-size:13px;line-height:1.45;margin-bottom:10px">
+          Starting from this clean Portpass profile:
+        </div>
+        <ol class="vs-cross-profile-steps">
+          <li>In the filling profile, open <span class="mono">{window.location.origin + import.meta.env.BASE_URL + 'autofill.html?pair=1'}</span>.</li>
+          <li>Create a pairing token there, then paste it here.</li>
+          <li>After pairing, drag or copy the generated bookmarklet into the filling profile's bookmarks bar.</li>
+          <li>Turn on the local switchboard relay below before using the bookmarklet.</li>
+        </ol>
+        <button class="vault-unlock-more" onclick={openPairDelegate}>+ Pair filling profile</button>
         <div class="vault-row" style="margin-bottom:4px">
-          <span class="vault-label muted" style="font-size:13px">Enable cross-profile autofill</span>
+          <span class="vault-label muted" style="font-size:13px">Use local switchboard relay</span>
           <div class="vault-segmented">
             <button class:on={!$crossProfileEnabled} disabled={!delegates.length} onclick={async () => { await setCrossProfileEnabled(_vaultUuid, false); crossProfileEnabled.set(false) }}>Off</button>
             <button class:on={$crossProfileEnabled}  disabled={!delegates.length} onclick={async () => { await setCrossProfileEnabled(_vaultUuid, true);  crossProfileEnabled.set(true)  }}>On</button>
           </div>
         </div>
-        {#if $crossProfileEnabled}
-          <label class="vault-label muted" style="font-size:12px;display:block;margin-bottom:4px">
-            WebSocket Relay URL
-            <input
-              class="input"
-              style="font-size:13px;display:block;width:100%;margin-top:4px"
-              bind:value={editSwitchboardUrl}
-              oninput={() => { switchboardUrlDirty = editSwitchboardUrl !== get(switchboardUrl) }}
-              placeholder="ws://localhost:7577"
-            />
-          </label>
-          {#if switchboardUrlDirty}
-            <div class="switchboard-url-actions">
-              <button class="btn btn-ghost" style="font-size:13px" onclick={cancelRelayUrlEdit}>Cancel</button>
-              <button class="btn btn-primary" style="font-size:13px" onclick={saveRelayUrl}>Save</button>
-            </div>
-          {/if}
-          <div class="switchboard-status-row">
-            <span class="switchboard-status-dot" class:switchboard-ok={$switchboardConnected} class:switchboard-error={!$switchboardConnected}></span>
-            <span class="muted" style="font-size:13px">
-              {$switchboardConnected ? 'Cross-profile autofill ready' : 'websocket relay not connected'}
-            </span>
-          </div>
-          <div class="muted" style="font-size:12px">
-            Count of cross-profile autofill uses: {totalRelayCount}{#if lastRelayUsed} · Last {fmtRelative(lastRelayUsed)}{/if}
-          </div>
-          <div class="muted" style="font-size:12px;line-height:1.4;margin-top:8px">
-            To pair another browser profile, open
-            <span class="mono">{window.location.origin + import.meta.env.BASE_URL + 'autofill.html?pair=1'}</span>
-            in that filling profile, then paste its token here with Add autofill profile.
+        {#if !delegates.length}
+          <div class="muted" style="font-size:12px;line-height:1.4">
+            Pair a filling profile before enabling the relay.
           </div>
         {/if}
+        <label class="vault-label muted" style="font-size:12px;display:block;margin-bottom:4px">
+          WebSocket Relay URL
+          <input
+            class="input"
+            style="font-size:13px;display:block;width:100%;margin-top:4px"
+            bind:value={editSwitchboardUrl}
+            oninput={() => { switchboardUrlDirty = editSwitchboardUrl !== get(switchboardUrl) }}
+            placeholder="ws://localhost:7577"
+          />
+        </label>
+        {#if switchboardUrlDirty}
+          <div class="switchboard-url-actions">
+            <button class="btn btn-ghost" style="font-size:13px" onclick={cancelRelayUrlEdit}>Cancel</button>
+            <button class="btn btn-primary" style="font-size:13px" onclick={saveRelayUrl}>Save</button>
+          </div>
+        {/if}
+        <div class="switchboard-status-row">
+          <span class="switchboard-status-dot" class:switchboard-ok={$crossProfileEnabled && $switchboardConnected} class:switchboard-error={!$crossProfileEnabled || !$switchboardConnected}></span>
+          <span class="muted" style="font-size:13px">
+            {!$crossProfileEnabled ? 'Cross-profile relay disabled' : ($switchboardConnected ? 'Cross-profile autofill ready' : 'websocket relay not connected')}
+          </span>
+        </div>
+        <div class="muted" style="font-size:12px">
+          Count of cross-profile autofill uses: {totalRelayCount}{#if lastRelayUsed} · Last {fmtRelative(lastRelayUsed)}{/if}
+        </div>
       </div>
     {/if}
   </div>
@@ -786,7 +793,7 @@
     onkeydown={e => { if (e.key === 'Escape' && !newDelegateBusy) cancelOrSave() }}>
     <div class="modal modal-install" role="dialog" aria-modal="true" tabindex="-1" onclick={e => e.stopPropagation()} onkeydown={e => e.stopPropagation()}>
       <div class="vs-modal-header">
-        <div class="modal-title">New autofill bookmarklet</div>
+        <div class="modal-title">New same-profile bookmarklet</div>
         <button class="vs-modal-x" onclick={() => { if (!newDelegateBusy) cancelOrSave() }} aria-label="Cancel">
           <Icon name="x" size={18}/>
         </button>
@@ -841,7 +848,7 @@
       {/if}
       <div class="vs-install-warning">
         <Icon name="alert-triangle" size={28}/>
-        <span>The bookmarklet contains no private key. Its paired signing key stays in this browser profile's Portpass storage and can be revoked here.</span>
+        <span>The bookmarklet contains no private key. Its paired signing key stays in this browser profile's Portpass storage and can be revoked here. Use this only when Portpass and the login pages are in the same browser profile.</span>
       </div>
       <div style="margin-top:8px">
         <button class="vs-close-btn" disabled={!canCommit} onclick={commitDelegate}>
@@ -859,7 +866,7 @@
     onkeydown={e => { if (e.key === 'Escape' && !pairDelegateBusy) closePairDelegate() }}>
     <div class="modal modal-install" role="dialog" aria-modal="true" tabindex="-1" onclick={e => e.stopPropagation()} onkeydown={e => e.stopPropagation()}>
       <div class="vs-modal-header">
-        <div class="modal-title">Add autofill profile</div>
+        <div class="modal-title">Pair cross-profile autofill</div>
         <button class="vs-modal-x" onclick={() => { if (!pairDelegateBusy) closePairDelegate() }} aria-label="Cancel">
           <Icon name="x" size={18}/>
         </button>
@@ -1418,6 +1425,18 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
+  }
+
+  .vs-cross-profile-steps {
+    margin: 0 0 2px;
+    padding-left: 20px;
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .vs-cross-profile-steps li {
+    margin: 0 0 6px;
   }
 
   .switchboard-url-actions {

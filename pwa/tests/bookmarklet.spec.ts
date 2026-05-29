@@ -21,7 +21,7 @@ async function createDelegateBookmarklet(portpass: Page): Promise<string> {
   await portpass.locator('.vault-pill').click()
   await expect(portpass.locator('.vault-settings-body')).toBeVisible()
 
-  await portpass.getByRole('button', { name: '+ New bookmarklet' }).click()
+  await portpass.getByRole('button', { name: '+ Same-profile bookmarklet' }).click()
   await portpass.getByPlaceholder('e.g. Chrome — work profile').fill('test')
   await portpass.locator('.vs-bookmarklet-chip:not(.chip-inactive)').waitFor({ timeout: 5000 })
   const url = await portpass.locator('.vs-bookmarklet-chip').getAttribute('href') ?? ''
@@ -166,7 +166,9 @@ test.describe('Bookmarklet — autofill popup phases', () => {
     expect(token).toMatch(/^ppair1_/)
 
     await portpass.locator('.vault-pill').click()
-    await portpass.getByRole('button', { name: '+ Add autofill profile' }).click()
+    await portpass.getByRole('button', { name: /Cross-profile autofill/ }).click()
+    await expect(portpass.getByText('Starting from this clean Portpass profile:')).toBeVisible()
+    await portpass.getByRole('button', { name: '+ Pair filling profile' }).click()
     await portpass.getByPlaceholder('Paste ppair1_… token from the autofill profile').fill(token)
     await portpass.getByRole('button', { name: 'Check token' }).click()
     await expect(portpass.locator('.vs-install-warning')).toContainText('Pairing code')
@@ -182,7 +184,8 @@ test.describe('Bookmarklet — autofill popup phases', () => {
   test('wrong autofill pairing token is rejected', async ({ context }) => {
     const { portpass } = await setupAutofillTest(context)
     await portpass.locator('.vault-pill').click()
-    await portpass.getByRole('button', { name: '+ Add autofill profile' }).click()
+    await portpass.getByRole('button', { name: /Cross-profile autofill/ }).click()
+    await portpass.getByRole('button', { name: '+ Pair filling profile' }).click()
     await portpass.getByPlaceholder('Paste ppair1_… token from the autofill profile').fill('ppair1_not-a-token')
     await portpass.getByRole('button', { name: 'Check token' }).click()
     await expect(portpass.locator('.unlock-error')).toContainText('Pairing token')

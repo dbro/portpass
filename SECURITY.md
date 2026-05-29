@@ -52,7 +52,7 @@ Neither browser provides a consolidated view — you must check each extension i
 
 Once you have identified which extensions have broad access, consider two distinct surfaces:
 
-1. **Extensions that can run on the Portpass URL** (`dbro.github.io`): highest impact. They can observe your master password as you type it, read any revealed password in the UI, and — during the brief window when the "New bookmarklet" modal is open — read the delegate private key from the chip's link attribute. If any extension you cannot fully trust has this access, use a dedicated profile for Portpass instead.
+1. **Extensions that can run on the Portpass URL** (`dbro.github.io`): highest impact. They can observe your master password as you type it, read any revealed password in the UI, and interact with Portpass-origin storage and scripts. If any extension you cannot fully trust has this access, use a dedicated profile for Portpass instead.
 
 2. **Extensions that can run on login pages**: they can read form field values after autofill. This is the same exposure that exists with every password manager, including native apps — an extension that runs on `bank.com` can read whatever was typed or filled into that page. Audit extensions on your sensitive login pages separately from the Portpass audit.
 
@@ -84,7 +84,7 @@ Extensions are installed per-profile. A profile with no extensions has no extens
 
 - **Cross-profile autofill**: Portpass runs in a clean, extension-free profile; the bookmarklet runs in your main browsing profile. Credentials travel via [switchboard](https://github.com/dbro/switchboard), a tiny local WebSocket broker (`localhost:7577`). This preserves full extension isolation — Portpass never touches the browsing profile. Requires switchboard to be running as a background service.
 
-Both modes use the **delegate model**: each bookmarklet installation holds an ECDSA P-256 private key; the corresponding public key is registered in Portpass. Every autofill request is signed with the private key and verified by Portpass before any credentials are exchanged. This means a malicious extension on the page cannot impersonate a legitimate bookmarklet and trick Portpass into delivering credentials to an attacker's key.
+Both modes use the **delegate model**: each paired autofill profile has an ECDSA P-256 signing key stored by Portpass's `autofill.html` page in Portpass-origin browser storage. The key is created as non-extractable where the browser supports WebCrypto non-extractability. The bookmarklet contains only routing data and the public delegate ID; it does not contain the private key. Every autofill request is signed by `autofill.html` and verified by Portpass before any credentials are exchanged.
 
 ---
 
@@ -143,39 +143,35 @@ Passkeys (WebAuthn) eliminate the clipboard and extension risks entirely — the
 
 ## Autofill security
 
-The Autofill bookmarklet uses a **delegate model** to create a cryptographically authenticated channel between the bookmarklet and Portpass, without any server infrastructure and without browser extensions.
+The Autofill bookmarklet uses a **delegate model** to create a cryptographically authenticated channel between a paired `autofill.html` popup and Portpass, without a browser extension. Same-profile autofill needs no helper service. Cross-profile autofill uses a local switchboard relay because browser profiles cannot communicate directly.
 
 ### Trusted islands
 
-- **Bookmarklet URL** — stored in the browser's bookmark store, which no web API can read or modify. Contains an ECDSA P-256 private key unique to this installation.
-- **relay.html** — served from the Portpass HTTPS origin, cross-origin isolated from the page being autofilled. Receives the private key from the bookmarklet via `postMessage` with strict `targetOrigin`.
-- **Portpass** — holds the registered public key for each delegate; verifies every autofill request signature before acting.
+- **Bookmarklet URL** — stored in the browser's bookmark store, which no web API can read or modify. Contains only page-agent code, the Portpass URL, relay routing data, and the public delegate ID. It is not a secret.
+- **autofill.html** — served from the Portpass HTTPS origin, cross-origin isolated from the page being autofilled. Holds the paired delegate's non-extractable ECDSA P-256 signing key in Portpass-origin browser storage.
+- **Portpass** — holds the registered public key for each delegate; verifies every autofill request signature, freshness value, delegate status, and URL binding before acting.
 
 ### Authentication
 
-Before exchanging any credentials, relay.html signs a challenge `{relayNonce, ecdhSpki}` (same-profile) or `{url, nonce, ecdh, timestamp}` (cross-profile) with the delegate's ECDSA P-256 private key. Portpass verifies the signature against the registered public keys. A forged or unsigned request is silently rejected.
+Before exchanging any credentials, `autofill.html` creates a fresh ECDH key pair and signs a request containing the delegate ID, action, current page URL/origin, timestamp, nonce, and ECDH public key. Portpass verifies the signature against the registered delegate public key. Stale timestamps, reused nonces, revoked delegates, wrong-origin URL claims, and forged or unsigned requests are rejected.
 
-This prevents the masquerade attack: a malicious extension or page script running at the Portpass origin can observe the BroadcastChannel but cannot forge a valid ECDSA signature for a registered delegate's key.
+This prevents the masquerade attack: a malicious page script can open the popup and send page context, but it cannot forge a valid ECDSA signature for a registered delegate key. A malicious extension that can run on the Portpass origin remains in the high-impact category described above.
 
 ### Credential encryption in transit
 
-After authentication, credentials are encrypted with ECDH P-256 + AES-256-GCM. The session key is ephemeral — a fresh ECDH key pair is generated for each autofill session. Credentials in transit are ciphertext only; no key material appears on the channel.
+After authentication, credentials are encrypted with ECDH P-256 + AES-256-GCM. The session key is ephemeral -- a fresh ECDH key pair is generated for each autofill session. Credential replies are bound to the request ID, previous message hash, delegate ID, and recipient before encryption. Credentials in transit are ciphertext only; no key material appears on the channel.
 
 ### Cross-profile relay server
 
-The switchboard (`localhost:7577`) is a dumb pipe — it stores and forwards encrypted blobs without inspecting content. It binds to `127.0.0.1` only and is not accessible over the network. An attacker who can read the relay server's memory has OS-level access and is outside the threat model.
+The switchboard (`localhost:7577`) is a dumb pipe: it stores and forwards signed requests and encrypted replies without needing to inspect their contents. It binds to `127.0.0.1` only and is not accessible over the network. Portpass treats the relay as untrusted transport that may observe metadata, delay, drop, replay, reorder, or inject packets. Signatures, timestamps, nonces, reply binding, and encryption provide the security properties; the relay itself is not trusted.
+
+Cross-profile credential release is intentionally stricter than same-profile autofill. Portpass sends credentials over the relay only for exact authorized URL matches. If there is no exact match, Portpass returns metadata only, such as a near-match count, and the user must view or update the record inside Portpass.
 
 ### What autofill does not protect against
 
 - **Credential in the DOM**: after filling, the credential is in `input.value` and readable by any extension on the page. This is identical to manual typing or any other password manager and cannot be avoided without browser-level APIs.
-- **Delegate private key in the bookmark store**: the bookmark store is stored as a plaintext JSON file in the browser profile directory. Any process that can read that directory — including backup software, another user account with filesystem access, or malware with user-level permissions — can extract the private key. The key persists indefinitely, so an exfiltrated copy remains valid until the delegate is explicitly revoked in Portpass.
-
-  However, the key is an *authentication token*, not an encryption key. It does not contain or unlock any vault data on its own. An attacker who holds the key can only use it by making a signed request to a running, unlocked Portpass instance — and only via BroadcastChannel (same browser profile) or the local switchboard WebSocket (same machine). Both channels require the attacker to be active on the same machine at the same moment the user has Portpass open. At that point the attacker already has access to more direct attacks.
-
-  This makes the key fundamentally different from a password captured off the clipboard: a clipboard password is immediately and permanently usable anywhere; the delegate key requires an ongoing session to exploit and becomes worthless the moment the vault is locked.
-
-  The same property that protects the key — the bookmark store is inaccessible to web pages — also means Portpass cannot rotate it automatically. Periodic manual rotation (revoke the old delegate in VaultSheet, drag a new bookmarklet) is good hygiene, especially if you suspect a device may have been accessed by someone else. A future VaultSheet version may display key age to prompt rotation.
-- **Extension present at drag-install time**: an extension running in the **Portpass profile** (the clean profile where the bookmarklet is dragged *from*) could modify the bookmarklet's JavaScript or substitute a different key before the drag completes. This is why the clean profile must have no extensions — not just to protect the vault, but to ensure the bookmarklet delivered to the bookmarks bar is genuine. Extensions in the *destination* browsing profile cannot intercept the bookmarklet because it arrives already stored in the bookmark store, which extensions cannot read.
+- **Delegate key in Portpass-origin browser storage**: the durable signing key is no longer embedded in the bookmarklet, but it still lives in the filling browser profile's site storage. It is created as a non-extractable WebCrypto key, which prevents ordinary JavaScript export, but a fully compromised browser profile, malicious browser, local malware, or privileged debugging access may still be able to abuse it by asking the browser to sign requests. Revoke the delegate in Portpass if a profile or device may be compromised.
+- **Extension present at pairing or bookmarklet install time**: an extension running on the Portpass origin in either the clean profile or filling profile could interfere with pairing, alter the bookmarklet JavaScript, or abuse the paired `autofill.html` page. This is why the clean Portpass profile should have no extensions. Extensions in the filling profile cannot extract the non-extractable private key through normal web APIs, but if they can run on login pages they can still read values after they are filled.
 
 ---
 
