@@ -68,6 +68,7 @@
     try {
       ;[fileHandle] = await window.showOpenFilePicker({
         types: [{ description: 'Password Safe', accept: { 'application/octet-stream': ['.psafe3', '.dat'] } }],
+        mode: 'readwrite',
       })
       mode = 'unlock'
       error = ''
@@ -127,10 +128,14 @@
         buf = await fallbackFile.arrayBuffer()
       } else {
         // requestPermission is a Chrome extension; guard for Firefox.
-        const perm = fileHandle.requestPermission
-          ? await fileHandle.requestPermission({ mode: 'read' })
-          : 'granted'
-        if (perm !== 'granted') { error = 'File access was denied.'; return }
+        // Request readwrite so createWritable() works on Android; fall back to read if denied.
+        if (fileHandle.requestPermission) {
+          let perm = await fileHandle.requestPermission({ mode: 'readwrite' })
+          if (perm !== 'granted') {
+            perm = await fileHandle.requestPermission({ mode: 'read' })
+            if (perm !== 'granted') { error = 'File access was denied.'; return }
+          }
+        }
         let file
         try { file = await fileHandle.getFile() } catch (e) {
           if (e.name === 'NotFoundError') { await handleFileMissing(); return }
@@ -167,13 +172,14 @@
       const fname = fileHandle?.name ?? fallbackFile?.name
 
       // 2. Request file permission (file handle path only — user activation requirement)
+      // Request readwrite so createWritable() works on Android; fall back to read if denied.
       if (fileHandle) {
-        const perm = fileHandle.requestPermission
-          ? await fileHandle.requestPermission({ mode: 'read' })
-          : 'granted'
-        if (perm !== 'granted') {
-          error = 'File access was denied.'
-          return
+        if (fileHandle.requestPermission) {
+          let perm = await fileHandle.requestPermission({ mode: 'readwrite' })
+          if (perm !== 'granted') {
+            perm = await fileHandle.requestPermission({ mode: 'read' })
+            if (perm !== 'granted') { error = 'File access was denied.'; return }
+          }
         }
       }
 
@@ -276,10 +282,13 @@
         const handle = cred.handle
         if (!handle) continue // no stored handle; user must manually re-link
         try {
-          const perm = handle.requestPermission
-            ? await handle.requestPermission({ mode: 'read' })
-            : 'granted'
-          if (perm !== 'granted') continue
+          if (handle.requestPermission) {
+            let perm = await handle.requestPermission({ mode: 'readwrite' })
+            if (perm !== 'granted') {
+              perm = await handle.requestPermission({ mode: 'read' })
+              if (perm !== 'granted') continue
+            }
+          }
           const vaultUuid = await loadVaultFile(handle, cred.masterPassword)
           if (vaultUuid !== cred.vaultUuid) { closeDatabase(vaultUuid); continue }
           const info  = getDatabaseInfo(vaultUuid)

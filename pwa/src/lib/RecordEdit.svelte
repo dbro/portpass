@@ -51,7 +51,7 @@
   let totpPeriod   = $state(untrack(() => record?.TOTPTimeStep || 30))
 
   // Custom fields — independent editable copy of initial prop value (first 9 only; overflow preserved on save)
-  let customFields  = $state(untrack(() => (record?.CustomFields ?? []).slice(0, 9).map(cf => ({ Name: cf.Name, Value: cf.Value, Sensitive: !!cf.Sensitive }))))
+  let customFields  = $state(untrack(() => (record?.CustomFields ?? []).slice(0, 9).map(cf => ({ Name: cf.Name, Value: cf.Value, Sensitive: !!cf.Sensitive, OriginalName: cf.Name }))))
   let overflowFields = untrack(() => (record?.CustomFields ?? []).slice(9))
   let totpGearOpen = $state(false)
   let totpRevealed = $state(false)

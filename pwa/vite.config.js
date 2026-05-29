@@ -86,6 +86,7 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm,gz,webmanifest}'],
+        navigateFallbackDenylist: [/\/autofill\.html(?:\?.*)?$/],
         maximumFileSizeToCacheInBytes: 5000000,
 	// Inject the header into the requests
         manifestTransforms: [async (entries) => {

@@ -333,9 +333,10 @@ func updateRecordFields(this js.Value, args []js.Value) interface{} {
 			} else {
 				// Use *string for Value so JSON null (withheld) can be distinguished from "" (clear).
 				type cfInput struct {
-					Name      string  `json:"Name"`
-					Value     *string `json:"Value"`
-					Sensitive bool    `json:"Sensitive"`
+					Name         string  `json:"Name"`
+					Value        *string `json:"Value"`
+					Sensitive    bool    `json:"Sensitive"`
+					OriginalName string  `json:"OriginalName,omitempty"`
 				}
 				var inputs []cfInput
 				if err := json.Unmarshal([]byte(value), &inputs); err != nil {
@@ -350,8 +351,12 @@ func updateRecordFields(this js.Value, args []js.Value) interface{} {
 					if inp.Value != nil {
 						cfs[i].Value = *inp.Value
 					}
+					lookupName := inp.Name
+					if inp.OriginalName != "" {
+						lookupName = inp.OriginalName
+					}
 					for _, ex := range rec.CustomFields {
-						if ex.Name == inp.Name {
+						if ex.Name == lookupName {
 							if inp.Value == nil {
 								cfs[i].Value = ex.Value
 							}
@@ -568,18 +573,23 @@ func standardFieldValue(rec pwsafe.Record, fieldname string) (string, error) {
 	}
 }
 
-// writeToClipboard writes value to the clipboard via the browser API.
-// Returns "{}" or a JSON hash object depending on returnHash.
+// writeToClipboard returns the value (and optionally its SHA-256 hash) as JSON.
+// The caller (JS) is responsible for writing to the clipboard so the async
+// Promise rejection can be observed and surfaced to the user.
 func writeToClipboard(value string, returnHash bool) string {
-	js.Global().Get("navigator").Get("clipboard").Call("writeText", value)
 	if !returnHash {
-		return `{}`
+		type Result struct {
+			Value string `json:"value"`
+		}
+		data, _ := json.Marshal(Result{Value: value})
+		return string(data)
 	}
 	h := sha256.Sum256([]byte(value))
 	type Result struct {
-		Hash string `json:"hash"`
+		Value string `json:"value"`
+		Hash  string `json:"hash"`
 	}
-	data, _ := json.Marshal(Result{Hash: hex.EncodeToString(h[:])})
+	data, _ := json.Marshal(Result{Value: value, Hash: hex.EncodeToString(h[:])})
 	return string(data)
 }
 
@@ -645,8 +655,11 @@ func copyTOTP(this js.Value, args []js.Value) interface{} {
 		t0 = rec.TOTPStartTime.Unix()
 	}
 	code, _ := pwsafe.ComputeTOTP(rec.TwoFactorKey, time.Now().Unix(), t0, rec.TOTPTimeStep, rec.TOTPLength)
-	js.Global().Get("navigator").Get("clipboard").Call("writeText", code)
-	return `{}`
+	type Result struct {
+		Value string `json:"value"`
+	}
+	data, _ := json.Marshal(Result{Value: code})
+	return string(data)
 }
 
 func getFieldValueFn(this js.Value, args []js.Value) interface{} {

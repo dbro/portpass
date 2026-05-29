@@ -5,10 +5,11 @@
   import { selectedFile, dbItems, secondaryVaults, switchboardUrl, switchboardConnected, crossProfileEnabled, delegatesVersion } from '../store.js'
   import { isBiometricSupported, isBiometricEnrolled, enrollBiometric, clearBiometric } from './biometric.js'
   import { makeDelegateBookmarkletUrl } from './bookmarklet.js'
-  import { getDelegates, addDelegate, revokeDelegate, setSwitchboardUrl, setCrossProfileEnabled } from './delegates.js'
+  import { getDelegates, addDelegate, revokeDelegate, setSwitchboardUrl, setCrossProfileEnabled, delegateFillMode } from './delegates.js'
+  import { createPairedAutofillProfile, removePairedAutofillProfile, parsePairingToken } from './pairedAutofill.js'
   import Icon from './Icon.svelte'
 
-  let { isDesktop, bookmarkletsSupported = false, onback, onlock, onlockall, onlocksecondary, onunlockadditional, ondbsave, ondirtychange, theme, accent, ontheme, onaccent } = $props()
+  let { isDesktop, bookmarkletsSupported = false, onback, onlock, onlockall, onlocksecondary, onunlockadditional, ondbsave, onsvdbsave, ondirtychange, theme, accent, ontheme, onaccent } = $props()
 
   // ── Biometric ──────────────────────────────────────────────────────────────
   let biometricAvailable = $state(false)
@@ -153,6 +154,7 @@
     svDetailOrigDesc = svDetailDraftDesc
     secondaryVaults.update(vs => vs.map(v => v.uuid === uuid ? { ...v, name: svDetailDraftName } : v))
     selectedDetailVault = null
+    onsvdbsave?.(uuid)
   }
 
   function saveAndBack() {
@@ -164,7 +166,6 @@
   let delegates = $state([])
   let newDelegateOpen = $state(false)
   let newDelegateName = $state('')
-  let newDelegatePrivKeyJwk = $state(null)
   let newDelegatePubKeySpki = $state(null)
   let newDelegateId   = $state(null)
   let newDelegateUrl  = $state('')
@@ -176,10 +177,15 @@
   let chipDragged = $state(false)
   let chipLinked  = $state(false)  // persistent: set on copy, not reset by the feedback timer
   let globeTipOpen = $state(false)
+  let pairDelegateOpen = $state(false)
+  let pairDelegateToken = $state('')
+  let pairDelegateError = $state('')
+  let pairDelegatePreview = $state(null)
+  let pairDelegateBusy = $state(false)
 
   let chipUsed   = $derived(chipDragged || chipLinked)
-  let canUseChip = $derived(!!newDelegateName.trim() && !!newDelegatePrivKeyJwk)
-  let canCommit  = $derived((!!newDelegateName.trim() || chipUsed) && !!newDelegatePrivKeyJwk && !newDelegateBusy)
+  let canUseChip = $derived(!!newDelegateName.trim() && !!newDelegatePubKeySpki)
+  let canCommit  = $derived((!!newDelegateName.trim() || chipUsed) && !!newDelegatePubKeySpki && !newDelegateBusy)
 
   function defaultDelegateName() {
     return 'Bookmarklet created ' + new Date(newDelegateBirthAt ?? Date.now()).toLocaleString(
@@ -191,7 +197,6 @@
   async function openNewDelegate() {
     newDelegateOpen = true
     newDelegateName = ''
-    newDelegatePrivKeyJwk = null
     newDelegatePubKeySpki = null
     newDelegateId   = null
     newDelegateUrl  = ''
@@ -203,15 +208,14 @@
     chipLinked  = false
     globeTipOpen = false
     try {
-      const keyPair = await crypto.subtle.generateKey(
-        { name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']
-      )
-      newDelegatePrivKeyJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey)
-      newDelegatePubKeySpki = await crypto.subtle.exportKey('spki', keyPair.publicKey)
-      newDelegateId  = crypto.randomUUID()
+      const profile = await createPairedAutofillProfile({
+        relayUrl: get(switchboardUrl),
+      })
+      newDelegateId = profile.delegateId
+      newDelegatePubKeySpki = new Uint8Array(profile.publicKey).buffer
       newDelegateUrl = makeDelegateBookmarkletUrl(
         window.location.origin + import.meta.env.BASE_URL,
-        newDelegatePrivKeyJwk, newDelegateId,
+        newDelegateId,
         get(switchboardUrl)
       )
     } catch (e) {
@@ -222,7 +226,6 @@
   function closeNewDelegate() {
     newDelegateOpen = false
     newDelegateName = ''
-    newDelegatePrivKeyJwk = null
     newDelegatePubKeySpki = null
     newDelegateId   = null
     newDelegateUrl  = ''
@@ -251,7 +254,10 @@
 
   async function cancelOrSave() {
     if (chipUsed) await commitDelegate()
-    else closeNewDelegate()
+    else {
+      if (newDelegateId) await removePairedAutofillProfile(newDelegateId).catch(() => {})
+      closeNewDelegate()
+    }
   }
 
   async function revokeOne(delegateId) {
@@ -259,19 +265,77 @@
     delegates = delegates.filter(d => d.id !== delegateId)
   }
 
+  function openPairDelegate() {
+    pairDelegateOpen = true
+    pairDelegateToken = ''
+    pairDelegateError = ''
+    pairDelegatePreview = null
+    pairDelegateBusy = false
+  }
+
+  function closePairDelegate() {
+    pairDelegateOpen = false
+    pairDelegateToken = ''
+    pairDelegateError = ''
+    pairDelegatePreview = null
+    pairDelegateBusy = false
+  }
+
+  async function refreshPairingPreview() {
+    pairDelegateError = ''
+    pairDelegatePreview = null
+    const token = pairDelegateToken.trim()
+    if (!token) return
+    try {
+      const parsed = await parsePairingToken(token)
+      pairDelegatePreview = parsed
+    } catch (e) {
+      pairDelegateError = token.startsWith('ppair1_') ? (e.message || 'Pairing token is not valid') : ''
+    }
+  }
+
+  async function commitPairDelegate() {
+    if (!_vaultUuid || pairDelegateBusy) return
+    pairDelegateBusy = true
+    pairDelegateError = ''
+    try {
+      const parsed = pairDelegatePreview || await parsePairingToken(pairDelegateToken)
+      const name = parsed.name || `Everyday profile ${parsed.displayCode}`
+      const delegate = await addDelegate(_vaultUuid, name, parsed.publicKey, parsed.delegateId, {
+        pairingId: parsed.pairingId,
+        relayUrl: parsed.relayUrl,
+      })
+      delegates = [delegate, ...delegates]
+      if (parsed.relayUrl && parsed.relayUrl !== get(switchboardUrl)) {
+        await setSwitchboardUrl(_vaultUuid, parsed.relayUrl)
+        switchboardUrl.set(parsed.relayUrl)
+      }
+      await setCrossProfileEnabled(_vaultUuid, true)
+      crossProfileEnabled.set(true)
+      closePairDelegate()
+    } catch (e) {
+      pairDelegateError = e.message || 'Failed to pair autofill profile'
+    } finally {
+      pairDelegateBusy = false
+    }
+  }
+
   // ── Advanced / switchboard ────────────────────────────────────────────────
-  let advancedOpen        = $state(false)
+  let relayAdvancedOpen   = $state(false)
   let editSwitchboardUrl  = $state('')
   let switchboardUrlDirty = $state(false)
+  let pairingPageUrl      = $derived(
+    window.location.origin + import.meta.env.BASE_URL + `autofill.html?pair=1&theme=${encodeURIComponent(theme)}&accent=${encodeURIComponent(accent)}`
+  )
 
   let totalRelayCount = $derived(delegates.reduce((n, d) => n + (d.relayCount ?? 0), 0))
   let lastRelayUsed   = $derived(
     delegates.reduce((t, d) => d.relayLastUsed ? Math.max(t, d.relayLastUsed) : t, 0) || null
   )
 
-  function toggleAdvanced() {
-    advancedOpen = !advancedOpen
-    if (advancedOpen) {
+  function toggleRelayAdvanced() {
+    relayAdvancedOpen = !relayAdvancedOpen
+    if (relayAdvancedOpen) {
       editSwitchboardUrl  = get(switchboardUrl)
       switchboardUrlDirty = false
     }
@@ -449,67 +513,111 @@
   <div class="vault-section">
     <div class="vault-section-title">AUTOFILL</div>
     <p class="muted" style="font-size:14px;margin:0 0 14px;line-height:1.5">
-      Create a uniquely keyed bookmarklet for each browser profile where you want autofill.
+      Fill logins straight from this vault. Set up either method — or both.
     </p>
     {#if delegates.length > 0}
       <div class="delegate-list">
         {#each delegates as d}
           {@const total   = (d.bcCount ?? 0) + (d.relayCount ?? 0)}
           {@const lastTs  = Math.max(d.bcLastUsed ?? 0, d.relayLastUsed ?? 0) || null}
+          {@const mode    = delegateFillMode(d)}
           <div class="delegate-row">
             <div class="delegate-info">
               <span class="delegate-name">{d.name}</span>
-              <span class="delegate-meta muted">Created {fmtDate(d.created)} · {total} {total === 1 ? 'page filled' : 'pages filled'}{lastTs ? ' · Last filled ' + fmtRelative(lastTs) : ''}</span>
+              <span class="delegate-meta muted">Created {fmtDate(d.created)}{d.displayCode ? ' · ' + d.displayCode : ''} · {total} {total === 1 ? 'page filled' : 'pages filled'} ({mode}){lastTs ? ' · Last filled ' + fmtRelative(lastTs) : ''}</span>
             </div>
             <button class="delegate-revoke" onclick={() => revokeOne(d.id)}>Revoke</button>
           </div>
         {/each}
       </div>
     {/if}
-    <button class="vault-unlock-more" onclick={openNewDelegate}>+ New bookmarklet</button>
+    <div class="vs-autofill-options">
+      <div class="vs-autofill-card">
+        <div class="vs-option-heading-row">
+          <h3 class="vs-option-title">Same-profile bookmarklet</h3>
+          <span class="vs-tradeoff-badge">SIMPLEST</span>
+        </div>
+        <p class="muted vs-option-copy">
+          Portpass and the sites you log in to share one browser profile. Quickest to set up; the bookmarklet is exposed to any extensions in this profile.
+        </p>
+        <button class="vs-primary-action vs-primary-action-wide" onclick={openNewDelegate}>+ Add same-profile bookmarklet</button>
+      </div>
 
-    <!-- Cross-profile autofill -->
-    <button class="delegate-advanced-toggle muted" onclick={toggleAdvanced}>
-      Cross-profile autofill {advancedOpen ? '▲' : '▼'}
-    </button>
-    {#if advancedOpen}
-      <div class="delegate-advanced-body">
-        <div class="vault-row" style="margin-bottom:4px">
-          <span class="vault-label muted" style="font-size:13px">Enable cross-profile autofill</span>
-          <div class="vault-segmented">
-            <button class:on={!$crossProfileEnabled} disabled={!delegates.length} onclick={async () => { await setCrossProfileEnabled(_vaultUuid, false); crossProfileEnabled.set(false) }}>Off</button>
-            <button class:on={$crossProfileEnabled}  disabled={!delegates.length} onclick={async () => { await setCrossProfileEnabled(_vaultUuid, true);  crossProfileEnabled.set(true)  }}>On</button>
+      <div class="vs-autofill-card">
+        <div class="vs-option-heading-row">
+          <h3 class="vs-option-title">Cross-profile pairing</h3>
+          <span class="vs-tradeoff-badge vs-tradeoff-badge-accent">MOST ISOLATED</span>
+          <span class="vs-card-status">
+            <span class="switchboard-status-dot" class:switchboard-ok={$crossProfileEnabled && $switchboardConnected} class:switchboard-error={!$crossProfileEnabled || !$switchboardConnected}></span>
+            {$crossProfileEnabled && $switchboardConnected ? 'Active' : 'Inactive'}
+          </span>
+        </div>
+        <p class="muted vs-option-copy">
+          Keep Portpass in this clean vault profile and fill from your everyday browser. Best protection from extensions; needs a one-time pairing.
+        </p>
+        <div class="vs-step">
+          <span class="vs-step-num">1</span>
+          <div>
+            <div class="vs-step-title">In your everyday browser <span class="vs-profile-badge">OTHER PROFILE</span></div>
+            <div class="muted vs-step-copy">Open <span class="mono">{pairingPageUrl}</span>, name and install the bookmarklet, then copy the pairing token.</div>
           </div>
         </div>
-        {#if $crossProfileEnabled}
+        <div class="vs-step">
+          <span class="vs-step-num">2</span>
+          <div>
+            <div class="vs-step-title">Here, in the vault profile <span class="vs-profile-badge vs-profile-badge-accent">THIS PROFILE</span></div>
+            <div class="muted vs-step-copy">Click <strong>Pair everyday profile</strong>, paste the token, and confirm the code matches. The relay turns on automatically.</div>
+          </div>
+        </div>
+        <button class="vs-primary-action" onclick={openPairDelegate}>+ Pair everyday profile</button>
+        <div class="vs-card-divider"></div>
+        <div class="switchboard-status-row vs-cross-profile-status">
+          <span class="switchboard-status-dot" class:switchboard-ok={$crossProfileEnabled && $switchboardConnected} class:switchboard-error={!$crossProfileEnabled || !$switchboardConnected}></span>
+          <span>
+            {$crossProfileEnabled && $switchboardConnected ? 'Ready' : (!$crossProfileEnabled ? 'Relay disabled' : 'Relay not connected')}
+            <span class="muted"> · {$crossProfileEnabled ? 'relay on' : 'relay off'} · {totalRelayCount} {totalRelayCount === 1 ? 'use' : 'uses'}{lastRelayUsed ? ` · Last ${fmtRelative(lastRelayUsed)}` : ''}</span>
+          </span>
+        </div>
+        <button class="delegate-advanced-toggle vs-nested-advanced-toggle muted" onclick={toggleRelayAdvanced}>
+          {relayAdvancedOpen ? '▼' : '▶'} Advanced
+        </button>
+      </div>
+      {#if relayAdvancedOpen}
+        <div class="delegate-advanced-body">
+          <div class="vault-row" style="margin-bottom:4px">
+            <span class="vault-label muted" style="font-size:13px">Use local switchboard relay</span>
+            <div class="vault-segmented">
+              <button class:on={!$crossProfileEnabled} disabled={!delegates.length} onclick={async () => { await setCrossProfileEnabled(_vaultUuid, false); crossProfileEnabled.set(false) }}>Off</button>
+              <button class:on={$crossProfileEnabled}  disabled={!delegates.length} onclick={async () => { await setCrossProfileEnabled(_vaultUuid, true);  crossProfileEnabled.set(true)  }}>On</button>
+            </div>
+          </div>
+          {#if !delegates.length}
+            <div class="muted" style="font-size:12px;line-height:1.4">
+              Pair an everyday profile before enabling the relay.
+            </div>
+          {/if}
           <label class="vault-label muted" style="font-size:12px;display:block;margin-bottom:4px">
-            WebSocket Relay URL
+            Relay URL
             <input
               class="input"
               style="font-size:13px;display:block;width:100%;margin-top:4px"
               bind:value={editSwitchboardUrl}
               oninput={() => { switchboardUrlDirty = editSwitchboardUrl !== get(switchboardUrl) }}
-              placeholder="ws://localhost:7577"
+              placeholder="http://localhost:7577"
             />
           </label>
+          <div class="muted" style="font-size:12px;line-height:1.4">
+            The pairing page shows an http:// URL. Portpass converts it to ws:// when opening the WebSocket relay.
+          </div>
           {#if switchboardUrlDirty}
             <div class="switchboard-url-actions">
               <button class="btn btn-ghost" style="font-size:13px" onclick={cancelRelayUrlEdit}>Cancel</button>
               <button class="btn btn-primary" style="font-size:13px" onclick={saveRelayUrl}>Save</button>
             </div>
           {/if}
-          <div class="switchboard-status-row">
-            <span class="switchboard-status-dot" class:switchboard-ok={$switchboardConnected} class:switchboard-error={!$switchboardConnected}></span>
-            <span class="muted" style="font-size:13px">
-              {$switchboardConnected ? 'Cross-profile autofill ready' : 'websocket relay not connected'}
-            </span>
-          </div>
-          <div class="muted" style="font-size:12px">
-            Count of cross-profile autofill uses: {totalRelayCount}{#if lastRelayUsed} · Last {fmtRelative(lastRelayUsed)}{/if}
-          </div>
-        {/if}
-      </div>
-    {/if}
+        </div>
+      {/if}
+    </div>
   </div>
   {/if}
 
@@ -700,7 +808,7 @@
     onkeydown={e => { if (e.key === 'Escape' && !newDelegateBusy) cancelOrSave() }}>
     <div class="modal modal-install" role="dialog" aria-modal="true" tabindex="-1" onclick={e => e.stopPropagation()} onkeydown={e => e.stopPropagation()}>
       <div class="vs-modal-header">
-        <div class="modal-title">New autofill bookmarklet</div>
+        <div class="modal-title">New same-profile bookmarklet</div>
         <button class="vs-modal-x" onclick={() => { if (!newDelegateBusy) cancelOrSave() }} aria-label="Cancel">
           <Icon name="x" size={18}/>
         </button>
@@ -755,11 +863,58 @@
       {/if}
       <div class="vs-install-warning">
         <Icon name="alert-triangle" size={28}/>
-        <span>The bookmarklet contains a unique private key that will not be shown again. Drag it to your bookmarks bar or copy the link before closing.</span>
+        <span>The bookmarklet contains no private key. Its paired signing key stays in this browser profile's Portpass storage and can be revoked here. Use this only when Portpass and the login pages are in the same browser profile.</span>
       </div>
       <div style="margin-top:8px">
         <button class="vs-close-btn" disabled={!canCommit} onclick={commitDelegate}>
           {newDelegateBusy ? 'Saving…' : 'Save and Close'}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- ── Pair autofill profile modal ────────────────────────────────────────── -->
+{#if pairDelegateOpen}
+  <div class="modal-overlay" role="presentation"
+    onclick={e => { e.stopPropagation(); if (!pairDelegateBusy) closePairDelegate() }}
+    onkeydown={e => { if (e.key === 'Escape' && !pairDelegateBusy) closePairDelegate() }}>
+    <div class="modal modal-install" role="dialog" aria-modal="true" tabindex="-1" onclick={e => e.stopPropagation()} onkeydown={e => e.stopPropagation()}>
+      <div class="vs-modal-header">
+        <div class="modal-title">Pair everyday profile</div>
+        <button class="vs-modal-x" onclick={() => { if (!pairDelegateBusy) closePairDelegate() }} aria-label="Cancel">
+          <Icon name="x" size={18}/>
+        </button>
+      </div>
+      <p class="muted" style="font-size:14px;margin:0 0 14px;line-height:1.4">
+        Paste the pairing token from your everyday browser.
+      </p>
+      <label class="vault-field" style="margin-bottom:10px">
+        <textarea
+          class="input"
+          rows={5}
+          placeholder="ppair1_..."
+          oninput={e => { pairDelegateToken = e.target.value; refreshPairingPreview() }}
+          use:focusOnMount
+        ></textarea>
+      </label>
+      {#if pairDelegatePreview}
+        <div class="vs-install-warning vs-code-confirm">
+          <Icon name="check" size={22}/>
+          <span>
+            Confirm this matches the code shown in your everyday browser:
+            <strong class="vs-code-chip">{pairDelegatePreview.displayCode}</strong>
+          </span>
+        </div>
+        <div class="vs-relay-auto">
+          <Icon name="check" size={16}/>
+          <span>Relay will be enabled automatically</span>
+        </div>
+      {/if}
+      {#if pairDelegateError}<div class="unlock-error" style="font-size:13px">{pairDelegateError}</div>{/if}
+      <div style="margin-top:12px">
+        <button class="vs-close-btn vs-primary-modal-btn" disabled={pairDelegateBusy || !pairDelegateToken.trim()} onclick={commitPairDelegate}>
+          {pairDelegateBusy ? 'Pairing…' : 'Pair everyday profile'}
         </button>
       </div>
     </div>
@@ -1237,7 +1392,6 @@
 
   .delegate-advanced-toggle {
     display: block;
-    margin-top: 14px;
     background: none;
     border: none;
     cursor: pointer;
@@ -1254,6 +1408,148 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
+  }
+
+  .vs-autofill-options {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .vs-autofill-card {
+    padding: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-card);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .vs-option-heading-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .vs-option-title {
+    color: var(--text);
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1.2;
+    margin: 0;
+  }
+
+  .vs-tradeoff-badge,
+  .vs-profile-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 22px;
+    padding: 0 9px;
+    border: 1px solid var(--border-strong);
+    border-radius: 7px;
+    color: var(--text-soft);
+    background: var(--surface-2);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    line-height: 1;
+  }
+
+  .vs-tradeoff-badge-accent,
+  .vs-profile-badge-accent {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--orange-bg-strong);
+  }
+
+  .vs-card-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    margin-left: auto;
+    color: var(--text-muted);
+    font-size: 14px;
+  }
+
+  .vs-option-copy {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .vs-step {
+    display: grid;
+    grid-template-columns: 30px 1fr;
+    gap: 12px;
+    align-items: flex-start;
+  }
+
+  .vs-step-num {
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid var(--accent);
+    border-radius: 50%;
+    color: var(--accent);
+    font-weight: 800;
+    font-size: 15px;
+    line-height: 1;
+  }
+
+  .vs-step-title {
+    color: var(--text);
+    font-size: 15px;
+    font-weight: 800;
+    line-height: 1.35;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    flex-wrap: wrap;
+  }
+
+  .vs-step-copy {
+    font-size: 14px;
+    line-height: 1.5;
+    margin-top: 4px;
+  }
+
+  .vs-card-divider {
+    height: 1px;
+    background: var(--border);
+    margin-top: 4px;
+  }
+
+  .vs-primary-action {
+    align-self: flex-start;
+    min-height: 42px;
+    padding: 0 22px;
+    border: none;
+    border-radius: 9px;
+    background: var(--accent);
+    color: var(--accent-on);
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .vs-primary-action:hover { background: var(--accent-strong); }
+  .vs-primary-action-wide {
+    width: 100%;
+    align-self: stretch;
+  }
+
+  .vs-nested-advanced-toggle {
+    align-self: flex-start;
+    font-size: 14px;
+  }
+
+  .vs-cross-profile-status {
+    font-size: 14px;
+    color: var(--text);
   }
 
   .switchboard-url-actions {
@@ -1328,6 +1624,33 @@
   }
   .vs-install-warning :global(svg) { flex-shrink: 0; margin-top: 1px; }
 
+  .vs-code-confirm {
+    margin-top: 4px;
+    margin-bottom: 14px;
+  }
+
+  .vs-code-chip {
+    display: table;
+    margin-top: 10px;
+    padding: 8px 14px;
+    border: 1.5px solid var(--accent);
+    border-radius: 8px;
+    color: var(--accent);
+    font-family: ui-monospace, monospace;
+    font-size: 18px;
+    letter-spacing: 0.04em;
+  }
+
+  .vs-relay-auto {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    color: var(--text-muted);
+    font-size: 14px;
+    margin-top: 12px;
+  }
+  .vs-relay-auto :global(svg) { color: var(--success); }
+
   .vs-install-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -1390,10 +1713,10 @@
     align-items: center;
     gap: 7px;
     padding: 9px 18px;
-    border: 1.5px solid var(--amber);
+    border: 1.5px solid var(--accent);
     border-radius: 8px;
     background: transparent;
-    color: var(--amber);
+    color: var(--accent);
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
@@ -1445,4 +1768,14 @@
     font-family: inherit;
   }
   .vs-close-btn:hover { background: var(--surface); }
+  .vs-primary-modal-btn {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-on);
+  }
+  .vs-primary-modal-btn:hover:not(:disabled) {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+    color: var(--accent-on);
+  }
 </style>

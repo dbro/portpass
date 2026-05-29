@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -56,6 +55,12 @@ type customFieldProp struct {
 	val string
 }
 
+// unknownField preserves a field whose type ID is not recognised, in wire order.
+type unknownField struct {
+	ID   byte
+	Data []byte
+}
+
 // CustomField is one entry in a record's custom text fields (field 0x30).
 type CustomField struct {
 	Name         string            `json:"Name"`
@@ -95,7 +100,7 @@ type Record struct {
 	URL                    string          // 0x0d
 	UUID                   [16]byte        // 0x01
 	CustomFields           []CustomField   // 0x30
-	UnknownFields          map[byte][]byte // forward compatibility: fields not yet parsed
+	UnknownFields          []unknownField  // forward compatibility: fields not yet parsed, in wire order
 }
 
 // setField sets the field value based on the ID
@@ -117,14 +122,26 @@ func (r *Record) setField(id byte, data []byte) error {
 	case recordPassword:
 		r.Password = string(data)
 	case recordCreateTime:
+		if len(data) != 4 {
+			return fmt.Errorf("invalid length for CreateTime: %d", len(data))
+		}
 		r.CreateTime = time.Unix(int64(binary.LittleEndian.Uint32(data)), 0)
 	case recordPasswordModTime:
 		r.PasswordModTime = string(data)
 	case recordAccessTime:
+		if len(data) != 4 {
+			return fmt.Errorf("invalid length for AccessTime: %d", len(data))
+		}
 		r.AccessTime = time.Unix(int64(binary.LittleEndian.Uint32(data)), 0)
 	case recordPasswordExpiry:
+		if len(data) != 4 {
+			return fmt.Errorf("invalid length for PasswordExpiry: %d", len(data))
+		}
 		r.PasswordExpiry = time.Unix(int64(binary.LittleEndian.Uint32(data)), 0)
 	case recordModTime:
+		if len(data) != 4 {
+			return fmt.Errorf("invalid length for ModTime: %d", len(data))
+		}
 		r.ModTime = time.Unix(int64(binary.LittleEndian.Uint32(data)), 0)
 	case recordURL:
 		r.URL = string(data)
@@ -196,10 +213,7 @@ func (r *Record) setField(id byte, data []byte) error {
 			}
 		}
 	default:
-		if r.UnknownFields == nil {
-			r.UnknownFields = make(map[byte][]byte)
-		}
-		r.UnknownFields[id] = append([]byte(nil), data...)
+		r.UnknownFields = append(r.UnknownFields, unknownField{id, append([]byte(nil), data...)})
 	}
 	return nil
 }
@@ -300,15 +314,8 @@ func (r *Record) marshal() ([]byte, []byte, error) {
 		appendField(recordCustomTextField, marshalCustomFields(r.CustomFields))
 	}
 
-	if len(r.UnknownFields) > 0 {
-		keys := make([]byte, 0, len(r.UnknownFields))
-		for k := range r.UnknownFields {
-			keys = append(keys, k)
-		}
-		sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
-		for _, k := range keys {
-			appendField(k, r.UnknownFields[k])
-		}
+	for _, f := range r.UnknownFields {
+		appendField(f.ID, f.Data)
 	}
 
 	// End of entry

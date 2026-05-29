@@ -181,7 +181,7 @@ func unmarshalRecord(records []byte, setter fieldSetter) (int, []byte, error) {
 	var rdata []byte
 	fieldStart := 0
 	for {
-		if fieldStart > len(records) {
+		if fieldStart+5 > len(records) {
 			return 0, rdata, errors.New("no END field found when UnMarshaling")
 		}
 		fieldLength := int(binary.LittleEndian.Uint32(records[fieldStart : fieldStart+4]))

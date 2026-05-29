@@ -3,6 +3,12 @@ import { get, set, del } from 'idb-keyval'
 const STORAGE_KEY = 'delegates-v1'
 const SWITCHBOARD_URL_DEFAULT = 'ws://localhost:7577'
 
+function delegateDisplayCode(id) {
+  if (!id?.startsWith('afp1_')) return null
+  const fp = id.slice(5)
+  return fp.slice(-8).replace(/(.{4})/g, '$1-').replace(/-$/, '').toUpperCase()
+}
+
 async function load() {
   return (await get(STORAGE_KEY)) ?? {}
 }
@@ -20,25 +26,49 @@ function migrate(d) {
   return d
 }
 
+export function delegateFillMode(delegate) {
+  const bcCount = delegate?.bcCount ?? 0
+  const relayCount = delegate?.relayCount ?? 0
+  const usedSameProfile = bcCount > 0
+  const usedCrossProfile = relayCount > 0
+
+  if (usedSameProfile && usedCrossProfile) return 'same profile + cross profile'
+  if (usedCrossProfile) return 'cross profile'
+  if (usedSameProfile) return 'same profile'
+  return delegate?.pairingId || delegate?.relayUrl ? 'cross profile' : 'same profile'
+}
+
 export async function getDelegates(vaultUuid) {
   if (!vaultUuid) return []
   const all = await load()
   return (all[vaultUuid] ?? []).map(migrate)
 }
 
-export async function addDelegate(vaultUuid, name, publicKeySpki, id = crypto.randomUUID()) {
+export async function getDelegate(vaultUuid, delegateId) {
+  if (!vaultUuid || !delegateId) return null
   const all = await load()
+  return (all[vaultUuid] ?? []).map(migrate).find(d => d.id === delegateId) ?? null
+}
+
+export async function addDelegate(vaultUuid, name, publicKeySpki, id = crypto.randomUUID(), options = {}) {
+  const all = await load()
+  const current = all[vaultUuid] ?? []
+  if (current.some(d => d.id === id)) throw new Error('This autofill profile is already paired')
   const delegate = {
     id,
     name,
     publicKey: Array.from(new Uint8Array(publicKeySpki)),
+    displayCode: delegateDisplayCode(id),
     created: Date.now(),
+    pairingId: options.pairingId || null,
+    relayUrl: options.relayUrl || null,
+    pairedAt: options.pairedAt || Date.now(),
     bcCount: 0,
     bcLastUsed: null,
     relayCount: 0,
     relayLastUsed: null,
   }
-  all[vaultUuid] = [delegate, ...(all[vaultUuid] ?? [])]
+  all[vaultUuid] = [delegate, ...current]
   await save(all)
   return delegate
 }
@@ -71,6 +101,23 @@ export async function verifyDelegate(vaultUuid, spkiBytes, message, signatureByt
     } catch { continue }
   }
   return null
+}
+
+export async function verifyDelegateById(vaultUuid, delegateId, message, signatureBytes) {
+  const d = await getDelegate(vaultUuid, delegateId)
+  if (!d) return null
+  try {
+    const spkiBytes = new Uint8Array(d.publicKey)
+    const key = await crypto.subtle.importKey(
+      'spki', spkiBytes, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']
+    )
+    const valid = await crypto.subtle.verify(
+      { name: 'ECDSA', hash: 'SHA-256' }, key, signatureBytes, message
+    )
+    return valid ? d : null
+  } catch {
+    return null
+  }
 }
 
 // Record a successful page fill for a delegate. Called when autofill.html shows

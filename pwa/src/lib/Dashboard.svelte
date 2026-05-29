@@ -13,7 +13,7 @@
   import { addSecondaryCredential, removeSecondaryCredential } from './secondaryVaults.js'
   import { getSwitchboardUrl, getCrossProfileEnabled } from './delegates.js'
   import { isBiometricEnrolledForFile, unlockWithBiometric } from './biometric.js'
-  import { getDelegates, verifyDelegate, recordFill } from './delegates.js'
+  import { getDelegates, verifyDelegateById, recordFill } from './delegates.js'
   import Icon from './Icon.svelte'
   import RecordList from './RecordList.svelte'
   import RecordRead from './RecordRead.svelte'
@@ -337,12 +337,26 @@
   }
 
   // Encrypt data with the autofill popup's ECDH public key and send as a ws-relay reply.
-  async function sbEncryptReply(replyTo, ecdhSpkiB64Arg, data) {
+  async function sha256B64(bytes) {
+    const digest = await crypto.subtle.digest('SHA-256', bytes)
+    return btoa(String.fromCharCode(...new Uint8Array(digest)))
+  }
+
+  async function sbEncryptReply(replyTo, ecdhSpkiB64Arg, data, meta = {}) {
     const ephPair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey'])
     const relayPub = await crypto.subtle.importKey('spki', Uint8Array.from(atob(ecdhSpkiB64Arg), c => c.charCodeAt(0)), { name: 'ECDH', namedCurve: 'P-256' }, false, [])
     const sk = await crypto.subtle.deriveKey({ name: 'ECDH', public: relayPub }, ephPair.privateKey, { name: 'AES-GCM', length: 256 }, false, ['encrypt'])
     const iv = crypto.getRandomValues(new Uint8Array(12))
-    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, sk, new TextEncoder().encode(JSON.stringify(data)))
+    const envelope = {
+      v: 1,
+      requestId: replyTo,
+      requestHash: meta.requestHash || null,
+      delegateId: meta.delegateId || null,
+      recipient: meta.recipient || 'autofill-popup',
+      ts: Date.now(),
+      data,
+    }
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, sk, new TextEncoder().encode(JSON.stringify(envelope)))
     const ephPubJwk = await crypto.subtle.exportKey('jwk', ephPair.publicKey)
     if (_sbWs) _sbWs.send(JSON.stringify({
       type: 'reply', replyTo,
@@ -382,6 +396,15 @@
 
   let _sbWs = null
   let _sbConnecting = false
+  const sbSeenNonces = new Set()
+  const bcSeenNonces = new Set()
+
+  function rememberNonce(seen, nonce) {
+    if (!nonce || seen.has(nonce)) return false
+    seen.add(nonce)
+    setTimeout(() => seen.delete(nonce), 120000)
+    return true
+  }
 
   function sbWsUrl() {
     // Accept both ws:// and http:// stored formats
@@ -405,13 +428,16 @@
     ws.onmessage = async (event) => {
       try {
         const msg = JSON.parse(event.data)
+        if (msg._switchboard_origin !== location.origin) return
         if (msg.type !== 'publish') return
         const age = Date.now() - msg.ts
         if (age > 60000 || age < -5000) return
-        const spkiBytes = Uint8Array.from(atob(msg.pub), c => c.charCodeAt(0))
         const sigBytes  = Uint8Array.from(atob(msg.sig), c => c.charCodeAt(0))
-        const message   = new TextEncoder().encode(JSON.stringify({ url: msg.url, nonce: msg.replyTo, ecdh: msg.ecdh, ts: msg.ts }))
-        const verified  = await verifyDelegate(dbKey, spkiBytes, message, sigBytes)
+        if (!rememberNonce(sbSeenNonces, msg.replyTo)) return
+        const message   = new TextEncoder().encode(JSON.stringify({ version: 1, sender: msg.delegateId || '', recipient: 'local-dashboard', url: msg.url || '', nonce: msg.replyTo, ecdh: msg.ecdh || '', ts: msg.ts,
+          msgType: msg.msgType || '', uuid: msg.uuid || '', vaultUuid: msg.vaultUuid || '', query: msg.query || '' }))
+        const requestHash = await sha256B64(message)
+        const verified  = await verifyDelegateById(dbKey, msg.delegateId || '', message, sigBytes)
         if (!verified) return
         if (msg.msgType === 'fill-done') {
           await recordFill(dbKey, verified.id, 'relay')
@@ -430,38 +456,33 @@
           return
         }
         if (msg.msgType === 'search') {
-          const allVaults = [
-            { uuid: dbKey, readonly: get(selectedFile)?.readonly || false },
-            ...get(secondaryVaults).map(v => ({ uuid: v.uuid, readonly: v.readonly || false })),
-          ]
-          const results = []
-          for (const { uuid: vaultUuid, readonly } of allVaults) {
-            try {
-              for (const recUuid of searchRecords(vaultUuid, msg.query || '', 0)) {
-                const rec = getRecordData(vaultUuid, recUuid)
-                results.push({ uuid: recUuid, vaultUuid: vaultUuid === dbKey ? null : vaultUuid,
-                  title: rec.Title, existingUrl: rec.URL || '', matchType: 'search', readonly })
-              }
-            } catch {}
-          }
-          try { await sbEncryptReply(msg.replyTo, msg.ecdh, results) } catch {}
+          try { await sbEncryptReply(msg.replyTo, msg.ecdh, [], { delegateId: verified.id, requestHash }) } catch {}
           return
         }
         if (msg.msgType === 'fill-uuid') {
           try {
             const rec = getRecordData(msg.vaultUuid || dbKey, msg.uuid)
+            if (canonicalURL(rec.URL || '') !== canonicalURL(msg.url || '')) {
+              if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo, error: 'Credentials require an exact saved URL match' }))
+              return
+            }
             const rf = buildRecordFields(msg.uuid, msg.vaultUuid || null)
             await sbEncryptReply(msg.replyTo, msg.ecdh, [{
               uuid: msg.uuid, vaultUuid: msg.vaultUuid || null,
               title: rec.Title, matchType: 'search', existingUrl: rec.URL || '',
               autotype: rf.autotype, sensitiveCodes: rf.sensitiveCodes, fields: rf.fields,
-            }])
+            }], { delegateId: verified.id, requestHash })
           } catch(e) {
             if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo, error: e.message || 'Could not get credentials' }))
           }
           return
         }
-        await processAutofillIntent({ url: msg.url, nonce: msg.replyTo, ecdhSpkiB64: msg.ecdh })
+        const records = autofillFindRecords(msg.url)
+        const exact = records.filter(r => r.matchType === 'exact')
+        const payload = exact.length
+          ? { records: exact, theme: localStorage.getItem('theme') || 'dark', accent: localStorage.getItem('accent') || 'amber' }
+          : { records: [], nearMatchCount: records.length, theme: localStorage.getItem('theme') || 'dark', accent: localStorage.getItem('accent') || 'amber' }
+        await sbEncryptReply(msg.replyTo, msg.ecdh, payload, { delegateId: verified.id, requestHash })
       } catch(e) {}
     }
     let closed = false
@@ -512,96 +533,6 @@
     return ''
   }
 
-  $effect(() => {
-    if (!isPopup) return
-
-    let sessionKey = null  // AES-256-GCM key derived from ECDH; null until hello exchange
-    let helloInProgress = false  // guard against duplicate hellos overwriting the session key
-
-    async function handleMessage(event) {
-      if (!event.source) return
-      const msg = event.data
-      if (!msg?.type) return
-
-      if (msg.type === 'hello') {
-        // Ignore a second hello while we're still processing the first one.
-        // Without this guard, a retry from the bookmarklet could overwrite sessionKey
-        // after the bookmarklet has already derived its key from the first response.
-        if (helloInProgress) return
-        helloInProgress = true
-        try {
-          const openerPub = await crypto.subtle.importKey(
-            'jwk', msg.pubkey,
-            { name: 'ECDH', namedCurve: 'P-256' }, false, []
-          )
-          const pair = await crypto.subtle.generateKey(
-            { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey']
-          )
-          sessionKey = await crypto.subtle.deriveKey(
-            { name: 'ECDH', public: openerPub },
-            pair.privateKey,
-            { name: 'AES-GCM', length: 256 }, false, ['encrypt']
-          )
-          const pubJwk = await crypto.subtle.exportKey('jwk', pair.publicKey)
-          event.source.postMessage({ type: 'hello', pubkey: pubJwk }, event.origin)
-        } catch {
-          sessionKey = null
-          event.source.postMessage({ type: 'error', message: 'Key exchange failed' }, event.origin)
-        } finally {
-          helloInProgress = false
-        }
-        return
-      }
-
-      if (msg.type === 'query') {
-        if (!sessionKey) {
-          event.source.postMessage(
-            { type: 'error', message: 'No secure session — click the bookmarklet again' },
-            event.origin
-          )
-          return
-        }
-
-        // URL search: return list of candidate records for the bookmarklet picker.
-        if (msg.url !== undefined) {
-          event.source.postMessage({ type: 'records', records: autofillFindRecords(msg.url) }, event.origin)
-          return
-        }
-
-        // Targeted fetch: return encrypted credentials for the specified (or selected) record.
-        const uuid = msg.uuid || selectedUUID
-        const vaultUuid = msg.uuid ? (msg.vaultUuid || null) : selectedVaultUuid
-        if (!uuid) {
-          event.source.postMessage({ type: 'error', message: 'Open a record in Portpass first' }, event.origin)
-          return
-        }
-        try {
-          const result = await autofillEncryptRecord(sessionKey, uuid, vaultUuid)
-          event.source.postMessage({ type: 'record', ...result }, event.origin)
-        } catch (e) {
-          event.source.postMessage({ type: 'error', message: e.message }, event.origin)
-        }
-        return
-      }
-
-      if (msg.type === 'save-url') {
-        if (!sessionKey) {
-          event.source.postMessage({ type: 'error', message: 'No secure session' }, event.origin)
-          return
-        }
-        try {
-          await autofillSaveURL(msg.uuid, msg.vaultUuid || null, msg.url)
-          event.source.postMessage({ type: 'url-saved' }, event.origin)
-        } catch (e) {
-          event.source.postMessage({ type: 'error', message: e.message }, event.origin)
-        }
-      }
-    }
-
-    window.addEventListener('message', handleMessage)
-    return () => { window.removeEventListener('message', handleMessage); sessionKey = null }
-  })
-
   // BroadcastChannel handler — lets the autofill popup (opened by the bookmarklet) reach this
   // unlocked tab across browsing-context-group boundaries. Only the main (non-popup) tab
   // handles these messages so the popup's own dashboard (when unlocked directly) is unaffected.
@@ -640,17 +571,22 @@
             ch.postMessage({ type: 'error', message: 'Autofill request not authorized — reinstall the bookmarklet', nonce: msg.nonce })
             return
           }
-          const spkiBytes = Uint8Array.from(atob(msg.pub), c => c.charCodeAt(0))
           const sigBytes  = Uint8Array.from(atob(msg.sig),  c => c.charCodeAt(0))
-          const sigMsg    = new TextEncoder().encode(JSON.stringify({ nonce: msg.nonce, ecdhSpki: msg.ecdhSpki }))
-          const verified  = await verifyDelegate(dbKey, spkiBytes, sigMsg, sigBytes)
+          const age = Date.now() - (msg.ts || 0)
+          if (age > 60000 || age < -5000 || !rememberNonce(bcSeenNonces, msg.nonce)) {
+            ch.postMessage({ type: 'error', message: 'Autofill request expired — click the bookmarklet again', nonce: msg.nonce })
+            return
+          }
+          const sigMsg    = new TextEncoder().encode(JSON.stringify({ version: 1, sender: msg.delegateId || '', recipient: 'local-dashboard', nonce: msg.nonce, ecdhSpki: msg.ecdhSpki, ts: msg.ts }))
+          const verified  = await verifyDelegateById(dbKey, msg.delegateId || '', sigMsg, sigBytes)
           if (!verified) {
             ch.postMessage({ type: 'error', message: 'Autofill request not authorized', nonce: msg.nonce })
             return
           }
           bcSessionDelegateId = verified.id
+          const ecdhSpkiBytes = Uint8Array.from(atob(msg.ecdhSpki), c => c.charCodeAt(0))
           const openerPub = await crypto.subtle.importKey(
-            'jwk', msg.pubkey, { name: 'ECDH', namedCurve: 'P-256' }, false, []
+            'spki', ecdhSpkiBytes, { name: 'ECDH', namedCurve: 'P-256' }, false, []
           )
           const pair = await crypto.subtle.generateKey(
             { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey']
@@ -835,9 +771,53 @@
     }
   }
 
+  async function checkPrimaryConflict() {
+    const handle = $selectedFile?.handle
+    if (!handle || primaryModified === null) return true
+    try {
+      const file = await handle.getFile()
+      if (file.lastModified !== primaryModified) {
+        let realConflict = true
+        if (primaryHead) {
+          try {
+            const buf = await file.slice(72, 152).arrayBuffer()
+            realConflict = !sameHead(new Uint8Array(buf), primaryHead)
+          } catch {}
+        }
+        if (realConflict) {
+          if (!confirm('This vault was modified since it was loaded.\n\nSaving will overwrite those changes. Save anyway?')) return false
+          primaryModified = file.lastModified
+        }
+      }
+    } catch {}
+    return true
+  }
+
   async function saveRecord(draft) {
     try {
       const targetVault = isNew ? (newRecordVaultUuid || dbKey) : (selectedVaultUuid || dbKey)
+
+      if (targetVault === dbKey) {
+        if (!await checkPrimaryConflict()) return
+      } else {
+        const sv = get(secondaryVaults).find(v => v.uuid === targetVault)
+        if (sv?.handle && !sv.readonly && secondaryModified[targetVault] !== undefined) {
+          try {
+            const file = await sv.handle.getFile()
+            if (file.lastModified !== secondaryModified[targetVault]) {
+              let realConflict = true
+              if (secondaryHead[targetVault]) {
+                try {
+                  const buf = await file.slice(72, 152).arrayBuffer()
+                  realConflict = !sameHead(new Uint8Array(buf), secondaryHead[targetVault])
+                } catch {}
+              }
+              if (realConflict && !confirm(`"${sv.name || sv.filename}" was modified since it was loaded.\n\nSaving will overwrite those changes. Save anyway?`)) return
+            }
+          } catch {}
+        }
+      }
+
       const uuid = updateRecordFields(targetVault, isNew ? null : selectedUUID, draft)
       selectedUUID = uuid ?? selectedUUID
       record = getRecordData(targetVault, selectedUUID)
@@ -860,21 +840,6 @@
             : v
           ))
           selectedVaultUuid = targetVault
-          if (sv.handle && !sv.readonly && secondaryModified[targetVault] !== undefined) {
-            try {
-              const file = await sv.handle.getFile()
-              if (file.lastModified !== secondaryModified[targetVault]) {
-                let realConflict = true
-                if (secondaryHead[targetVault]) {
-                  try {
-                    const buf = await file.slice(72, 152).arrayBuffer()
-                    realConflict = !sameHead(new Uint8Array(buf), secondaryHead[targetVault])
-                  } catch {}
-                }
-                if (realConflict && !confirm(`"${sv.name || sv.filename}" was modified since it was loaded.\n\nSaving will overwrite those changes. Save anyway?`)) return
-              }
-            } catch {}
-          }
           const data = saveDatabase(targetVault)
           if (sv.handle && !sv.readonly) {
             const w = await sv.handle.createWritable()
@@ -915,19 +880,15 @@
 
       pendingDeleteTimer = setTimeout(async () => {
         try {
-          wasmDeleteRecord(targetVault, pendingDeleteUUID)
           if (targetVault === dbKey) {
+            if (!await checkPrimaryConflict()) return
+            wasmDeleteRecord(targetVault, pendingDeleteUUID)
             dbItems.set(getDatabaseData(dbKey))
             isDirty = true
             await saveFile(true)
           } else {
             const sv = get(secondaryVaults).find(v => v.uuid === targetVault)
             if (sv) {
-              const items = getDatabaseData(targetVault)
-              secondaryVaults.update(vs => vs.map(v => v.uuid === targetVault
-                ? { ...v, items: items.map(i => ({ ...i, vaultUuid: targetVault })) }
-                : v
-              ))
               if (sv.handle && !sv.readonly && secondaryModified[targetVault] !== undefined) {
                 try {
                   const file = await sv.handle.getFile()
@@ -943,6 +904,12 @@
                   }
                 } catch {}
               }
+              wasmDeleteRecord(targetVault, pendingDeleteUUID)
+              const items = getDatabaseData(targetVault)
+              secondaryVaults.update(vs => vs.map(v => v.uuid === targetVault
+                ? { ...v, items: items.map(i => ({ ...i, vaultUuid: targetVault })) }
+                : v
+              ))
               const data = saveDatabase(targetVault)
               if (sv.handle && !sv.readonly) {
                 const w = await sv.handle.createWritable()
@@ -1022,7 +989,7 @@
           isDirty = false
           try { lastSave = getDatabaseInfo(dbKey)?.when ?? '' } catch {}
           if (!silent) showToast('Vault saved')
-          return
+          return true
         }
       }
 
@@ -1037,7 +1004,7 @@
                 realConflict = !sameHead(new Uint8Array(buf), primaryHead)
               } catch {}
             }
-            if (realConflict && !confirm('This vault was modified since it was loaded.\n\nSaving will overwrite those changes. Save anyway?')) return
+            if (realConflict && !confirm('This vault was modified since it was loaded.\n\nSaving will overwrite those changes. Save anyway?')) return false
           }
         } catch {}
       }
@@ -1052,8 +1019,10 @@
       isDirty = false
       try { lastSave = getDatabaseInfo(dbKey)?.when ?? '' } catch {}
       if (!silent) showToast('Vault saved')
+      return true
     } catch (e) {
       if (e.name !== 'AbortError') showToast('Save failed: ' + e.message)
+      return false
     }
   }
 
@@ -1153,7 +1122,7 @@
 
   async function copyFieldViaWasm(recordVaultUuid, recordUuid, fieldname) {
     try {
-      const { hash } = copyFieldToClipboard(recordVaultUuid, recordUuid, fieldname, true)
+      const { hash } = await copyFieldToClipboard(recordVaultUuid, recordUuid, fieldname, true)
       const hashBytes = hexToBytes(hash)
       clipHash = hashBytes
       const token = ++sessionSerial
@@ -1169,7 +1138,7 @@
 
   async function copyCustomFieldViaWasm(recordVaultUuid, recordUuid, fieldname) {
     try {
-      const { hash } = copyCustomFieldToClipboard(recordVaultUuid, recordUuid, fieldname, true)
+      const { hash } = await copyCustomFieldToClipboard(recordVaultUuid, recordUuid, fieldname, true)
       const hashBytes = hexToBytes(hash)
       clipHash = hashBytes
       const token = ++sessionSerial
@@ -1191,10 +1160,10 @@
     return selectedVaultUuid || dbKey
   }
 
-  async function copyTOTPForUUID(uuid) {
+  async function copyTOTPForUUID(uuid, vaultUuidHint = null) {
     try {
-      const vaultUuid = vaultUuidForRecord(uuid)
-      wasmCopyTOTP(vaultUuid, uuid)
+      const vaultUuid = vaultUuidHint ?? vaultUuidForRecord(uuid)
+      await wasmCopyTOTP(vaultUuid, uuid)
       if (clearTimer) { clearTimeout(clearTimer); clearTimer = null }
       clipHash = null
       const token = ++sessionSerial
@@ -1223,12 +1192,31 @@
   async function saveDBFields(fields) {
     try {
       updateDBFields(dbKey, fields)
-      await saveFile(true)
-      dbName = fields.Name ?? dbName  // fields uses PascalCase for the WASM write API
-      vaultDirty = false
-      showToast('Vault info saved')
+      if (await saveFile(true)) {
+        dbName = fields.Name ?? dbName  // fields uses PascalCase for the WASM write API
+        vaultDirty = false
+        showToast('Vault info saved')
+      }
     } catch (e) {
       showToast('Failed to save vault info: ' + e.message)
+    }
+  }
+
+  async function saveSecondaryDBFields(uuid) {
+    const sv = get(secondaryVaults).find(v => v.uuid === uuid)
+    if (!sv || sv.readonly) return
+    try {
+      const data = saveDatabase(uuid)
+      if (sv.handle) {
+        const w = await sv.handle.createWritable()
+        await w.write(data)
+        await w.close()
+        secondaryHead[uuid] = data.slice(72, 152)
+        try { secondaryModified[uuid] = (await sv.handle.getFile()).lastModified } catch {}
+        showToast('Saved to ' + (sv.name || sv.filename), null, 2000)
+      }
+    } catch (e) {
+      if (e.name !== 'AbortError') showToast('Failed to save: ' + e.message)
     }
   }
 
@@ -1244,6 +1232,12 @@
     get(secondaryVaults).forEach(v => closeDatabase(v.uuid))
     closeDatabase(dbKey)
     secondaryVaults.set([])
+    dbItems.set([])
+    selectedFile.set(null)
+    if (clearTimer) { clearTimeout(clearTimer); clearTimer = null }
+    clipHash = null
+    clipboardSession.set(null)
+    clipboardContext.set(null)
     onclosed()
   }
 
@@ -1260,6 +1254,12 @@
     get(secondaryVaults).forEach(v => closeDatabase(v.uuid))
     closeDatabase(dbKey)
     secondaryVaults.set([])
+    dbItems.set([])
+    selectedFile.set(null)
+    if (clearTimer) { clearTimeout(clearTimer); clearTimer = null }
+    clipHash = null
+    clipboardSession.set(null)
+    clipboardContext.set(null)
     onclosed()
   }
 
@@ -1485,7 +1485,7 @@
         const next = flatList[0]
         if (next) { selectRecord(next.uuid, next.vaultUuid); searchInput?.blur() }
       } else {
-        const idx = flatList.findIndex(i => i.uuid === selectedUUID)
+        const idx = flatList.findIndex(i => i.uuid === selectedUUID && i.vaultUuid === selectedVaultUuid)
         if (idx === flatList.length - 1) {
           record = null; selectedUUID = null; searchInput?.focus()
         } else {
@@ -1501,7 +1501,7 @@
         const prev = flatList[flatList.length - 1]
         if (prev) { selectRecord(prev.uuid, prev.vaultUuid); searchInput?.blur() }
       } else {
-        const idx = flatList.findIndex(i => i.uuid === selectedUUID)
+        const idx = flatList.findIndex(i => i.uuid === selectedUUID && i.vaultUuid === selectedVaultUuid)
         if (idx === 0) {
           record = null; selectedUUID = null; searchInput?.focus()
         } else {
@@ -1524,7 +1524,7 @@
     if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); startEdit(); return }
     if (e.key === 'Enter' && !e.target.matches('button, a')) {
       e.preventDefault()
-      if (record.URL) window.open(absoluteUrl(record.URL), '_blank')
+      if (record.URL) window.open(absoluteUrl(record.URL), '_blank', 'noopener,noreferrer')
       return
     }
     if (e.ctrlKey && e.key === 'c') {
@@ -1611,7 +1611,7 @@
     {/if}
   </div>
 
-  <RecordList query={debouncedQuery} {selectedUUID} {collapseSeq} excludeUUID={pendingDeleteUUID} storageKey={dbKey} primaryVaultName={vaultName} ontap={selectRecord} oncopy={copyToClipboard} oncopytotp={copyTOTPForUUID} onwasmcopyfield={copyFieldViaWasm} onwasmcopycustomfield={copyCustomFieldViaWasm}/>
+  <RecordList query={debouncedQuery} {selectedUUID} {selectedVaultUuid} {collapseSeq} excludeUUID={pendingDeleteUUID} storageKey={dbKey} primaryVaultName={vaultName} ontap={selectRecord} oncopy={copyToClipboard} oncopytotp={copyTOTPForUUID} onwasmcopyfield={copyFieldViaWasm} onwasmcopycustomfield={copyCustomFieldViaWasm}/>
 
   <!-- FAB (mobile) -->
   <button class="fab" onclick={startNew} aria-label="New">
@@ -1681,6 +1681,7 @@
       onlocksecondary={lockSecondaryVault}
       onunlockadditional={unlockAdditionalVault}
       ondbsave={saveDBFields}
+      onsvdbsave={saveSecondaryDBFields}
       ondirtychange={(d) => vaultDirty = d}
       {ontheme}
       {onaccent}

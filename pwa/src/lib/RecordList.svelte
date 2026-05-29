@@ -5,7 +5,7 @@
   import { searchRecords, getRecordData } from '../wasm.js'
   import Icon from './Icon.svelte'
 
-  let { selectedUUID = null, excludeUUID = null, query = '', primaryVaultName = '', collapseSeq = '', ontap, oncopy, oncopytotp, onwasmcopyfield = null, onwasmcopycustomfield = null, storageKey = null } = $props()
+  let { selectedUUID = null, selectedVaultUuid = null, excludeUUID = null, query = '', primaryVaultName = '', collapseSeq = '', ontap, oncopy, oncopytotp, onwasmcopyfield = null, onwasmcopycustomfield = null, storageKey = null } = $props()
 
   function loadGroupState() {
     if (!storageKey) return {}
@@ -211,12 +211,13 @@
   // Auto-expand the group containing the newly-selected record (e.g. via arrow key navigation)
   $effect(() => {
     const uuid = selectedUUID
+    const vaultUuid = selectedVaultUuid
     if (!uuid) return
     const allItems = [
       ...get(dbItems),
       ...get(secondaryVaults).flatMap(sv => sv.items ?? [])
     ]
-    const item = allItems.find(i => i.uuid === uuid)
+    const item = allItems.find(i => i.uuid === uuid && (i.vaultUuid ?? null) === vaultUuid)
     if (!item) return
     const group = item.group || 'Ungrouped'
     untrack(() => {
@@ -269,8 +270,8 @@
 
   function handleClick(uuid, vaultUuid = null) {
     if (contextMenu) { contextMenu = null; return }
-    if (uuid === selectedUUID && !vaultUuid) {
-      copyPassword(uuid)
+    if (uuid === selectedUUID && (vaultUuid ?? null) === selectedVaultUuid) {
+      copyPassword(uuid, vaultUuid)
     } else {
       ontap(uuid, vaultUuid)
     }
@@ -281,23 +282,24 @@
     copyPassword(uuid)
   }
 
-  function handleContextMenu(e, uuid) {
+  function handleContextMenu(e, uuid, vaultUuid = null) {
     e.preventDefault()
     try {
-      const rec = getRecordData(vaultUuidForRecord(uuid), uuid)
+      const resolvedVaultUuid = vaultUuid !== null && vaultUuid !== undefined ? vaultUuid : vaultUuidForRecord(uuid)
+      const rec = getRecordData(resolvedVaultUuid, uuid)
       // Clamp to viewport so menu doesn't appear off-screen
       const menuW = 180, menuH = 500
       const x = Math.min(e.clientX, window.innerWidth  - menuW - 8)
       const y = Math.min(e.clientY, window.innerHeight - menuH - 8)
-      contextMenu = { x, y, rec, uuid }
+      contextMenu = { x, y, rec, uuid, vaultUuid: resolvedVaultUuid }
     } catch {}
   }
 
-  function copyPassword(uuid) {
+  function copyPassword(uuid, vaultUuid = null) {
     try {
-      const vaultUuid = vaultUuidForRecord(uuid)
-      const rec = getRecordData(vaultUuid, uuid)
-      if (rec.Password === null) handleWasmCopy(vaultUuid, uuid, 'Password')  // withheld — use WASM
+      const resolvedVaultUuid = vaultUuid !== null && vaultUuid !== undefined ? vaultUuid : vaultUuidForRecord(uuid)
+      const rec = getRecordData(resolvedVaultUuid, uuid)
+      if (rec.Password === null) handleWasmCopy(resolvedVaultUuid, uuid, 'Password')  // withheld — use WASM
       else if (rec.Password) handleCopy(rec.Password, uuid, 'Password')
     } catch {}
   }
@@ -421,7 +423,7 @@
 {#snippet recordRow(r)}
   <button
     class="record-row"
-    class:is-selected={r.uuid === selectedUUID}
+    class:is-selected={r.uuid === selectedUUID && (r.vaultUuid ?? null) === selectedVaultUuid}
     class:clipboard-active={flashedUUID === r.uuid}
     class:is-secondary={!!r.vaultUuid}
     style={flashedUUID === r.uuid
@@ -431,7 +433,7 @@
       : ''}
     onclick={() => handleClick(r.uuid, r.vaultUuid)}
     ondblclick={() => handleDblClick(r.uuid, r.vaultUuid)}
-    oncontextmenu={e => handleContextMenu(e, r.uuid)}
+    oncontextmenu={e => handleContextMenu(e, r.uuid, r.vaultUuid)}
   >
     <div class="record-row-main">
       <span class="record-row-title">
@@ -460,7 +462,7 @@
     {/if}
     {#if contextMenu.rec.Password !== ''}
       <button onclick={() => {
-        if (contextMenu.rec.Password === null) handleWasmCopy(vaultUuidForRecord(contextMenu.uuid), contextMenu.uuid, 'Password')
+        if (contextMenu.rec.Password === null) handleWasmCopy(contextMenu.vaultUuid, contextMenu.uuid, 'Password')
         else handleCopy(contextMenu.rec.Password, contextMenu.uuid, 'Password')
         closeMenu()
       }}>
@@ -471,19 +473,18 @@
       <button onclick={() => { handleCopy(contextMenu.rec.URL, contextMenu.uuid, 'URL'); closeMenu() }}>
         <span>Copy URL</span><span class="ctx-keys"><kbd>Ctrl</kbd><kbd>U</kbd></span>
       </button>
-      <button onclick={() => { window.open(absoluteUrl(contextMenu.rec.URL), '_blank'); closeMenu() }}>
+      <button onclick={() => { window.open(absoluteUrl(contextMenu.rec.URL), '_blank', 'noopener,noreferrer'); closeMenu() }}>
         <span>Visit URL</span><span class="ctx-keys"><kbd>↵</kbd></span>
       </button>
     {/if}
     {#if contextMenu.rec.TwoFactorKey !== undefined}
-      <button onclick={async () => { const u = contextMenu.uuid; closeMenu(); await oncopytotp(u) }}>
+      <button onclick={async () => { const u = contextMenu.uuid; const v = contextMenu.vaultUuid; closeMenu(); await oncopytotp(u, v) }}>
         <span>Copy one-time code</span><span class="ctx-keys"><kbd>Ctrl</kbd><kbd>T</kbd></span>
       </button>
     {/if}
     {#each (contextMenu.rec.CustomFields ?? []).slice(0, 9) as cf, i}
       <button onclick={() => {
-        const vaultUuid = vaultUuidForRecord(contextMenu.uuid)
-        if (cf.Value === null) handleWasmCustomCopy(vaultUuid, contextMenu.uuid, cf.Name, `custom-${i}`)
+        if (cf.Value === null) handleWasmCustomCopy(contextMenu.vaultUuid, contextMenu.uuid, cf.Name, `custom-${i}`)
         else handleCopy(cf.Value, contextMenu.uuid, `custom-${i}`, cf.Name)
         closeMenu()
       }}>

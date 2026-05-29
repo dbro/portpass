@@ -14,19 +14,19 @@ You decide where to store your vault file: on-device, self-hosted, or in a cloud
 
 ## What Portpass does
 
-* works fully offline, no network connection required after initial installation. Can also work with cloud-hosted files if you choose.
-* runs on all your devices: mobile, tablet, and desktop
-* stores each vault as a file on your device, for easy sync/backup/sharing
-* unlocks vault files using WebAuthn methods: fingerprint, face recognition, and PIN
-* fills login forms on websites using a bookmarklet in two clicks (desktop only). No browser extension with excessive permissions, no copying secrets to the system clipboard
+* works fully **offline**, no network connection required after initial installation. Can also work with cloud-hosted files if you choose.
+* runs on all your devices: **mobile, tablet, and desktop**
+* stores each vault as a file on your device, for easy **sync/backup/sharing**
+* unlocks vault files using WebAuthn methods: **fingerprint, face recognition, and PIN**
+* **fills login forms on websites** using a bookmarklet in two clicks (desktop only). No browser extension with excessive permissions, no copying secrets to the system clipboard
 * generates strong passwords
 * keeps a history of previous password values
-* generates one-time codes (TOTP) for two-factor authentication (2FA)
-* supports custom fields (eg. credit card numbers, PIN codes, account numbers, API keys)
+* generates **one-time codes (TOTP)** for two-factor authentication (2FA)
+* supports **custom fields** (eg. credit card numbers, PIN codes, account numbers, API keys)
 * searches instantly across multiple vaults and multiple data fields
 * organizes password records into groups for browsing
 * encrypts your vault using an established open source format (pwsafe v3)
-* opens multiple vaults simultaneously (eg. personal, work, family), supports sharing vaults with other people
+* opens **multiple vaults simultaneously** (eg. personal, work, family), supports sharing vaults with other people
 * respects read-only file permissions for each vault
 * has a mobile-first design with both light and dark modes
 
@@ -126,7 +126,7 @@ There is no server, no account, and nothing to trust except the open source code
 
 **Biometric/PIN unlock** can be enabled to use your device's built-in authentication (fingerprint, face recognition, or PIN) so you don't have to type your master password on repeat visits. Your master password is encrypted with a key only your device can produce and stored locally, it is never transmitted anywhere.
 
-On Android, Chrome routes biometric/PIN unlock setup through [Google Password Manager](https://passwords.google.com/), which requires a recovery PIN to have been set up previously. Google Password Manager stores a synced copy of the passkey in Google's cloud (but not your vault's master password, which always stays on your device). To set up or reset a Google Password Manager recovery PIN, visit [passwords.google.com/passkeys/reset/intro](https://passwords.google.com/passkeys/reset/intro).
+The Chrome browser routes biometric/PIN unlock setup through [Google Password Manager](https://passwords.google.com/), which requires a recovery PIN to have been set up previously. Google Password Manager stores a synced copy of the passkey in Google's cloud (but not your vault's master password, which always stays on your device). To set up or reset a Google Password Manager recovery PIN, visit [passwords.google.com/passkeys/reset/intro](https://passwords.google.com/passkeys/reset/intro). Other browsers beyond Chrome use similar hosted services (eg. Microsoft password manager, Apple iCloud keychain).
 
 ## Autofill
 
@@ -142,11 +142,15 @@ Portpass finds matching vault entries by URL, lets you pick one if there are mul
 
 ### How Autofill works
 
-A `javascript:` bookmarklet in your browser's bookmarks bar opens a small picker popup when you click it on a login page. The popup shows credentials that match the current page's URL. Click a record and Portpass fills the fields directly, following the record's Autofill sequence setting (default: fill username → Tab → fill password → Submit).
+A `javascript:` bookmarklet in your browser's bookmarks bar opens a small picker popup when you click it on a login page. The popup shows credentials that match the current page's URL. Click a record and Portpass fills the fields directly, following the record's Autofill sequence setting (default: fill username -> Tab -> fill password -> Submit).
 
-The bookmarklet communicates with your open Portpass vault over an encrypted channel. No credentials pass through the clipboard at any point — this matters on Windows and Linux, where clipboard contents can be read by any running process, and in browsers where extensions with clipboard permission could read a copied password before it is pasted. The encryption key is unique to each new bookmarklet created in Portpass, and can be revoked from Portpass's vault settings.
+The bookmarklet itself is not a secret and contains no private key. It opens Portpass's `autofill.html` popup, which holds a non-extractable signing key in Portpass-origin browser storage for that profile. Portpass stores the matching public key as a revocable autofill delegate. Requests are signed by the popup, and credential replies are encrypted to a fresh per-session key.
 
-Portpass searches all unlocked vaults for URLs that match the current web page. It compares the canonical version, removing "www." as well as url parameters after the "?" and "#" characters. It looks for exact matches first, then falls back to offering the current open record (if one is open) as well as up to 5 near matches. If one of the non-exact matches is chosen, you can instruct Portpass to update that entry's URL in the vault to match the current webpage URL to accelerate future Autofill requests on this webpage. The "near match" method uses edit distance (Levenshtein) showing the five closest matches within a distance of 5 edits.
+No credentials pass through the clipboard at any point -- this matters on Windows and Linux, where clipboard contents can be read by any running process, and in browsers where extensions with clipboard permission could read a copied password before it is pasted.
+
+In same-profile autofill, Portpass searches all unlocked vaults for URLs that match the current web page. It compares the canonical version, removing "www." as well as url parameters after the "?" and "#" characters. It looks for exact matches first, then falls back to offering the current open record (if one is open) as well as up to 5 near matches. If one of the non-exact matches is chosen, you can instruct Portpass to update that entry's URL in the vault to match the current webpage URL to accelerate future Autofill requests on this webpage. The "near match" method uses edit distance (Levenshtein) showing the five closest matches within a distance of 5 edits.
+
+In cross-profile autofill, credential release is stricter: Portpass only sends credentials over the relay for exact authorized URL matches. If there is no exact match, it returns metadata only, such as the count of near matches, and prompts you to view or update the record inside Portpass.
 
 ### Setting up autofill
 
@@ -156,6 +160,14 @@ Portpass searches all unlocked vaults for URLs that match the current web page. 
 4. Drag the chip to your browser's bookmarks bar. If the bar is hidden, click **Copy link** and add the bookmark manually.
 
 For cross-profile setup, start the [switchboard](https://github.com/dbro/switchboard) as a background service on your machine before using the bookmarklet. See the repo README for instructions to run switchboard automatically in the background.
+
+Cross-profile setup uses a separate pairing ceremony because the filling profile and the clean Portpass profile do not share browser storage:
+
+1. In the filling browser profile, open `https://dbro.github.io/portpass/autofill.html?pair=1`.
+2. Click **Create pairing token** and copy the `ppair1_...` token.
+3. In the clean Portpass profile, open vault settings -> **Autofill** -> **Add autofill profile**.
+4. Paste the token, compare the short pairing code, and click **Pair profile**.
+5. Drag or copy the generated bookmarklet into the filling profile's bookmarks bar.
 
 <img src="https://github.com/user-attachments/assets/677ce196-f282-4de6-8506-407905e077c4" width="35%" alt="Screenshot of autofill bookmarklet creation">
 
@@ -188,7 +200,7 @@ The text representation is also possible, and is easier to document here. The de
 
 ### Best practices with Autofill
 
-- **Use a unique bookmarklet for each browser profile.** Each bookmarklet holds a unique private key. Create a separate bookmarklet for each browser and profile where you want autofill, and give each a descriptive name so you can revoke individual ones if needed.
+- **Use a unique autofill profile for each browser profile.** Each profile has its own non-extractable signing key stored by `autofill.html` in that browser profile's Portpass-origin storage. Create a separate bookmarklet/delegate for each browser and profile where you want autofill, and give each a descriptive name so you can revoke individual ones if needed.
 - **Revoke bookmarklets you no longer use.** Open vault settings → Autofill, and click **Revoke** next to any entry you want to invalidate. The corresponding bookmarklet will be rejected immediately, even if it is still in someone's bookmarks bar.
 - **Prefer autofill over copy-paste on Windows and Linux (X11).** On these platforms, any running process can read the clipboard at any time. Autofill writes directly to the form field without ever putting the credential in the clipboard, eliminating that exposure window entirely. (Linux Wayland has better clipboard security than X11.)
 
@@ -202,9 +214,9 @@ The official desktop Password Safe app has a function called "Autotype" that can
 
 It is possible to autofill while running Portpass in a separate clean profile, following the security best-practice to reduce exposure to browser extensions -- however, it requires a helper switchboard running in its own process on your system. It is also possible to run Portpass in a different browser (eg. Chrome) and use autofill in another browser (eg. Firefox).
 
-**Same-profile**: Portpass and the pages you fill are in the same browser profile. The bookmarklet opens a relay popup that talks to Portpass directly via a browser-internal channel. No extra software needed. This is the simpler approach, but it means that all your browser extensions could try to attack Portpass. If you trust your browser extensions, this is ok.
+**Same-profile**: Portpass and the pages you fill are in the same browser profile. The bookmarklet opens `autofill.html`, which talks to Portpass directly via a browser-internal channel. No extra software needed. This is the simpler approach, but it means that all your browser extensions could try to attack Portpass. If you trust your browser extensions, this is ok.
 
-**Cross-profile**: To protect against malicious browser extensions, you could choose to run Portpass in a separate browser profile with no extensions installed. This means that the browser has stronger isolation between Portpass and the websites that you visit, and the browser prevents the bookmarklet from communicating with Portpass to transfer information from your vault to the bookmarklet. In this scenario, a helper service provides a simple message switchboard between Portpass and the bookmarklet. This service is called **[switchboard](https://github.com/dbro/switchboard)**, and it runs in the background acting as a very limited shared memory. No data leaves your machine. All messages sent between Portpass and the bookmarklet via the switchboard are encrypted end-to-end using the key that is set up when the bookmarklet is installed. An eavesdropper would see only encrypted blobs.
+**Cross-profile**: To protect against malicious browser extensions, you can run Portpass in a separate browser profile with no extensions installed. The filling profile pairs its `autofill.html` popup with the clean Portpass profile using a short-lived copy/paste token. A helper service called **[switchboard](https://github.com/dbro/switchboard)** then provides a local message relay between the two profiles. No data leaves your machine. The relay is treated as untrusted: requests are signed by the paired popup, replies are encrypted to that popup's per-session key, replayed requests are rejected, and credentials are released only for exact authorized URL matches.
 
 See [SECURITY.md](SECURITY.md) for setup instructions.
 
@@ -213,6 +225,17 @@ Note that while Portpass should run in Chrome or Safari, the bookmarklet can run
 ## Security
 
 Portpass's threat model, known limitations, and guidance on protecting yourself from malicious browser extensions are documented in [SECURITY.md](SECURITY.md).
+
+## Roadmap
+
+Possible future improvements:
+* Allow changing vault's master password and the number of key stretching rounds 
+* Import/Export other vault file formats
+* Automatically lock vault after an amount of time or system event (eg screen lock)
+* Companion mobile keyboard app to autofill values
+* Display and store attachments in the vault (one for each password)
+
+Some of these capabilitites can be done today using other apps that read and write pwsafe v3 files (change master password, import/export).
 
 ## Credits
 

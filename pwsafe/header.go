@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/pborman/uuid"
@@ -47,7 +46,7 @@ type header struct {
 	RecentyUsed    string    // 0x0f
 	Tree           string    // 0x03
 	UUID           [16]byte        // 0x01
-	UnknownFields  map[byte][]byte // forward compatibility: fields not yet parsed
+	UnknownFields  []unknownField  // forward compatibility: fields not yet parsed, in wire order
 	Version        [2]byte         // 0x00
 }
 
@@ -78,6 +77,9 @@ func (h *header) setField(id byte, data []byte) error {
 	case headerTree:
 		h.Tree = string(data)
 	case headerLastSave:
+		if len(data) != 4 {
+			return fmt.Errorf("invalid length for LastSave: %d", len(data))
+		}
 		h.LastSave = time.Unix(int64(binary.LittleEndian.Uint32(data)), 0)
 	case headerLastSaveBy:
 		h.LastSaveBy = data
@@ -98,10 +100,7 @@ func (h *header) setField(id byte, data []byte) error {
 	case headerEmptyGroups:
 		h.EmptyGroups = append(h.EmptyGroups, string(data))
 	default:
-		if h.UnknownFields == nil {
-			h.UnknownFields = make(map[byte][]byte)
-		}
-		h.UnknownFields[id] = append([]byte(nil), data...)
+		h.UnknownFields = append(h.UnknownFields, unknownField{id, append([]byte(nil), data...)})
 	}
 	return nil
 }
@@ -154,15 +153,8 @@ func (h *header) marshal() ([]byte, []byte) {
 		appendField(headerEmptyGroups, []byte(group))
 	}
 
-	if len(h.UnknownFields) > 0 {
-		keys := make([]byte, 0, len(h.UnknownFields))
-		for k := range h.UnknownFields {
-			keys = append(keys, k)
-		}
-		sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
-		for _, k := range keys {
-			appendField(k, h.UnknownFields[k])
-		}
+	for _, f := range h.UnknownFields {
+		appendField(f.ID, f.Data)
 	}
 
 	// End of entry

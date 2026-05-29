@@ -25,7 +25,7 @@ test.describe('Keyboard shortcuts', () => {
   test('Ctrl+L locks vault and returns to unlock screen', async ({ page }) => {
     await page.keyboard.press('ArrowDown') // moves focus off search (required — Ctrl+L blocked while search is focused)
     await page.keyboard.press('Control+l')
-    await expect(page.getByRole('button', { name: 'Open vault file' })).toBeVisible({ timeout: 5000 })
+    await expect(page.getByPlaceholder('Master password')).toBeVisible({ timeout: 5000 })
   })
 
   // ── New record ──────────────────────────────────────────────────────────────
