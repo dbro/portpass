@@ -21,7 +21,7 @@ async function createDelegateBookmarklet(portpass: Page): Promise<string> {
   await portpass.locator('.vault-pill').click()
   await expect(portpass.locator('.vault-settings-body')).toBeVisible()
 
-  await portpass.getByRole('button', { name: '+ Same-profile bookmarklet' }).click()
+  await portpass.getByRole('button', { name: '+ Add same-profile bookmarklet' }).click()
   await portpass.getByPlaceholder('e.g. Chrome — work profile').fill('test')
   await portpass.locator('.vs-bookmarklet-chip:not(.chip-inactive)').waitFor({ timeout: 5000 })
   const url = await portpass.locator('.vs-bookmarklet-chip').getAttribute('href') ?? ''
@@ -172,13 +172,11 @@ test.describe('Bookmarklet — autofill popup phases', () => {
     expect(token).toMatch(/^ppair1_/)
 
     await portpass.locator('.vault-pill').click()
-    await portpass.getByRole('button', { name: /Cross-profile autofill/ }).click()
-    await expect(portpass.getByText('IN YOUR EVERYDAY BROWSER')).toBeVisible()
+    await expect(portpass.getByText('In your everyday browser')).toBeVisible()
     await portpass.getByRole('button', { name: '+ Pair everyday profile' }).click()
     await portpass.getByPlaceholder('ppair1_...').fill(token)
-    await portpass.getByRole('button', { name: 'Check token' }).click()
     await expect(portpass.locator('.vs-install-warning')).toContainText('Confirm this matches')
-    await portpass.getByRole('button', { name: 'Pair profile' }).click()
+    await portpass.getByRole('button', { name: 'Pair everyday profile', exact: true }).click()
     await expect(portpass.locator('.delegate-row', { hasText: 'Everyday profile' })).toBeVisible()
     await expect(portpass.locator('.delegate-row', { hasText: 'Everyday profile' }).locator('.delegate-meta')).toContainText('0 pages filled (cross profile)')
   })
@@ -186,10 +184,8 @@ test.describe('Bookmarklet — autofill popup phases', () => {
   test('wrong autofill pairing token is rejected', async ({ context }) => {
     const { portpass } = await setupAutofillTest(context)
     await portpass.locator('.vault-pill').click()
-    await portpass.getByRole('button', { name: /Cross-profile autofill/ }).click()
     await portpass.getByRole('button', { name: '+ Pair everyday profile' }).click()
     await portpass.getByPlaceholder('ppair1_...').fill('ppair1_not-a-token')
-    await portpass.getByRole('button', { name: 'Check token' }).click()
     await expect(portpass.locator('.unlock-error')).toContainText('Pairing token')
   })
 

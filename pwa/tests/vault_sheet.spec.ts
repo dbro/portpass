@@ -115,7 +115,7 @@ test.describe('VaultSheet autofill installation UI', () => {
 
   async function createBookmarklet(page) {
     await page.locator('.vault-pill').click()
-    await page.getByRole('button', { name: '+ Same-profile bookmarklet' }).click()
+    await page.getByRole('button', { name: '+ Add same-profile bookmarklet' }).click()
     // wait for key generation (chip activates once keys are ready + name is entered)
     await page.getByPlaceholder('e.g. Chrome — work profile').fill('Test')
     await expect(page.locator('.vs-bookmarklet-chip:not(.chip-inactive)')).toBeVisible({ timeout: 5000 })
@@ -164,7 +164,7 @@ test.describe('VaultSheet autofill installation UI', () => {
   test('modal shows name input, warning banner, and two-column install layout', async ({ page }) => {
     await openVault(page)
     await page.locator('.vault-pill').click()
-    await page.getByRole('button', { name: '+ Same-profile bookmarklet' }).click()
+    await page.getByRole('button', { name: '+ Add same-profile bookmarklet' }).click()
     await expect(page.locator('.modal-title', { hasText: 'New same-profile bookmarklet' })).toBeVisible()
     await expect(page.getByPlaceholder('e.g. Chrome — work profile')).toBeVisible()
     await expect(page.locator('.vs-install-warning')).toBeVisible()
@@ -175,7 +175,7 @@ test.describe('VaultSheet autofill installation UI', () => {
   test('chip is inactive and copy button disabled before name is entered', async ({ page }) => {
     await openVault(page)
     await page.locator('.vault-pill').click()
-    await page.getByRole('button', { name: '+ Same-profile bookmarklet' }).click()
+    await page.getByRole('button', { name: '+ Add same-profile bookmarklet' }).click()
     await expect(page.locator('.vs-bookmarklet-chip.chip-inactive')).toBeVisible({ timeout: 5000 })
     await expect(page.locator('.vs-copy-link-btn')).toBeDisabled()
     await page.getByPlaceholder('e.g. Chrome — work profile').fill('test')
@@ -186,7 +186,7 @@ test.describe('VaultSheet autofill installation UI', () => {
   test('"Save and Close" is disabled until a name is entered', async ({ page }) => {
     await openVault(page)
     await page.locator('.vault-pill').click()
-    await page.getByRole('button', { name: '+ Same-profile bookmarklet' }).click()
+    await page.getByRole('button', { name: '+ Add same-profile bookmarklet' }).click()
     await expect(page.locator('.vs-close-btn')).toBeDisabled()
     await page.getByPlaceholder('e.g. Chrome — work profile').fill('My bookmark')
     await expect(page.locator('.vs-close-btn')).toBeEnabled({ timeout: 5000 })
@@ -195,7 +195,7 @@ test.describe('VaultSheet autofill installation UI', () => {
   test('X button cancels without saving when chip unused', async ({ page }) => {
     await openVault(page)
     await page.locator('.vault-pill').click()
-    await page.getByRole('button', { name: '+ Same-profile bookmarklet' }).click()
+    await page.getByRole('button', { name: '+ Add same-profile bookmarklet' }).click()
     await page.locator('.vs-modal-x').click()
     await expect(page.locator('.modal-title', { hasText: 'New same-profile bookmarklet' })).not.toBeVisible()
     await expect(page.locator('.delegate-name')).not.toBeVisible()
