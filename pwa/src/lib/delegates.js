@@ -26,6 +26,18 @@ function migrate(d) {
   return d
 }
 
+export function delegateFillMode(delegate) {
+  const bcCount = delegate?.bcCount ?? 0
+  const relayCount = delegate?.relayCount ?? 0
+  const usedSameProfile = bcCount > 0
+  const usedCrossProfile = relayCount > 0
+
+  if (usedSameProfile && usedCrossProfile) return 'same profile + cross profile'
+  if (usedCrossProfile) return 'cross profile'
+  if (usedSameProfile) return 'same profile'
+  return delegate?.pairingId || delegate?.relayUrl ? 'cross profile' : 'same profile'
+}
+
 export async function getDelegates(vaultUuid) {
   if (!vaultUuid) return []
   const all = await load()

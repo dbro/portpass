@@ -179,6 +179,7 @@ test.describe('Bookmarklet — autofill popup phases', () => {
     expect(decoded).not.toContain('privKey')
     await portpass.getByRole('button', { name: 'Pair profile' }).click()
     await expect(portpass.locator('.delegate-row', { hasText: 'Firefox daily' })).toBeVisible()
+    await expect(portpass.locator('.delegate-row', { hasText: 'Firefox daily' }).locator('.delegate-meta')).toContainText('0 pages filled (cross profile)')
   })
 
   test('wrong autofill pairing token is rejected', async ({ context }) => {
