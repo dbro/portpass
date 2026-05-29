@@ -287,8 +287,9 @@ body {
   var SVG_WAITING  = '<svg width="90" height="70"' + _S.replace('currentColor','currentColor') + ' stroke-width="1.5"><rect x="4" y="4" width="66" height="46" rx="8" stroke-dasharray="5 3"/><line x1="14" y1="18" x2="50" y2="18" stroke-width="2" stroke-linecap="round"/><line x1="14" y1="28" x2="42" y2="28" stroke-width="2" stroke-linecap="round"/><circle cx="62" cy="46" r="15" style="fill:var(--amber-bg)" stroke="none"/><path d="m55 46 5 5 9-9" style="stroke:var(--amber)" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 
   // ── Shared state ───────────────────────────────────────────────────────────
+  var pairMode = new URLSearchParams(location.search).has('pair')
   var pingNonce = crypto.randomUUID()
-  var ch = new BroadcastChannel('portpass-autofill')
+  var ch = pairMode ? null : new BroadcastChannel('portpass-autofill')
   var bookmarkletOrigin = null
   var isSecure = false
   var currentUrl = ''
@@ -368,6 +369,13 @@ body {
     el.className = 'pp-status'
     el.textContent = msg
     $content.appendChild(el)
+  }
+
+  var PAIR_BASE32 = 'abcdefghijklmnopqrstuvwxyz234567'
+
+  if (pairMode) {
+    showPairingSetup()
+    return
   }
 
   // ── Startup: generate ECDH key pair, signal ready ─────────────────────────
@@ -501,11 +509,11 @@ body {
     $transport = {
       search: async function(q) {
         var blob = await cpSignAndSend('search', { url: q, query: q })
-        return decryptReply(blob)
+        return decryptReply(blob, blob.replyTo)
       },
       fill: async function(uuid, vu) {
         var blob = await cpSignAndSend('fill-uuid', { url: currentUrl, uuid: uuid, vaultUuid: vu || null })
-        var results = await decryptReply(blob)
+        var results = await decryptReply(blob, blob.replyTo)
         if (!results || !results.length) throw new Error('Could not get credentials')
         return results[0]
       },
@@ -562,7 +570,7 @@ body {
     })
   }
 
-  async function decryptReply(blob) {
+  async function decryptReply(blob, expectedRequestId) {
     var ephPubJwk = JSON.parse(atob(blob.ephPub))
     var ephPubKey = await crypto.subtle.importKey('jwk', ephPubJwk, { name: 'ECDH', namedCurve: 'P-256' }, false, [])
     var cpSessionKey = await crypto.subtle.deriveKey(
@@ -572,13 +580,20 @@ body {
     var iv = Uint8Array.from(atob(blob.iv), function(c) { return c.charCodeAt(0) })
     var ct = Uint8Array.from(atob(blob.ciphertext), function(c) { return c.charCodeAt(0) })
     var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, cpSessionKey, ct)
-    return JSON.parse(new TextDecoder().decode(pt))
+    var parsed = JSON.parse(new TextDecoder().decode(pt))
+    if (parsed && parsed.v === 1 && Object.prototype.hasOwnProperty.call(parsed, 'data')) {
+      if (expectedRequestId && parsed.requestId !== expectedRequestId) throw new Error('Relay reply did not match request')
+      if (parsed.delegateId && delegateId && parsed.delegateId !== delegateId) throw new Error('Relay reply was for a different delegate')
+      if (parsed.recipient && parsed.recipient !== 'autofill-popup') throw new Error('Relay reply was for a different recipient')
+      return parsed.data
+    }
+    return parsed
   }
 
   async function processRelayBlob(blob) {
     if (blob.error) { sendError(blob.error); return }
     try {
-      var data = await decryptReply(blob)
+      var data = await decryptReply(blob, blob.replyTo)
       if (data && data.records) {
         applyTheme(data.theme === 'dark', data.accent || 'amber')
         if ((!data.records || !data.records.length) && data.nearMatchCount !== undefined) showNearMatchSummary(data.nearMatchCount)
@@ -687,6 +702,191 @@ body {
         } catch(e) { reject(e) }
       }
     })
+  }
+
+  function savePairedProfile(profile) {
+    return new Promise(function(resolve, reject) {
+      var req = indexedDB.open('keyval-store')
+      req.onerror = function() { reject(req.error || new Error('IndexedDB unavailable')) }
+      req.onupgradeneeded = function() {
+        var db = req.result
+        if (!db.objectStoreNames.contains('keyval')) db.createObjectStore('keyval')
+      }
+      req.onsuccess = function() {
+        var db = req.result
+        try {
+          var tx = db.transaction('keyval', 'readwrite')
+          var store = tx.objectStore('keyval')
+          var gr = store.get('paired-autofill-profiles-v1')
+          gr.onerror = function() { reject(gr.error || new Error('Pairing storage unavailable')) }
+          gr.onsuccess = function() {
+            var all = gr.result || {}
+            all[profile.delegateId] = profile
+            all.defaultDelegateId = profile.delegateId
+            var pr = store.put(all, 'paired-autofill-profiles-v1')
+            pr.onerror = function() { reject(pr.error || new Error('Pairing storage unavailable')) }
+            pr.onsuccess = function() { resolve(profile) }
+          }
+        } catch(e) { reject(e) }
+      }
+    })
+  }
+
+  function pairBase32(bytes) {
+    var out = '', bits = ''
+    for (var i = 0; i < bytes.length; i++) {
+      bits += bytes[i].toString(2).padStart(8, '0')
+      while (bits.length >= 5) {
+        out += PAIR_BASE32[parseInt(bits.slice(0, 5), 2)]
+        bits = bits.slice(5)
+      }
+    }
+    if (bits.length > 0) out += PAIR_BASE32[parseInt(bits.padEnd(5, '0'), 2)]
+    return out
+  }
+
+  function pairBytesToB64(bytes) {
+    return btoa(String.fromCharCode.apply(null, new Uint8Array(bytes)))
+  }
+
+  function pairB64url(s) {
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  }
+
+  async function identityFromPairingPublicKey(publicKeySpki) {
+    var digest = new Uint8Array(await crypto.subtle.digest('SHA-256', publicKeySpki))
+    var fp = pairBase32(digest.slice(0, 16))
+    return {
+      delegateId: 'afp1_' + fp,
+      displayCode: fp.slice(-8).replace(/(.{4})/g, '$1-').replace(/-$/, '').toUpperCase(),
+    }
+  }
+
+  function pairingTokenForProfile(profile, name) {
+    var now = Date.now()
+    var token = {
+      v: 1,
+      type: 'portpass-autofill-pairing',
+      delegateId: profile.delegateId,
+      displayCode: profile.displayCode,
+      name: name || '',
+      publicKeyB64: profile.publicKeyB64,
+      relayUrl: profile.relayUrl || '',
+      pairingId: profile.pairingId,
+      created: profile.created,
+      expires: now + 10 * 60 * 1000,
+    }
+    return 'ppair1_' + pairB64url(JSON.stringify(token))
+  }
+
+  async function createPairingProfile(relayUrl) {
+    var keyPair = await crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify']
+    )
+    var spki = await crypto.subtle.exportKey('spki', keyPair.publicKey)
+    var identity = await identityFromPairingPublicKey(spki)
+    var profile = {
+      delegateId: identity.delegateId,
+      displayCode: identity.displayCode,
+      dashboardId: 'local-dashboard',
+      relayUrl: relayUrl || '',
+      pairingId: crypto.randomUUID(),
+      created: Date.now(),
+      signingKey: keyPair.privateKey,
+      publicKey: Array.from(new Uint8Array(spki)),
+      publicKeyB64: pairBytesToB64(spki),
+    }
+    return savePairedProfile(profile)
+  }
+
+  function showPairingSetup() {
+    hideSearchUI()
+    $subheader.style.display = 'none'
+    $content.innerHTML = ''
+
+    var wrap = document.createElement('div')
+    wrap.style.cssText = 'padding:16px;display:flex;flex-direction:column;gap:12px'
+
+    var title = document.createElement('div')
+    title.className = 'pp-waiting-title'
+    title.textContent = 'Pair this autofill profile'
+    wrap.appendChild(title)
+
+    var help = document.createElement('div')
+    help.className = 'pp-waiting-sub'
+    help.style.textAlign = 'left'
+    help.textContent = 'Create a pairing token here, then paste it into Portpass in the clean profile using Vault settings → Autofill → Add autofill profile.'
+    wrap.appendChild(help)
+
+    var name = document.createElement('input')
+    name.className = 'pp-search'
+    name.placeholder = 'Name, e.g. Firefox — daily profile'
+    wrap.appendChild(name)
+
+    var relay = document.createElement('input')
+    relay.className = 'pp-search'
+    relay.placeholder = 'Relay URL, e.g. http://localhost:7577'
+    relay.value = 'http://localhost:7577'
+    wrap.appendChild(relay)
+
+    var create = document.createElement('button')
+    create.className = 'pp-footer-btn'
+    create.style.alignSelf = 'flex-start'
+    create.textContent = 'Create pairing token'
+    wrap.appendChild(create)
+
+    var code = document.createElement('div')
+    code.className = 'rec-match-badge'
+    code.style.alignSelf = 'flex-start'
+    code.style.display = 'none'
+    wrap.appendChild(code)
+
+    var token = document.createElement('textarea')
+    token.className = 'pp-search'
+    token.rows = 8
+    token.readOnly = true
+    token.style.display = 'none'
+    token.style.resize = 'vertical'
+    wrap.appendChild(token)
+
+    var copy = document.createElement('button')
+    copy.className = 'pp-footer-btn'
+    copy.style.cssText = 'align-self:flex-start;display:none'
+    copy.textContent = 'Copy token'
+    wrap.appendChild(copy)
+
+    var status = document.createElement('div')
+    status.className = 'pp-waiting-sub'
+    status.style.textAlign = 'left'
+    wrap.appendChild(status)
+
+    create.onclick = function() {
+      create.disabled = true
+      status.textContent = 'Creating profile…'
+      createPairingProfile(relay.value.trim()).then(function(profile) {
+        token.value = pairingTokenForProfile(profile, name.value.trim())
+        token.style.display = ''
+        copy.style.display = ''
+        code.style.display = ''
+        code.textContent = 'Code ' + profile.displayCode
+        status.textContent = 'Token expires in 10 minutes. After pairing, create or update the bookmarklet in this profile.'
+      }).catch(function(e) {
+        create.disabled = false
+        status.textContent = e.message || 'Could not create pairing token'
+      })
+    }
+
+    copy.onclick = function() {
+      navigator.clipboard.writeText(token.value).then(function() {
+        copy.textContent = 'Copied!'
+        setTimeout(function() { copy.textContent = 'Copy token' }, 1800)
+      }).catch(function() {
+        token.focus()
+        token.select()
+      })
+    }
+
+    $content.appendChild(wrap)
   }
 
   // ── Record selection — shared entry point ──────────────────────────────────

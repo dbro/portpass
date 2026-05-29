@@ -38,20 +38,25 @@ export async function getDelegate(vaultUuid, delegateId) {
   return (all[vaultUuid] ?? []).map(migrate).find(d => d.id === delegateId) ?? null
 }
 
-export async function addDelegate(vaultUuid, name, publicKeySpki, id = crypto.randomUUID()) {
+export async function addDelegate(vaultUuid, name, publicKeySpki, id = crypto.randomUUID(), options = {}) {
   const all = await load()
+  const current = all[vaultUuid] ?? []
+  if (current.some(d => d.id === id)) throw new Error('This autofill profile is already paired')
   const delegate = {
     id,
     name,
     publicKey: Array.from(new Uint8Array(publicKeySpki)),
     displayCode: delegateDisplayCode(id),
     created: Date.now(),
+    pairingId: options.pairingId || null,
+    relayUrl: options.relayUrl || null,
+    pairedAt: options.pairedAt || Date.now(),
     bcCount: 0,
     bcLastUsed: null,
     relayCount: 0,
     relayLastUsed: null,
   }
-  all[vaultUuid] = [delegate, ...(all[vaultUuid] ?? [])]
+  all[vaultUuid] = [delegate, ...current]
   await save(all)
   return delegate
 }

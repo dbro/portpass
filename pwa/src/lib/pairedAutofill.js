@@ -15,21 +15,32 @@ function bytesToB64(bytes) {
   return btoa(String.fromCharCode(...new Uint8Array(bytes)))
 }
 
+function b64ToBytes(b64) {
+  return Uint8Array.from(atob(b64), c => c.charCodeAt(0))
+}
+
+function b64urlEncode(s) {
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+function b64urlDecode(s) {
+  const b64 = s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - s.length % 4) % 4)
+  return atob(b64)
+}
+
 const BASE32 = 'abcdefghijklmnopqrstuvwxyz234567'
 
 function base32NoPad(bytes) {
   let out = ''
-  let value = 0
-  let bits = 0
+  let bits = ''
   for (const byte of bytes) {
-    value = (value << 8) | byte
-    bits += 8
-    while (bits >= 5) {
-      out += BASE32[(value >>> (bits - 5)) & 31]
-      bits -= 5
+    bits += byte.toString(2).padStart(8, '0')
+    while (bits.length >= 5) {
+      out += BASE32[parseInt(bits.slice(0, 5), 2)]
+      bits = bits.slice(5)
     }
   }
-  if (bits > 0) out += BASE32[(value << (5 - bits)) & 31]
+  if (bits.length > 0) out += BASE32[parseInt(bits.padEnd(5, '0'), 2)]
   return out
 }
 
@@ -39,6 +50,51 @@ async function delegateIdFromPublicKey(publicKeySpki) {
   return {
     delegateId: `afp1_${fp}`,
     displayCode: fp.slice(-8).replace(/(.{4})/g, '$1-').replace(/-$/, '').toUpperCase(),
+  }
+}
+
+export async function delegateIdentityFromPublicKey(publicKeySpki) {
+  return delegateIdFromPublicKey(publicKeySpki)
+}
+
+export function makePairingToken(profile, { name = '', ttlMs = 10 * 60 * 1000 } = {}) {
+  const now = Date.now()
+  const token = {
+    v: 1,
+    type: 'portpass-autofill-pairing',
+    delegateId: profile.delegateId,
+    displayCode: profile.displayCode,
+    name,
+    publicKeyB64: profile.publicKeyB64,
+    relayUrl: profile.relayUrl || '',
+    pairingId: profile.pairingId || crypto.randomUUID(),
+    created: profile.created || now,
+    expires: now + ttlMs,
+  }
+  return 'ppair1_' + b64urlEncode(JSON.stringify(token))
+}
+
+export async function parsePairingToken(raw) {
+  const text = (raw || '').trim()
+  if (!text.startsWith('ppair1_')) throw new Error('Pairing token must start with ppair1_')
+  let token
+  try {
+    token = JSON.parse(b64urlDecode(text.slice('ppair1_'.length)))
+  } catch {
+    throw new Error('Pairing token is not valid')
+  }
+  if (token?.type !== 'portpass-autofill-pairing' || token.v !== 1) {
+    throw new Error('Pairing token is not a Portpass autofill token')
+  }
+  if (!token.publicKeyB64 || !token.delegateId) throw new Error('Pairing token is missing key data')
+  if (!token.expires || Date.now() > token.expires) throw new Error('Pairing token has expired')
+  const publicKey = b64ToBytes(token.publicKeyB64)
+  const identity = await delegateIdFromPublicKey(publicKey.buffer)
+  if (identity.delegateId !== token.delegateId) throw new Error('Pairing token fingerprint does not match its public key')
+  return {
+    ...token,
+    displayCode: token.displayCode || identity.displayCode,
+    publicKey: publicKey.buffer,
   }
 }
 
@@ -53,6 +109,7 @@ export async function createPairedAutofillProfile({ relayUrl = '', dashboardId =
     displayCode,
     dashboardId,
     relayUrl,
+    pairingId: crypto.randomUUID(),
     created: Date.now(),
     signingKey: keyPair.privateKey,
     publicKey: Array.from(new Uint8Array(publicKeySpki)),

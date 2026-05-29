@@ -337,12 +337,26 @@
   }
 
   // Encrypt data with the autofill popup's ECDH public key and send as a ws-relay reply.
-  async function sbEncryptReply(replyTo, ecdhSpkiB64Arg, data) {
+  async function sha256B64(bytes) {
+    const digest = await crypto.subtle.digest('SHA-256', bytes)
+    return btoa(String.fromCharCode(...new Uint8Array(digest)))
+  }
+
+  async function sbEncryptReply(replyTo, ecdhSpkiB64Arg, data, meta = {}) {
     const ephPair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey'])
     const relayPub = await crypto.subtle.importKey('spki', Uint8Array.from(atob(ecdhSpkiB64Arg), c => c.charCodeAt(0)), { name: 'ECDH', namedCurve: 'P-256' }, false, [])
     const sk = await crypto.subtle.deriveKey({ name: 'ECDH', public: relayPub }, ephPair.privateKey, { name: 'AES-GCM', length: 256 }, false, ['encrypt'])
     const iv = crypto.getRandomValues(new Uint8Array(12))
-    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, sk, new TextEncoder().encode(JSON.stringify(data)))
+    const envelope = {
+      v: 1,
+      requestId: replyTo,
+      requestHash: meta.requestHash || null,
+      delegateId: meta.delegateId || null,
+      recipient: meta.recipient || 'autofill-popup',
+      ts: Date.now(),
+      data,
+    }
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, sk, new TextEncoder().encode(JSON.stringify(envelope)))
     const ephPubJwk = await crypto.subtle.exportKey('jwk', ephPair.publicKey)
     if (_sbWs) _sbWs.send(JSON.stringify({
       type: 'reply', replyTo,
@@ -422,6 +436,7 @@
         if (!rememberNonce(sbSeenNonces, msg.replyTo)) return
         const message   = new TextEncoder().encode(JSON.stringify({ version: 1, sender: msg.delegateId || '', recipient: 'local-dashboard', url: msg.url || '', nonce: msg.replyTo, ecdh: msg.ecdh || '', ts: msg.ts,
           msgType: msg.msgType || '', uuid: msg.uuid || '', vaultUuid: msg.vaultUuid || '', query: msg.query || '' }))
+        const requestHash = await sha256B64(message)
         const verified  = await verifyDelegateById(dbKey, msg.delegateId || '', message, sigBytes)
         if (!verified) return
         if (msg.msgType === 'fill-done') {
@@ -441,7 +456,7 @@
           return
         }
         if (msg.msgType === 'search') {
-          try { await sbEncryptReply(msg.replyTo, msg.ecdh, []) } catch {}
+          try { await sbEncryptReply(msg.replyTo, msg.ecdh, [], { delegateId: verified.id, requestHash }) } catch {}
           return
         }
         if (msg.msgType === 'fill-uuid') {
@@ -456,7 +471,7 @@
               uuid: msg.uuid, vaultUuid: msg.vaultUuid || null,
               title: rec.Title, matchType: 'search', existingUrl: rec.URL || '',
               autotype: rf.autotype, sensitiveCodes: rf.sensitiveCodes, fields: rf.fields,
-            }])
+            }], { delegateId: verified.id, requestHash })
           } catch(e) {
             if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo, error: e.message || 'Could not get credentials' }))
           }
@@ -467,7 +482,7 @@
         const payload = exact.length
           ? { records: exact, theme: localStorage.getItem('theme') || 'dark', accent: localStorage.getItem('accent') || 'amber' }
           : { records: [], nearMatchCount: records.length, theme: localStorage.getItem('theme') || 'dark', accent: localStorage.getItem('accent') || 'amber' }
-        await sbEncryptReply(msg.replyTo, msg.ecdh, payload)
+        await sbEncryptReply(msg.replyTo, msg.ecdh, payload, { delegateId: verified.id, requestHash })
       } catch(e) {}
     }
     let closed = false

@@ -12,7 +12,7 @@ Consequences of this scope:
 - Mobile browsers: not supported — the bookmarks bar is not accessible
 - Same-profile: works with no helper process. `window.open()`, `postMessage`, and `BroadcastChannel` stay within one browser profile.
 - Cross-profile and cross-browser: uses a local WebSocket switchboard relay. Browser-native `BroadcastChannel` cannot cross profile or browser boundaries, so the relay is the transport bridge.
-- Clean browser profile: supported by the relay protocol; the remaining product work is the explicit cross-profile pairing UI.
+- Clean browser profile: supported by the relay protocol and copy/paste pairing ceremony.
 
 ### Cross-profile / cross-browser bridging options
 
@@ -60,12 +60,12 @@ Same-profile setup currently uses the "New bookmarklet" flow:
 3. Dashboard stores the delegate public key, name, created time, display code, and revocation/use metadata.
 4. The generated bookmarklet contains only the Portpass URL, relay routing data, delegate ID, and page-agent code.
 
-True cross-profile pairing needs one additional UI ceremony because profile A and profile B do not share IndexedDB. The intended flow is:
+True cross-profile pairing needs one additional UI ceremony because profile A and profile B do not share IndexedDB. The implemented copy/paste-token flow is:
 
 1. User opens D in the clean Portpass profile and chooses "Add autofill profile".
 2. User opens A in the filling profile.
 3. A generates a delegate signing keypair locally. The private key never leaves profile A's Portpass origin storage.
-4. A and D pair over R using a human-authenticated ceremony: QR code, short pairing code, or copy/paste pairing token.
+4. A shows a `ppair1_...` token containing its public key, relay URL, expiry, pairing ID, and short display code.
 5. D stores A's public key, delegate name, created time, and revocation metadata.
 6. A stores D's public key or pairing identifier so it can authenticate D's replies.
 
@@ -154,10 +154,9 @@ It also removes the reusable-secret exposure from B. A malicious website can sti
 
 #### Remaining work
 
-1. Add the human-authenticated cross-profile pairing ceremony and UI.
-2. Bind relay replies more tightly to request IDs / previous message hashes.
-3. Add relay-focused tests for replay rejection, wrong-origin URL claims, metadata-only no-match behavior, and exact-match credential release.
-4. Optionally add activity logs in VaultSheet: delegate, channel, page origin, action, record title, timestamp, and whether credentials were released.
+1. Add relay-focused tests for replay rejection, wrong-origin URL claims, metadata-only no-match behavior, and exact-match credential release.
+2. Optionally add QR or short-code pairing on top of the copy/paste token flow.
+3. Optionally add activity logs in VaultSheet: delegate, channel, page origin, action, record title, timestamp, and whether credentials were released.
 
 ---
 
@@ -245,7 +244,7 @@ The bookmarklet contains no private key. Portpass creates a paired autofill prof
 4. Pair the filling profile's `autofill.html` delegate with the clean-profile Dashboard.
 5. Install the bookmarklet in the filling profile.
 
-The full human-authenticated cross-profile pairing UI is still a separate step from the same-profile "New bookmarklet" flow. The protocol expects the filling profile to hold the non-extractable private signing key and the clean profile to hold the matching public delegate record.
+Cross-profile pairing is separate from the same-profile "New bookmarklet" flow. The filling profile holds the non-extractable private signing key and displays a `ppair1_...` token from `autofill.html?pair=1`; the clean profile imports that token with Vault settings → Autofill → Add autofill profile and stores the matching public delegate record.
 
 ### Per-use
 
@@ -318,7 +317,7 @@ Cross-profile communication uses the switchboard relay. The relay is treated as 
 
 ## Implementation status (as of 2026-05-28)
 
-The secure paired-delegate foundation is implemented. The bookmarklet no longer contains a private key; the durable signing key lives in `autofill.html`'s Portpass-origin IndexedDB storage and is created as a non-extractable WebCrypto key. Same-profile autofill is working through this model. Cross-profile transport and stricter relay-side authorization are implemented; the full human-authenticated cross-profile pairing ceremony is still the remaining UI/protocol step.
+The secure paired-delegate foundation is implemented. The bookmarklet no longer contains a private key; the durable signing key lives in `autofill.html`'s Portpass-origin IndexedDB storage and is created as a non-extractable WebCrypto key. Same-profile autofill is working through this model. Cross-profile transport, copy/paste pairing, reply binding, and stricter relay-side authorization are implemented.
 
 ### What is built
 
@@ -455,7 +454,7 @@ The popup code uses the same broad UI shell in both modes, but credential releas
 
 ### Browser notes
 
-- **Chrome and Firefox** tested for the same-profile bookmarklet flow. Cross-profile relay transport is implemented; full cross-profile pairing UI remains to be completed.
+- **Chrome and Firefox** tested for the same-profile bookmarklet flow. Cross-profile relay transport and copy/paste pairing UI are implemented; relay end-to-end testing still needs the local switchboard path exercised in CI/manual QA.
 - **Switchboard URL**: use `http://localhost:7577` (not `http://127.0.0.1:7577`). Firefox's mixed-content loopback exemption is specified for `localhost`; `127.0.0.1` may not be exempt on older Firefox versions.
 - **Protocol handler** (`web+portpass://` LaunchQueue): tested on Chrome/Linux where it routes to the active profile rather than the PWA's profile. May behave correctly on macOS/Windows — `handleIntent` in App.svelte is wired up for this path.
 

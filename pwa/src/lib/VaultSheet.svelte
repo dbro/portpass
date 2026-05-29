@@ -6,7 +6,7 @@
   import { isBiometricSupported, isBiometricEnrolled, enrollBiometric, clearBiometric } from './biometric.js'
   import { makeDelegateBookmarkletUrl } from './bookmarklet.js'
   import { getDelegates, addDelegate, revokeDelegate, setSwitchboardUrl, setCrossProfileEnabled } from './delegates.js'
-  import { createPairedAutofillProfile, removePairedAutofillProfile } from './pairedAutofill.js'
+  import { createPairedAutofillProfile, removePairedAutofillProfile, parsePairingToken } from './pairedAutofill.js'
   import Icon from './Icon.svelte'
 
   let { isDesktop, bookmarkletsSupported = false, onback, onlock, onlockall, onlocksecondary, onunlockadditional, ondbsave, onsvdbsave, ondirtychange, theme, accent, ontheme, onaccent } = $props()
@@ -177,6 +177,14 @@
   let chipDragged = $state(false)
   let chipLinked  = $state(false)  // persistent: set on copy, not reset by the feedback timer
   let globeTipOpen = $state(false)
+  let pairDelegateOpen = $state(false)
+  let pairDelegateName = $state('')
+  let pairDelegateToken = $state('')
+  let pairDelegateError = $state('')
+  let pairDelegatePreview = $state(null)
+  let pairDelegateUrl = $state('')
+  let pairBookmarkletCopied = $state(false)
+  let pairDelegateBusy = $state(false)
 
   let chipUsed   = $derived(chipDragged || chipLinked)
   let canUseChip = $derived(!!newDelegateName.trim() && !!newDelegatePubKeySpki)
@@ -258,6 +266,77 @@
   async function revokeOne(delegateId) {
     await revokeDelegate(_vaultUuid, delegateId)
     delegates = delegates.filter(d => d.id !== delegateId)
+  }
+
+  function openPairDelegate() {
+    pairDelegateOpen = true
+    pairDelegateName = ''
+    pairDelegateToken = ''
+    pairDelegateError = ''
+    pairDelegatePreview = null
+    pairDelegateUrl = ''
+    pairBookmarkletCopied = false
+    pairDelegateBusy = false
+  }
+
+  function closePairDelegate() {
+    pairDelegateOpen = false
+    pairDelegateName = ''
+    pairDelegateToken = ''
+    pairDelegateError = ''
+    pairDelegatePreview = null
+    pairDelegateUrl = ''
+    pairBookmarkletCopied = false
+    pairDelegateBusy = false
+  }
+
+  async function previewPairingToken() {
+    pairDelegateError = ''
+    pairDelegatePreview = null
+    try {
+      const parsed = await parsePairingToken(pairDelegateToken)
+      pairDelegatePreview = parsed
+      pairDelegateUrl = makeDelegateBookmarkletUrl(
+        window.location.origin + import.meta.env.BASE_URL,
+        parsed.delegateId,
+        parsed.relayUrl || get(switchboardUrl)
+      )
+      if (!pairDelegateName.trim()) pairDelegateName = parsed.name || `Autofill profile ${parsed.displayCode}`
+    } catch (e) {
+      pairDelegateError = e.message || 'Pairing token is not valid'
+    }
+  }
+
+  async function commitPairDelegate() {
+    if (!_vaultUuid || pairDelegateBusy) return
+    pairDelegateBusy = true
+    pairDelegateError = ''
+    try {
+      const parsed = pairDelegatePreview || await parsePairingToken(pairDelegateToken)
+      const name = pairDelegateName.trim() || parsed.name || `Autofill profile ${parsed.displayCode}`
+      const delegate = await addDelegate(_vaultUuid, name, parsed.publicKey, parsed.delegateId, {
+        pairingId: parsed.pairingId,
+        relayUrl: parsed.relayUrl,
+      })
+      delegates = [delegate, ...delegates]
+      if (parsed.relayUrl && parsed.relayUrl !== get(switchboardUrl)) {
+        await setSwitchboardUrl(_vaultUuid, parsed.relayUrl)
+        switchboardUrl.set(parsed.relayUrl)
+      }
+      closePairDelegate()
+    } catch (e) {
+      pairDelegateError = e.message || 'Failed to pair autofill profile'
+    } finally {
+      pairDelegateBusy = false
+    }
+  }
+
+  function copyPairBookmarklet() {
+    if (!pairDelegateUrl) return
+    navigator.clipboard.writeText(pairDelegateUrl).then(() => {
+      pairBookmarkletCopied = true
+      setTimeout(() => { pairBookmarkletCopied = false }, 2200)
+    })
   }
 
   // ── Advanced / switchboard ────────────────────────────────────────────────
@@ -468,6 +547,7 @@
       </div>
     {/if}
     <button class="vault-unlock-more" onclick={openNewDelegate}>+ New bookmarklet</button>
+    <button class="vault-unlock-more" onclick={openPairDelegate}>+ Add autofill profile</button>
 
     <!-- Cross-profile autofill -->
     <button class="delegate-advanced-toggle muted" onclick={toggleAdvanced}>
@@ -507,6 +587,11 @@
           </div>
           <div class="muted" style="font-size:12px">
             Count of cross-profile autofill uses: {totalRelayCount}{#if lastRelayUsed} · Last {fmtRelative(lastRelayUsed)}{/if}
+          </div>
+          <div class="muted" style="font-size:12px;line-height:1.4;margin-top:8px">
+            To pair another browser profile, open
+            <span class="mono">{window.location.origin + import.meta.env.BASE_URL + 'autofill.html?pair=1'}</span>
+            in that filling profile, then paste its token here with Add autofill profile.
           </div>
         {/if}
       </div>
@@ -761,6 +846,84 @@
       <div style="margin-top:8px">
         <button class="vs-close-btn" disabled={!canCommit} onclick={commitDelegate}>
           {newDelegateBusy ? 'Saving…' : 'Save and Close'}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- ── Pair autofill profile modal ────────────────────────────────────────── -->
+{#if pairDelegateOpen}
+  <div class="modal-overlay" role="presentation"
+    onclick={e => { e.stopPropagation(); if (!pairDelegateBusy) closePairDelegate() }}
+    onkeydown={e => { if (e.key === 'Escape' && !pairDelegateBusy) closePairDelegate() }}>
+    <div class="modal modal-install" role="dialog" aria-modal="true" tabindex="-1" onclick={e => e.stopPropagation()} onkeydown={e => e.stopPropagation()}>
+      <div class="vs-modal-header">
+        <div class="modal-title">Add autofill profile</div>
+        <button class="vs-modal-x" onclick={() => { if (!pairDelegateBusy) closePairDelegate() }} aria-label="Cancel">
+          <Icon name="x" size={18}/>
+        </button>
+      </div>
+      <label class="vault-field" style="margin-bottom:10px">
+        <span class="vault-label muted">Pairing token</span>
+        <textarea
+          class="input"
+          rows={5}
+          bind:value={pairDelegateToken}
+          placeholder="Paste ppair1_… token from the autofill profile"
+          oninput={() => { pairDelegatePreview = null; pairDelegateError = '' }}
+          use:focusOnMount
+        ></textarea>
+      </label>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <button class="btn btn-ghost" disabled={!pairDelegateToken.trim() || pairDelegateBusy} onclick={previewPairingToken}>Check token</button>
+      </div>
+      {#if pairDelegatePreview}
+        <div class="vs-install-warning" style="align-items:flex-start">
+          <Icon name="check" size={22}/>
+          <span>
+            Pairing code <strong>{pairDelegatePreview.displayCode}</strong>{pairDelegatePreview.relayUrl ? ` · Relay ${pairDelegatePreview.relayUrl}` : ''}
+          </span>
+        </div>
+        <div class="vs-install-grid" style="margin-top:10px">
+          <div class="vs-install-col vs-install-col-drag">
+            <span class="vs-install-col-label">FILLING PROFILE</span>
+            <a
+              class="vs-bookmarklet-chip"
+              href={pairDelegateUrl || '#'}
+              draggable={pairDelegateUrl ? 'true' : 'false'}
+              onclick={e => e.preventDefault()}
+              title="Drag to the filling profile bookmarks bar"
+              aria-label="Paired Portpass autofill bookmarklet"
+            >
+              <img src="{import.meta.env.BASE_URL}icon.svg" width="16" height="16" alt="" aria-hidden="true" draggable="false">
+              {pairDelegateName || pairDelegatePreview.name || 'Paired autofill'}
+            </a>
+            <span class="vs-install-col-hint">Drag or copy this bookmarklet into the filling profile</span>
+          </div>
+          <div class="vs-install-col vs-install-col-copy">
+            <span class="vs-install-col-label">BAR HIDDEN</span>
+            <button class="vs-copy-link-btn" class:copied={pairBookmarkletCopied} disabled={!pairDelegateUrl} onclick={copyPairBookmarklet}>
+              <Icon name={pairBookmarkletCopied ? 'check' : 'copy'} size={15}/>
+              {pairBookmarkletCopied ? 'Copied!' : 'Copy link'}
+            </button>
+            <span class="vs-install-col-hint">Paste as the bookmark URL in the filling profile</span>
+          </div>
+        </div>
+        <label class="vault-field" style="margin:10px 0 4px">
+          <span class="vault-label muted">Name</span>
+          <input
+            class="input"
+            bind:value={pairDelegateName}
+            placeholder="e.g. Firefox — daily profile"
+            onkeydown={e => { if (e.key === 'Enter') commitPairDelegate() }}
+          />
+        </label>
+      {/if}
+      {#if pairDelegateError}<div class="unlock-error" style="font-size:13px">{pairDelegateError}</div>{/if}
+      <div style="margin-top:12px">
+        <button class="vs-close-btn" disabled={pairDelegateBusy || (!pairDelegatePreview && !pairDelegateToken.trim())} onclick={commitPairDelegate}>
+          {pairDelegateBusy ? 'Pairing…' : 'Pair profile'}
         </button>
       </div>
     </div>

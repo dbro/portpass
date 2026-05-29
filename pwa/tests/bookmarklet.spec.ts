@@ -154,6 +154,40 @@ test.describe('Bookmarklet — autofill popup phases', () => {
     await expect(login.locator('#pass')).toHaveValue('')
   })
 
+  test('cross-profile pairing token can be imported and shows bookmarklet without private key', async ({ context }) => {
+    const { portpass } = await setupAutofillTest(context)
+    const pairing = await context.newPage()
+    await pairing.goto(PORTPASS_URL + 'autofill.html?pair=1')
+    await pairing.getByPlaceholder('Name, e.g. Firefox — daily profile').fill('Firefox daily')
+    await pairing.getByRole('button', { name: 'Create pairing token' }).click()
+    const tokenBox = pairing.locator('textarea').first()
+    await expect.poll(() => tokenBox.inputValue(), { timeout: 15000 }).toMatch(/^ppair1_/)
+    const token = await tokenBox.inputValue()
+    expect(token).toMatch(/^ppair1_/)
+
+    await portpass.locator('.vault-pill').click()
+    await portpass.getByRole('button', { name: '+ Add autofill profile' }).click()
+    await portpass.getByPlaceholder('Paste ppair1_… token from the autofill profile').fill(token)
+    await portpass.getByRole('button', { name: 'Check token' }).click()
+    await expect(portpass.locator('.vs-install-warning')).toContainText('Pairing code')
+    const bookmarkletUrl = await portpass.locator('.vs-bookmarklet-chip').last().getAttribute('href') ?? ''
+    const decoded = decodeURIComponent(bookmarkletUrl)
+    expect(decoded).toContain('autofill.html')
+    expect(decoded).toMatch(/afp1_[a-z2-7]{26}/)
+    expect(decoded).not.toContain('privKey')
+    await portpass.getByRole('button', { name: 'Pair profile' }).click()
+    await expect(portpass.locator('.delegate-row', { hasText: 'Firefox daily' })).toBeVisible()
+  })
+
+  test('wrong autofill pairing token is rejected', async ({ context }) => {
+    const { portpass } = await setupAutofillTest(context)
+    await portpass.locator('.vault-pill').click()
+    await portpass.getByRole('button', { name: '+ Add autofill profile' }).click()
+    await portpass.getByPlaceholder('Paste ppair1_… token from the autofill profile').fill('ppair1_not-a-token')
+    await portpass.getByRole('button', { name: 'Check token' }).click()
+    await expect(portpass.locator('.unlock-error')).toContainText('Pairing token')
+  })
+
   test('waiting phase shows selected record title', async ({ context }) => {
     const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
     await createRecord(portpass, { title: 'My Bank', autotype: '\\u\\t\\p\\n' })
