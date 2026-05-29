@@ -13,6 +13,7 @@
   --bg: #14161a; --surface: #1c1f24; --surface-2: #262a31;
   --border: #2c3038; --text: #f1ede4; --text-muted: #a6a39b;
   --text-soft: #757279; --amber: #d9a358; --amber-bg: #3a2e1a;
+  --accent: #d9a358; --accent-strong: #e6b572; --accent-soft: #3a2e1a; --accent-on: #1a1407;
   --success: #6cba8a; --green-bg: #1a3025;
   --red: #e08673; --orange: #c47030;
 }
@@ -233,10 +234,10 @@ body {
 
   // ── Theme ─────────────────────────────────────────────────────────────────
   var _accentMap = {
-    amber:    { light: ['#b07418', '#f3e6c9'], dark: ['#d9a358', '#3a2e1a'] },
-    sage:     { light: ['#5a7a4f', '#dde6d4'], dark: ['#97b386', '#2c3a26'] },
-    slate:    { light: ['#4a5d82', '#dee3ee'], dark: ['#8da3c8', '#25304a'] },
-    burgundy: { light: ['#8a3a3a', '#ead4d4'], dark: ['#c98a8a', '#3a2222'] },
+    amber:    { light: ['#b07418', '#8c5c12', '#f3e6c9', '#ffffff'], dark: ['#d9a358', '#e6b572', '#3a2e1a', '#1a1407'] },
+    sage:     { light: ['#5a7a4f', '#466239', '#dde6d4', '#ffffff'], dark: ['#97b386', '#a8c298', '#2c3a26', '#11160d'] },
+    slate:    { light: ['#4a5d82', '#364770', '#dee3ee', '#ffffff'], dark: ['#8da3c8', '#9fb6da', '#25304a', '#0f1320'] },
+    burgundy: { light: ['#8a3a3a', '#6b2828', '#ead4d4', '#ffffff'], dark: ['#c98a8a', '#d99b9b', '#3a2222', '#1a0d0d'] },
   }
   function applyTheme(dark, accent) {
     var r = document.documentElement.style
@@ -266,10 +267,26 @@ body {
       r.setProperty('--orange',    '#c47030')
     }
     var av = (_accentMap[accent] || _accentMap.amber)[dark ? 'dark' : 'light']
-    r.setProperty('--amber',    av[0])
-    r.setProperty('--amber-bg', av[1])
+    r.setProperty('--accent',        av[0])
+    r.setProperty('--accent-strong', av[1])
+    r.setProperty('--accent-soft',   av[2])
+    r.setProperty('--accent-on',     av[3])
+    r.setProperty('--amber',         av[0])
+    r.setProperty('--amber-bg',      av[2])
   }
-  // Theme applied when first message arrives from Portpass via applyTheme().
+  function applyStoredThemeFromParams() {
+    var p = new URLSearchParams(location.search)
+    var theme = p.get('theme') || localStorage.getItem('theme') || 'dark'
+    var accent = p.get('accent') || localStorage.getItem('accent') || 'amber'
+    if (theme !== 'light' && theme !== 'dark') theme = 'dark'
+    if (!_accentMap[accent]) accent = 'amber'
+    try {
+      localStorage.setItem('theme', theme)
+      localStorage.setItem('accent', accent)
+    } catch(_) {}
+    applyTheme(theme === 'dark', accent)
+  }
+  // Theme is applied from Portpass messages during fill, and from URL/storage on the pairing page.
 
   // ── SVG icons ─────────────────────────────────────────────────────────────
   var _S = ' viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"'
@@ -278,6 +295,7 @@ body {
   var SVG_X_ICO      = '<svg width="16" height="16"' + _S + ' stroke-width="1.6"><path d="M6 6l12 12M18 6 6 18"/></svg>'
   var SVG_PENCIL = '<svg width="13" height="13"' + _S + ' stroke-width="1.6"><path d="M4 20h4l10-10-4-4L4 16v4Z"/><path d="m14 6 4 4"/></svg>'
   var SVG_UNDO   = '<svg width="13" height="13"' + _S + ' stroke-width="1.6"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>'
+  var SVG_COPY   = '<svg width="15" height="15"' + _S + ' stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>'
   var SVG_CHECK_SM = '<svg width="12" height="12"' + _S + ' stroke-width="2.2"><path d="m5 12 5 5L20 7"/></svg>'
   var SVG_CHECK_MD = '<svg width="24" height="24"' + _S + ' stroke-width="2"><path d="m5 12 5 5L20 7"/></svg>'
   // Large error icons (40px)
@@ -374,6 +392,7 @@ body {
   var PAIR_BASE32 = 'abcdefghijklmnopqrstuvwxyz234567'
 
   if (pairMode) {
+    applyStoredThemeFromParams()
     showPairingSetup()
     return
   }
@@ -799,94 +818,484 @@ body {
     return savePairedProfile(profile)
   }
 
+  function makeDelegateBookmarkletUrl(portpassUrl, delegateId, relayUrl) {
+    var origin = new URL(portpassUrl).origin
+    return 'javascript:' + encodeURIComponent(
+      '(' + DELEGATE_BOOKMARKLET_IIFE.toString() + ')(' +
+      JSON.stringify(portpassUrl) + ',' +
+      JSON.stringify(origin) + ',' +
+      JSON.stringify(delegateId) + ',' +
+      JSON.stringify(relayUrl) + ')'
+    )
+  }
+
+  function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, RELAY_URL) {
+    'use strict'
+    if (window.__ppRunning) return
+    window.__ppRunning = true
+    var activeEl = isUsableInput(document.activeElement) ? document.activeElement : null
+    var isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost'
+    var currentCanonical = canonicalURL(window.location.href)
+    var saveUrl = window.location.origin + window.location.pathname
+    var AUTOFILL_URL = PORTPASS_URL + 'autofill.html'
+    var pp = null
+    var startEl = null
+    var cleanedUp = false
+
+    function cleanup() {
+      if (cleanedUp) return
+      cleanedUp = true
+      document.removeEventListener('click', onFieldClick, true)
+      window.removeEventListener('message', onPopupMessage)
+      window.__ppRunning = false
+    }
+    function onFieldClick(e) {
+      var target = e.target
+      if (!isUsableInput(target)) return
+      e.preventDefault()
+      startEl = target
+      try { pp.postMessage({ type: 'field-clicked' }, PORTPASS_ORIGIN) } catch(_) {}
+    }
+    function onPopupMessage(e) {
+      if (!pp || e.source !== pp) return
+      var msg = e.data
+      if (!msg) return
+      if (msg.type === 'fill') {
+        document.removeEventListener('click', onFieldClick, true)
+        var el = startEl || activeEl
+        executeAutotype(el, msg.autotype, msg.fields).then(function() {
+          try { pp.postMessage({ type: 'fill-done' }, PORTPASS_ORIGIN) } catch(_) {}
+          try { pp.focus() } catch(_) {}
+          cleanup()
+        })
+      } else if (msg.type === 'cancel') cleanup()
+    }
+    ;(async function run() {
+      try {
+        var ppW = 380, ppH = 480
+        var ppLeft = screen.width - ppW - 24
+        pp = window.open(AUTOFILL_URL, 'portpass_autofill', 'popup=yes,width=' + ppW + ',height=' + ppH + ',left=' + ppLeft + ',top=24')
+        if (!pp) { cleanup(); return }
+        var readyMsg
+        try { readyMsg = await recv(pp, ['ready', 'error'], 10000) }
+        catch (_) { try { pp.close() } catch (_2) {}; cleanup(); return }
+        if (readyMsg.type === 'error') { cleanup(); return }
+        pp.postMessage({
+          type: 'init',
+          url: currentCanonical,
+          saveUrl: saveUrl,
+          isSecure: isSecure,
+          delegateId: DELEGATE_ID,
+          relayUrl: RELAY_URL,
+          hasActiveField: !!activeEl,
+        }, PORTPASS_ORIGIN)
+        window.addEventListener('message', onPopupMessage)
+        document.addEventListener('click', onFieldClick, true)
+        var closeCheck = setInterval(function() {
+          if (pp && pp.closed) { clearInterval(closeCheck); cleanup() }
+        }, 500)
+      } catch (e) { cleanup() }
+    })()
+    function recv(target, types, timeout) {
+      timeout = timeout || 5000
+      return new Promise(function(resolve, reject) {
+        var t = setTimeout(function() {
+          window.removeEventListener('message', handler)
+          reject('timeout')
+        }, timeout)
+        function handler(e) {
+          if (e.source !== target) return
+          if (types.indexOf(e.data && e.data.type) >= 0) {
+            clearTimeout(t)
+            window.removeEventListener('message', handler)
+            resolve(e.data)
+          }
+        }
+        window.addEventListener('message', handler)
+      })
+    }
+    function canonicalURL(href) {
+      var s = href || ''
+      var pfxs = ['https://', 'http://']
+      for (var i = 0; i < pfxs.length; i++) {
+        if (s.toLowerCase().indexOf(pfxs[i]) === 0) { s = s.slice(pfxs[i].length); break }
+      }
+      var h = s.indexOf('#'); if (h >= 0) s = s.slice(0, h)
+      var q = s.indexOf('?'); if (q >= 0) s = s.slice(0, q)
+      s = s.toLowerCase()
+      var sl = s.indexOf('/')
+      if (sl >= 0) s = s.slice(0, sl).replace(/^www\./, '') + s.slice(sl)
+      else s = s.replace(/^www\./, '')
+      return s.replace(/\/+$/, '')
+    }
+    function parseAutotype(seq) {
+      var tokens = [], lit = '', i = 0
+      while (i < seq.length) {
+        if (seq[i] !== '\\') { lit += seq[i]; i++; continue }
+        var code = seq[i + 1]
+        if (!code) break
+        if (code === '\\') { lit += '\\'; i += 2 }
+        else if (code === 'f') {
+          if (lit) { tokens.push({ type: 'lit', text: lit }); lit = '' }
+          var d = seq[i + 2]
+          if (d && /^[1-9]$/.test(d)) { tokens.push({ type: 'f', n: parseInt(d) }); i += 3 }
+          else { tokens.push({ type: 'f', n: 1 }); i += 2 }
+        } else if (code === 'w' || code === 'W') {
+          if (lit) { tokens.push({ type: 'lit', text: lit }); lit = '' }
+          var j = i + 2, count = 0
+          while (j < seq.length && count < 3 && /^[0-9]$/.test(seq[j])) { j++; count++ }
+          tokens.push({ type: 'delay', ms: (parseInt(seq.slice(i + 2, j)) || 0) * (code === 'W' ? 1000 : 1) }); i = j
+        } else if ('uptmn2s'.indexOf(code) >= 0) {
+          if (lit) { tokens.push({ type: 'lit', text: lit }); lit = '' }
+          tokens.push({ type: 'code', code: code }); i += 2
+        } else i += 2
+      }
+      if (lit) tokens.push({ type: 'lit', text: lit })
+      return tokens
+    }
+    function isUsableInput(el) {
+      if (!el) return false
+      var tag = el.tagName
+      if (tag !== 'INPUT' && tag !== 'TEXTAREA') return false
+      if (el.disabled || el.type === 'hidden') return false
+      if (['submit', 'button', 'reset', 'image', 'checkbox', 'radio'].indexOf(el.type) >= 0) return false
+      var s = getComputedStyle(el)
+      return s.display !== 'none' && s.visibility !== 'hidden'
+    }
+    function fillField(el, value) {
+      var proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+      var setter = Object.getOwnPropertyDescriptor(proto, 'value')
+      if (setter && setter.set) setter.set.call(el, value)
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+      el.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+    function focusableList() {
+      var q = 'input:not([disabled]):not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]):not([type=image]):not([type=checkbox]):not([type=radio]),textarea:not([disabled])'
+      var all = Array.from(document.querySelectorAll(q)).filter(function(e) {
+        var s = getComputedStyle(e)
+        return e.tabIndex >= 0 && s.display !== 'none' && s.visibility !== 'hidden'
+      })
+      return all.filter(function(e) { return e.tabIndex > 0 }).sort(function(a, b) { return a.tabIndex - b.tabIndex }).concat(all.filter(function(e) { return e.tabIndex === 0 }))
+    }
+    function nextFocusable(el) {
+      var sorted = focusableList()
+      var i = sorted.indexOf(el)
+      return i >= 0 ? sorted[i + 1] || null : null
+    }
+    function prevFocusable(el) {
+      var sorted = focusableList()
+      var i = sorted.indexOf(el)
+      return i > 0 ? sorted[i - 1] : null
+    }
+    async function executeAutotype(startEl, sequence, fields) {
+      var tokens = parseAutotype(sequence)
+      var el = startEl
+      for (var i = 0; i < tokens.length; i++) {
+        var tok = tokens[i]
+        if (tok.type === 'delay') await new Promise(function(r) { setTimeout(r, tok.ms) })
+        else if (tok.type === 'lit' || tok.type === 'f') {
+          if (el) fillField(el, tok.type === 'f' ? (fields['f' + tok.n] || '') : tok.text)
+        } else {
+          var code = tok.code
+          if (code === 'u' || code === 'p' || code === 'm' || code === '2') {
+            if (el) fillField(el, fields[code] || '')
+          } else if (code === 't') {
+            var next = nextFocusable(el)
+            if (next) { if (el) el.dispatchEvent(new Event('blur', { bubbles: true })); next.focus(); el = next }
+          } else if (code === 's') {
+            var prev = prevFocusable(el)
+            if (prev) { if (el) el.dispatchEvent(new Event('blur', { bubbles: true })); prev.focus(); el = prev }
+          } else if (code === 'n') {
+            if (el) ['keydown', 'keypress', 'keyup'].forEach(function(evType) {
+              el.dispatchEvent(new KeyboardEvent(evType, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }))
+            })
+            var form = el && el.closest('form')
+            var submitBtn = (form && form.querySelector('[type=submit]')) || (form && form.querySelector('[default-button]'))
+            if (!submitBtn && form) {
+              var btns = Array.from(form.querySelectorAll('button:not([type=reset])'))
+              if (btns.length === 1) submitBtn = btns[0]
+            }
+            if (submitBtn) submitBtn.click()
+            else if (form) try { form.requestSubmit() } catch (_) { try { form.submit() } catch (_2) {} }
+          }
+        }
+      }
+    }
+  }
+
   function showPairingSetup() {
     hideSearchUI()
     $subheader.style.display = 'none'
     $content.innerHTML = ''
 
     var wrap = document.createElement('div')
-    wrap.style.cssText = 'padding:16px;display:flex;flex-direction:column;gap:12px'
+    wrap.style.cssText = 'padding:26px 28px 34px;display:flex;flex-direction:column;gap:24px;max-width:760px'
 
     var title = document.createElement('div')
     title.className = 'pp-waiting-title'
-    title.textContent = 'Pair this autofill profile'
+    title.style.cssText = 'font-size:26px;line-height:1.15'
+    title.textContent = 'Pair this everyday browser'
     wrap.appendChild(title)
 
     var help = document.createElement('div')
     help.className = 'pp-waiting-sub'
-    help.style.textAlign = 'left'
-    help.textContent = 'Create a pairing token here, then paste it into Portpass in the clean profile using Vault settings → Autofill → Add autofill profile.'
+    help.style.cssText = 'text-align:left;font-size:16px;line-height:1.45;margin-top:-14px'
+    help.textContent = 'This creates a signing key that stays in this browser. Pair it with your vault profile so Portpass will trust autofill requests from here.'
     wrap.appendChild(help)
 
+    function step(num, heading, body) {
+      var row = document.createElement('div')
+      row.style.cssText = 'display:grid;grid-template-columns:40px 1fr;gap:14px;align-items:start'
+      var badge = document.createElement('div')
+      badge.textContent = String(num)
+      badge.style.cssText = 'width:30px;height:30px;border:1.5px solid var(--accent);border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--accent);font-weight:800;font-size:17px;margin-top:2px'
+      var col = document.createElement('div')
+      col.style.cssText = 'display:flex;flex-direction:column;gap:10px;min-width:0'
+      var h = document.createElement('div')
+      h.className = 'pp-waiting-title'
+      h.style.cssText = 'font-size:18px'
+      h.textContent = heading
+      col.appendChild(h)
+      if (body) {
+        var b = document.createElement('div')
+        b.className = 'pp-waiting-sub'
+        b.style.cssText = 'text-align:left;line-height:1.45'
+        b.textContent = body
+        col.appendChild(b)
+      }
+      row.appendChild(badge)
+      row.appendChild(col)
+      wrap.appendChild(row)
+      return col
+    }
+
+    var nameStep = step(1, 'Name this bookmarklet', 'The label shown in your bookmarks bar.')
     var name = document.createElement('input')
     name.className = 'pp-search'
-    name.placeholder = 'Name, e.g. Firefox — daily profile'
-    wrap.appendChild(name)
+    name.placeholder = 'Portpass Autofill'
+    name.value = 'Portpass Autofill'
+    nameStep.appendChild(name)
 
+    var relayWrap = document.createElement('details')
+    relayWrap.style.cssText = 'color:var(--text-soft)'
+    var relaySummary = document.createElement('summary')
+    relaySummary.textContent = 'Advanced · relay endpoint'
+    relaySummary.style.cursor = 'pointer'
+    relayWrap.appendChild(relaySummary)
+    var relayBox = document.createElement('div')
+    relayBox.style.cssText = 'margin-top:12px;padding:16px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2);display:flex;flex-direction:column;gap:10px'
+    relayWrap.appendChild(relayBox)
+    var relayLabel = document.createElement('label')
+    relayLabel.className = 'pp-waiting-sub'
+    relayLabel.style.cssText = 'text-align:left'
+    relayLabel.textContent = 'Relay endpoint'
+    relayBox.appendChild(relayLabel)
     var relay = document.createElement('input')
     relay.className = 'pp-search'
-    relay.placeholder = 'Relay URL, e.g. http://localhost:7577'
+    relay.placeholder = 'http://localhost:7577'
     relay.value = 'http://localhost:7577'
-    wrap.appendChild(relay)
+    relayBox.appendChild(relay)
+    var relayHint = document.createElement('div')
+    relayHint.className = 'pp-waiting-sub'
+    relayHint.style.cssText = 'text-align:left;line-height:1.45'
+    relayHint.textContent = 'Defaults to the local relay. Baked into the token and bookmarklet below — change it only if your relay runs elsewhere.'
+    relayBox.appendChild(relayHint)
+    nameStep.appendChild(relayWrap)
 
-    var create = document.createElement('button')
-    create.className = 'pp-footer-btn'
-    create.style.alignSelf = 'flex-start'
-    create.textContent = 'Create pairing token'
-    wrap.appendChild(create)
+    var bookmarkletStep = step(2, 'Install the bookmarklet here', "It carries no key — it just opens this page to fill. Works once you've paired in the next step.")
+    var installGrid = document.createElement('div')
+    installGrid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:4px'
+    bookmarkletStep.appendChild(installGrid)
+
+    var dragCol = document.createElement('div')
+    dragCol.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:12px;border:1.5px dashed var(--border);border-radius:10px;background:var(--surface-2);padding:22px 14px;opacity:0.55'
+    installGrid.appendChild(dragCol)
+    var dragLabel = document.createElement('div')
+    dragLabel.textContent = 'BOOKMARKS BAR VISIBLE'
+    dragLabel.style.cssText = 'font-size:11px;font-weight:800;letter-spacing:0.08em;color:var(--text-soft)'
+    dragCol.appendChild(dragLabel)
+    var chip = document.createElement('a')
+    chip.href = '#'
+    chip.draggable = false
+    chip.onclick = function(e) { e.preventDefault() }
+    chip.style.cssText = 'display:inline-flex;align-items:center;gap:8px;padding:9px 16px;background:var(--bg);border:1.5px dashed var(--border);border-radius:999px;color:var(--text);text-decoration:none;font-weight:800;cursor:default'
+    chip.innerHTML = '<img src="icon.svg" width="16" height="16" alt="" draggable="false"> <span>Portpass Autofill</span>'
+    dragCol.appendChild(chip)
+    var dragHint = document.createElement('div')
+    dragHint.className = 'pp-waiting-sub'
+    dragHint.textContent = 'Drag to your bookmarks bar'
+    dragCol.appendChild(dragHint)
+
+    var copyCol = document.createElement('div')
+    copyCol.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:12px;border:1.5px solid var(--border);border-radius:10px;background:var(--surface-2);padding:22px 14px;opacity:0.55'
+    installGrid.appendChild(copyCol)
+    var copyLabel = document.createElement('div')
+    copyLabel.textContent = 'BAR HIDDEN'
+    copyLabel.style.cssText = dragLabel.style.cssText
+    copyCol.appendChild(copyLabel)
+    var copyLink = document.createElement('button')
+    copyLink.className = 'pp-footer-btn'
+    copyLink.disabled = true
+    copyLink.style.cssText = 'display:inline-flex;align-items:center;gap:8px;border:1.5px solid var(--accent);border-radius:8px;color:var(--accent);padding:9px 18px;font-weight:800'
+    copyLink.innerHTML = SVG_COPY + ' Copy link'
+    copyCol.appendChild(copyLink)
+    var copyHint = document.createElement('div')
+    copyHint.className = 'pp-waiting-sub'
+    copyHint.style.textAlign = 'center'
+    copyHint.textContent = 'Add a bookmark and paste the link'
+    copyCol.appendChild(copyHint)
+
+    var tokenStep = step(3, 'Copy the pairing token to the vault profile', 'Paste it into Portpass in your vault profile and confirm this code matches. This is the last step here.')
+    var tokenRow = document.createElement('div')
+    tokenRow.style.cssText = 'display:flex;align-items:center;gap:14px;flex-wrap:wrap'
+    tokenStep.appendChild(tokenRow)
 
     var code = document.createElement('div')
-    code.className = 'rec-match-badge'
-    code.style.alignSelf = 'flex-start'
-    code.style.display = 'none'
-    wrap.appendChild(code)
+    code.textContent = '---- ----'
+    code.style.cssText = 'border:1.5px solid var(--accent);border-radius:8px;padding:7px 13px;color:var(--accent);font-family:ui-monospace,monospace;font-size:18px;font-weight:800;letter-spacing:0.04em'
+    tokenRow.appendChild(code)
+
+    var copyToken = document.createElement('button')
+    copyToken.className = 'pp-footer-btn'
+    copyToken.disabled = true
+    copyToken.style.cssText = 'display:inline-flex;align-items:center;gap:8px;background:var(--accent);color:var(--accent-on);border:none;border-radius:8px;padding:10px 20px;font-weight:800'
+    copyToken.innerHTML = SVG_COPY + ' Copy token'
+    tokenRow.appendChild(copyToken)
+
+    var tokenMeta = document.createElement('div')
+    tokenMeta.className = 'pp-waiting-sub'
+    tokenMeta.style.cssText = 'text-align:left;line-height:1.45'
+    tokenMeta.textContent = 'Stays valid while this page is open · 10 min after you copy'
+    tokenStep.appendChild(tokenMeta)
+
+    var regen = document.createElement('button')
+    regen.className = 'pp-footer-btn'
+    regen.style.cssText = 'align-self:flex-start;color:var(--text-soft)'
+    regen.textContent = '↻ Regenerate'
+    tokenMeta.appendChild(document.createTextNode(' · '))
+    tokenMeta.appendChild(regen)
+
+    var rawToggle = document.createElement('button')
+    rawToggle.className = 'pp-footer-btn'
+    rawToggle.style.cssText = 'align-self:flex-start;color:var(--text-soft)'
+    rawToggle.textContent = '▶ Show raw token'
+    tokenStep.appendChild(rawToggle)
 
     var token = document.createElement('textarea')
     token.className = 'pp-search'
-    token.rows = 8
+    token.rows = 5
     token.readOnly = true
-    token.style.display = 'none'
-    token.style.resize = 'vertical'
-    wrap.appendChild(token)
-
-    var copy = document.createElement('button')
-    copy.className = 'pp-footer-btn'
-    copy.style.cssText = 'align-self:flex-start;display:none'
-    copy.textContent = 'Copy token'
-    wrap.appendChild(copy)
+    token.style.cssText = 'display:none;resize:vertical;font-family:ui-monospace,monospace'
+    tokenStep.appendChild(token)
 
     var status = document.createElement('div')
     status.className = 'pp-waiting-sub'
     status.style.textAlign = 'left'
     wrap.appendChild(status)
 
-    create.onclick = function() {
-      create.disabled = true
-      status.textContent = 'Creating profile…'
-      createPairingProfile(relay.value.trim()).then(function(profile) {
-        token.value = pairingTokenForProfile(profile, name.value.trim())
-        token.style.display = ''
-        copy.style.display = ''
-        code.style.display = ''
-        code.textContent = 'Code ' + profile.displayCode
-        status.textContent = 'Token expires in 10 minutes. After pairing, create or update the bookmarklet in this profile.'
-      }).catch(function(e) {
-        create.disabled = false
-        status.textContent = e.message || 'Could not create pairing token'
+    var pairedProfile = null
+    var tokenValue = ''
+    var bookmarkletUrl = ''
+    var expiresAt = 0
+    var expiryTimer = null
+    var regenTimer = null
+
+    function setInstallEnabled(enabled) {
+      dragCol.style.opacity = enabled ? '1' : '0.55'
+      copyCol.style.opacity = enabled ? '1' : '0.55'
+      chip.draggable = enabled
+      chip.style.cursor = enabled ? 'grab' : 'default'
+      copyLink.disabled = !enabled
+      copyToken.disabled = !enabled
+    }
+
+    function updateChipName() {
+      chip.querySelector('span').textContent = name.value.trim() || 'Portpass Autofill'
+    }
+    name.oninput = updateChipName
+
+    function updateExpiry() {
+      var remaining = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000))
+      var m = Math.floor(remaining / 60)
+      var s = String(remaining % 60).padStart(2, '0')
+      tokenMeta.firstChild.nodeValue = remaining > 0
+        ? 'Stays valid while this page is open · expires in ' + m + ':' + s
+        : 'Stays valid while this page is open · 10 min after you copy'
+      if (remaining <= 0 && expiryTimer) clearInterval(expiryTimer)
+    }
+
+    function currentRelayUrl() {
+      return relay.value.trim() || 'http://localhost:7577'
+    }
+
+    function setBusy(msg) {
+      status.textContent = msg || ''
+      setInstallEnabled(false)
+      copyToken.disabled = true
+    }
+
+    function setProfile(profile) {
+      pairedProfile = profile
+      tokenValue = ''
+      token.value = ''
+      expiresAt = 0
+      if (expiryTimer) clearInterval(expiryTimer)
+      tokenMeta.firstChild.nodeValue = 'Stays valid while this page is open · 10 min after you copy'
+      code.textContent = profile.displayCode
+      bookmarkletUrl = makeDelegateBookmarkletUrl(location.href.split('autofill.html')[0], profile.delegateId, currentRelayUrl())
+      chip.href = bookmarkletUrl
+      setInstallEnabled(true)
+      status.textContent = ''
+    }
+
+    function regenerateProfile(reason) {
+      setBusy(reason || 'Creating profile…')
+      createPairingProfile(currentRelayUrl()).then(setProfile).catch(function(e) {
+        status.textContent = e.message || 'Could not create pairing profile'
       })
     }
 
-    copy.onclick = function() {
-      navigator.clipboard.writeText(token.value).then(function() {
-        copy.textContent = 'Copied!'
-        setTimeout(function() { copy.textContent = 'Copy token' }, 1800)
+    rawToggle.onclick = function() {
+      var open = token.style.display === 'none'
+      token.style.display = open ? '' : 'none'
+      rawToggle.textContent = open ? '▼ Hide raw token' : '▶ Show raw token'
+    }
+
+    copyToken.onclick = function() {
+      if (!pairedProfile) return
+      tokenValue = pairingTokenForProfile(pairedProfile, '')
+      token.value = tokenValue
+      navigator.clipboard.writeText(tokenValue).then(function() {
+        copyToken.innerHTML = SVG_CHECK_SM + ' Copied'
+        expiresAt = Date.now() + 10 * 60 * 1000
+        updateExpiry()
+        if (expiryTimer) clearInterval(expiryTimer)
+        expiryTimer = setInterval(updateExpiry, 1000)
+        setTimeout(function() { copyToken.innerHTML = SVG_COPY + ' Copy token' }, 1800)
       }).catch(function() {
         token.focus()
         token.select()
       })
     }
 
+    regen.onclick = function() { regenerateProfile('Regenerating profile…') }
+
+    relay.oninput = function() {
+      clearTimeout(regenTimer)
+      setBusy('Relay changed — regenerating token and bookmarklet…')
+      regenTimer = setTimeout(function() { regenerateProfile('Regenerating profile…') }, 500)
+    }
+
+    copyLink.onclick = function() {
+      if (!bookmarkletUrl) return
+      navigator.clipboard.writeText(bookmarkletUrl).then(function() {
+        copyLink.innerHTML = SVG_CHECK_SM + ' Copied'
+        setTimeout(function() { copyLink.innerHTML = SVG_COPY + ' Copy link' }, 1800)
+      })
+    }
+
     $content.appendChild(wrap)
+    regenerateProfile('Creating profile…')
   }
 
   // ── Record selection — shared entry point ──────────────────────────────────

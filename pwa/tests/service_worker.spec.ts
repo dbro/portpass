@@ -10,8 +10,9 @@ test.describe('PWA service worker routing', () => {
   test('autofill pairing page is served as its own page', async ({ page }) => {
     await page.goto('/portpass/autofill.html?pair=1')
 
-    await expect(page.getByText('Pair this autofill profile')).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Create pairing token' })).toBeVisible()
+    await expect(page.getByText('Pair this everyday browser')).toBeVisible()
+    await expect(page.getByText('Install the bookmarklet here')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Copy token' })).toBeVisible()
     await expect(page.getByText('Vault is locked')).not.toBeVisible()
   })
 
