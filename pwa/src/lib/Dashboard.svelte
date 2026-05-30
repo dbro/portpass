@@ -1,12 +1,12 @@
 <script>
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import { get } from 'svelte/store'
   import { selectedFile, dbItems, secondaryVaults, toast, clipboardSession, clipboardContext, switchboardUrl, switchboardConnected, crossProfileEnabled, delegatesVersion } from '../store.js'
   import {
     openDatabase,
     getRecordData, getDatabaseData, saveDatabase, getDatabaseInfo,
     updateRecordFields, updateDBFields, deleteRecord as wasmDeleteRecord,
-    searchRecords, closeDatabase, loadVaultFile,
+    searchRecords, searchRecordResults, closeDatabase, loadVaultFile,
     copyFieldToClipboard, copyCustomFieldToClipboard, copyTOTP as wasmCopyTOTP,
     getTOTP, getFieldValue, getCustomFieldValue,
   } from '../wasm.js'
@@ -46,6 +46,8 @@
   let dbKey        = $state('')
   let lastSave     = $state('')
   let hasDelegates = $state(false)
+  let searchWasActive = false
+  let preSearchSelection = null
 
   $effect(() => {
     void $delegatesVersion
@@ -680,6 +682,18 @@
   })
 
   // Load a record by UUID. vaultUuid is null for primary vault records.
+  function loadRecordSelection(uuid, vaultUuid = null) {
+    if (!uuid) {
+      record = null
+      selectedUUID = null
+      selectedVaultUuid = null
+      return
+    }
+    record = getRecordData(vaultUuid || dbKey, uuid)
+    selectedUUID = uuid
+    selectedVaultUuid = vaultUuid
+  }
+
   function selectRecord(uuid, vaultUuid = null) {
     if (isEditing && editDirty) {
       if (!confirm('Discard unsaved changes?')) return
@@ -694,9 +708,7 @@
     isNew = false
     editDirty = false
     try {
-      record = getRecordData(vaultUuid || dbKey, uuid)
-      selectedUUID = uuid
-      selectedVaultUuid = vaultUuid
+      loadRecordSelection(uuid, vaultUuid)
     } catch (e) {
       console.error(e)
       showToast('Could not load record.')
@@ -1397,6 +1409,20 @@
   let showHelp      = $state(false)
   let collapseSeq   = $state('')
 
+  let vaultSearchResults = $derived.by(() => {
+    const results = new Map()
+    if (!debouncedQuery.trim()) return results
+    try {
+      results.set('', searchRecordResults(dbKey, debouncedQuery, 0))
+    } catch {}
+    for (const sv of $secondaryVaults) {
+      try {
+        results.set(sv.uuid, searchRecordResults(sv.uuid, debouncedQuery, 0))
+      } catch {}
+    }
+    return results
+  })
+
   // Flat ordered {uuid, vaultUuid} list spanning all open vaults, matching RecordList's sort.
   // vaultUuid is null for primary vault records (selectRecord defaults to dbKey).
   let flatList = $derived.by(() => {
@@ -1404,10 +1430,11 @@
       let list = items
       if (pendingDeleteUUID) list = list.filter(i => i.uuid !== pendingDeleteUUID)
       if (debouncedQuery.trim()) {
-        try {
-          const matched = new Set(searchRecords(vaultUuid ?? dbKey, debouncedQuery, 0))
+        const result = vaultSearchResults.get(vaultUuid ?? '')
+        if (result) {
+          const matched = new Set(result.uuids ?? [])
           list = list.filter(i => matched.has(i.uuid))
-        } catch {}
+        }
       }
       return [...list].sort((a, b) => {
         const ga = a.group || 'Ungrouped', gb = b.group || 'Ungrouped'
@@ -1419,6 +1446,69 @@
       ...sortedEntries($dbItems, null),
       ...$secondaryVaults.flatMap(sv => sortedEntries(sv.items ?? [], sv.uuid)),
     ]
+  })
+
+  function bestSearchMatch(searchText, candidates) {
+    if (!searchText.trim() || candidates.length === 0) return null
+    let best = null
+    let bestScore = Infinity
+    for (const candidate of candidates) {
+      const result = vaultSearchResults.get(candidate.vaultUuid ?? '')
+      if (result?.autoSelectUuid === candidate.uuid && Number.isFinite(result.autoSelectScore)) {
+        if (result.autoSelectScore < bestScore) {
+          best = candidate
+          bestScore = result.autoSelectScore
+        }
+      }
+    }
+    return best
+  }
+
+  $effect(() => {
+    const searchText = debouncedQuery.trim()
+    const hasSearch = !!searchText
+
+    if (hasSearch && !searchWasActive) {
+      untrack(() => {
+        preSearchSelection = { uuid: selectedUUID, vaultUuid: selectedVaultUuid }
+        searchWasActive = true
+      })
+    }
+
+    if (!hasSearch) {
+      if (searchWasActive && !isEditing && !isNew) {
+        const restore = preSearchSelection
+        searchWasActive = false
+        preSearchSelection = null
+        try {
+          loadRecordSelection(restore?.uuid ?? null, restore?.vaultUuid ?? null)
+        } catch (e) {
+          console.error(e)
+          showToast('Could not restore previous record.')
+        }
+      } else if (searchWasActive && (isEditing || isNew)) {
+        searchWasActive = false
+        preSearchSelection = null
+      }
+      return
+    }
+
+    if (isEditing || isNew || sheetOpen) return
+
+    const best = bestSearchMatch(searchText, flatList)
+    if (!best) return
+
+    const alreadySelected = untrack(() =>
+      selectedUUID === best.uuid && selectedVaultUuid === best.vaultUuid
+    )
+    if (alreadySelected) return
+
+    try {
+      loadRecordSelection(best.uuid, best.vaultUuid)
+    } catch (e) {
+      console.error(e)
+      showToast('Could not load best search match.')
+    }
   })
 
   async function copyRecordField(field) {

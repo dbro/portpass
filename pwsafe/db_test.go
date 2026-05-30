@@ -123,6 +123,55 @@ func TestSearchModeAllIncludesCustomFields(t *testing.T) {
 	assert.Len(t, hits, 0, "sensitive custom field value must not be searched")
 }
 
+func TestSearchAutoSelect(t *testing.T) {
+	db := NewV3("test", "pw")
+	firstFallback := db.SetRecord(Record{Title: "Alpha", Group: "A"})
+	notesMatch := db.SetRecord(Record{Title: "Bravo", Group: "B", Notes: "needle appears here"})
+	urlContains := db.SetRecord(Record{Title: "Charlie", Group: "C", URL: "https://www.example.com/login"})
+	urlStarts := db.SetRecord(Record{Title: "Delta", Group: "D", URL: "https://www.needle.example.com"})
+	titleContains := db.SetRecord(Record{Title: "My Needle", Group: "E"})
+	titleStarts := db.SetRecord(Record{Title: "Needle Keeper", Group: "F"})
+	ordered := []string{firstFallback, notesMatch, urlContains, urlStarts, titleContains, titleStarts}
+
+	uuid, score, ok := db.SearchAutoSelect("needle", ordered)
+	assert.True(t, ok)
+	assert.Equal(t, titleStarts, uuid)
+	assert.Equal(t, 10013, score)
+
+	uuid, score, ok = db.SearchAutoSelect("example", ordered[:4])
+	assert.True(t, ok)
+	assert.Equal(t, urlContains, uuid)
+	assert.Equal(t, 30011, score)
+
+	uuid, score, ok = db.SearchAutoSelect("appears", ordered[:2])
+	assert.True(t, ok)
+	assert.Equal(t, notesMatch, uuid)
+	assert.Equal(t, 50019, score)
+
+	uuid, score, ok = db.SearchAutoSelect("fallback", ordered[:1])
+	assert.True(t, ok, "a single filtered result should still auto-select")
+	assert.Equal(t, firstFallback, uuid)
+	assert.Equal(t, 60005, score)
+
+	_, _, ok = db.SearchAutoSelect("fallback", ordered[:2])
+	assert.False(t, ok, "multiple fallback-only candidates should not auto-select")
+}
+
+func TestSearchWithAutoSelect(t *testing.T) {
+	db := NewV3("test", "pw")
+	db.SetRecord(Record{Title: "Alpha", Group: "Shared"})
+	db.SetRecord(Record{Title: "Bravo", Group: "Shared"})
+
+	results := db.SearchWithAutoSelect("Shared", 0)
+	assert.Len(t, results.UUIDs, 2)
+	assert.Empty(t, results.AutoSelectUUID, "group-only multi-match should not auto-select")
+
+	results = db.SearchWithAutoSelect("Alpha", 0)
+	assert.Len(t, results.UUIDs, 1)
+	assert.NotEmpty(t, results.AutoSelectUUID)
+	assert.Equal(t, 10005, results.AutoSelectScore)
+}
+
 func TestSetRecordTimes(t *testing.T) {
 	db := NewV3("test", "password")
 	record := Record{Title: "Test Record", Password: "password"}

@@ -111,6 +111,10 @@ export function searchRecords(vaultUuid, query, mode) {
     return parseOrThrow(window.searchRecords(vaultUuid, query, mode))
 }
 
+export function searchRecordResults(vaultUuid, query, mode) {
+    return parseOrThrow(window.searchRecordResults(vaultUuid, query, mode))
+}
+
 export function getAutocompleteSuggestion(vaultUuid, field, prefix) {
     return window.getSuggestion(vaultUuid, field, prefix) || ''
 }

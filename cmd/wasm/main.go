@@ -461,6 +461,22 @@ func searchRecords(this js.Value, args []js.Value) interface{} {
 	return string(jsonData)
 }
 
+func searchRecordResults(this js.Value, args []js.Value) interface{} {
+	db, _, ok := getDB(args)
+	if !ok {
+		return "database not open"
+	}
+	if len(args) != 3 {
+		return "invalid arguments: expected (vaultUuid, query, mode)"
+	}
+	result := db.SearchWithAutoSelect(args[1].String(), args[2].Int())
+	jsonData, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Sprintf("json marshal error: %s", err)
+	}
+	return string(jsonData)
+}
+
 func getSuggestion(this js.Value, args []js.Value) interface{} {
 	db, _, ok := getDB(args)
 	if !ok {
@@ -872,6 +888,7 @@ func main() {
 	js.Global().Set("deleteRecord", js.FuncOf(deleteRecord))
 	js.Global().Set("UpdateDBFields", js.FuncOf(updateDBFields))
 	js.Global().Set("searchRecords", js.FuncOf(searchRecords))
+	js.Global().Set("searchRecordResults", js.FuncOf(searchRecordResults))
 	js.Global().Set("getSuggestion", js.FuncOf(getSuggestion))
 	js.Global().Set("getTOTP", js.FuncOf(getTOTP))
 	js.Global().Set("copyFieldToClipboard", js.FuncOf(copyFieldToClipboard))
