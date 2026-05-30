@@ -26,26 +26,28 @@ func (db *V3) Decrypt(reader io.Reader, passwd string) (int, error) {
 		return cr.BytesRead, errors.New("file is not a valid Password Safe v3 file")
 	}
 
+	parsed := V3{LastSavePath: db.LastSavePath}
+
 	// Read the Salt
-	if _, err := io.ReadFull(cr, db.Salt[:]); err != nil {
+	if _, err := io.ReadFull(cr, parsed.Salt[:]); err != nil {
 		return cr.BytesRead, err
 	}
 
 	// Read iter
-	if err := binary.Read(cr, binary.LittleEndian, &db.Iter); err != nil {
+	if err := binary.Read(cr, binary.LittleEndian, &parsed.Iter); err != nil {
 		return cr.BytesRead, err
 	}
-	if err := validateStretchIterations(db.Iter); err != nil {
+	if err := validateStretchIterations(parsed.Iter); err != nil {
 		return cr.BytesRead, err
 	}
 
 	// Verify the password
-	db.calculateStretchKey(passwd)
+	parsed.calculateStretchKey(passwd)
 	var keyHash [sha256.Size]byte
 	if _, err := io.ReadFull(cr, keyHash[:]); err != nil {
 		return cr.BytesRead, err
 	}
-	if keyHash != sha256.Sum256(db.StretchedKey[:]) {
+	if keyHash != sha256.Sum256(parsed.StretchedKey[:]) {
 		return cr.BytesRead, errors.New("invalid password")
 	}
 
@@ -54,9 +56,9 @@ func (db *V3) Decrypt(reader io.Reader, passwd string) (int, error) {
 	if _, err := io.ReadFull(cr, keyData); err != nil {
 		return cr.BytesRead, err
 	}
-	db.extractKeys(keyData)
+	parsed.extractKeys(keyData)
 
-	if _, err := io.ReadFull(cr, db.CBCIV[:]); err != nil {
+	if _, err := io.ReadFull(cr, parsed.CBCIV[:]); err != nil {
 		return cr.BytesRead, err
 	}
 
@@ -77,11 +79,11 @@ func (db *V3) Decrypt(reader io.Reader, passwd string) (int, error) {
 		}
 	}
 
-	block, err := twofish.NewCipher(db.EncryptionKey[:])
+	block, err := twofish.NewCipher(parsed.EncryptionKey[:])
 	if err != nil {
 		return 0, err
 	}
-	decrypter := cipher.NewCBCDecrypter(block, db.CBCIV[:])
+	decrypter := cipher.NewCBCDecrypter(block, parsed.CBCIV[:])
 	decryptedDB := make([]byte, encryptedSize) // The EOF and HMAC are after the encrypted section
 	decrypter.CryptBlocks(decryptedDB, encryptedDB)
 
@@ -96,24 +98,26 @@ func (db *V3) Decrypt(reader io.Reader, passwd string) (int, error) {
 	if err != nil {
 		return cr.BytesRead, errors.New("error parsing the unencrypted header - " + err.Error())
 	}
-	db.Header = header
+	parsed.Header = header
 
-	_, recordHMACData, err := db.unmarshalRecords(decryptedDB[hdrSize:])
+	_, recordHMACData, err := parsed.unmarshalRecords(decryptedDB[hdrSize:])
 	if err != nil {
 		return cr.BytesRead, errors.New("error parsing the unencrypted records - " + err.Error())
 	}
 	hmacData := append(headerHMACData, recordHMACData...)
 
 	// Verify HMAC - The HMAC is only calculated on the header/field values not length/type
-	db.calculateHMAC(hmacData)
-	if !hmac.Equal(db.HMAC[:], expectedHMAC) {
+	parsed.calculateHMAC(hmacData)
+	if !hmac.Equal(parsed.HMAC[:], expectedHMAC) {
 		return cr.BytesRead, errors.New("error calculated HMAC does not match read HMAC")
 	}
 
 	// Ensure the DB has a UUID
-	if db.Header.UUID == [16]byte{} {
-		db.Header.UUID = [16]byte(uuid.NewRandom().Array())
+	if parsed.Header.UUID == [16]byte{} {
+		parsed.Header.UUID = [16]byte(uuid.NewRandom().Array())
 	}
+
+	*db = parsed
 
 	return cr.BytesRead, nil
 }

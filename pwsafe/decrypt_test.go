@@ -37,6 +37,26 @@ func TestBadHMAC(t *testing.T) {
 	assert.Equal(t, errors.New("error calculated HMAC does not match read HMAC"), err)
 }
 
+func TestBadHMACDoesNotMutateExistingDB(t *testing.T) {
+	db := NewV3("sentinel", "sentinel-password")
+	originalHeader := db.Header
+	originalIter := db.Iter
+	originalSalt := db.Salt
+	originalStretchedKey := db.StretchedKey
+
+	f, err := os.Open("./test_dbs/badHMAC.dat")
+	assert.NoError(t, err)
+	defer f.Close()
+
+	_, err = db.Decrypt(f, "password")
+	assert.Equal(t, errors.New("error calculated HMAC does not match read HMAC"), err)
+	assert.Equal(t, originalHeader, db.Header)
+	assert.Equal(t, originalIter, db.Iter)
+	assert.Equal(t, originalSalt, db.Salt)
+	assert.Equal(t, originalStretchedKey, db.StretchedKey)
+	assert.Empty(t, db.Records)
+}
+
 func TestThreeDB(t *testing.T) {
 	// This test relies on the password db found at ./test_db/three.dat
 	db, err := OpenPWSafeFile("./test_dbs/three.dat", "three3#;")
