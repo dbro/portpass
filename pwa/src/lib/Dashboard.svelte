@@ -227,51 +227,56 @@
       .map(({ _d, ...rest }) => rest)
   }
 
-  // Encrypt credentials for a specific record using the given AES-GCM session key.
-  async function autofillEncryptRecord(sessionKey, uuid, vaultUuid) {
+  function autofillRecordMeta(uuid, vaultUuid) {
     const v = vaultUuid || dbKey
     const rec = getRecordData(v, uuid)
     const autotype = rec.Autotype || '\\u\\t\\p\\n'
     const parseErr = autofillValidateSequence(autotype)
     if (parseErr) throw new Error(`Could not parse autofill sequence: ${autotype}`)
-
-    // Parse sequence to determine which fields are referenced.
-    const codes = new Set()
-    const fieldNums = new Set()
-    for (let i = 0; i < autotype.length; ) {
-      if (autotype[i] !== '\\') { i++; continue }
-      const code = autotype[i + 1]
-      if (!code) break
-      if (code === 'f') {
-        const d = autotype[i + 2]
-        if (d && /^[1-9]$/.test(d)) { fieldNums.add(parseInt(d)); i += 3 }
-        else { fieldNums.add(1); i += 2 }
-      } else if (code === 'w' || code === 'W') {
-        let j = i + 2, count = 0
-        while (j < autotype.length && count < 3 && /^[0-9]$/.test(autotype[j])) { j++; count++ }
-        i = j
-      } else {
-        codes.add(code); i += 2
-      }
+    return {
+      title: rec.Title, autotype,
+      fields: [
+        rec.Username ? { code: 'u', label: 'Username', value: rec.Username } : null,
+        rec.Password !== '' && rec.Password !== undefined ? { code: 'p', label: 'Password', sensitive: true } : null,
+        rec.Email ? { code: 'm', label: 'Email', value: rec.Email } : null,
+        rec.TwoFactorKey !== undefined ? { code: '2', label: 'One-time code', sensitive: true } : null,
+        ...(rec.CustomFields || []).slice(0, 9).filter(cf => cf.Value !== '').map((cf, i) => ({
+          code: 'f' + (i + 1), label: cf.Name, sensitive: !!cf.Sensitive,
+          ...(cf.Sensitive ? {} : { value: cf.Value }),
+        })),
+        rec.Notes !== '' && rec.Notes !== undefined ? { code: 'notes', label: 'Notes', sensitive: true, notes: true } : null,
+      ].filter(Boolean),
     }
+  }
 
-    const fields = {}
-    const sensitiveCodes = []  // field codes whose values are sensitive (blocked on HTTP)
-    if (codes.has('u')) fields.u = rec.Username ?? ''
-    if (codes.has('p')) { fields.p = getFieldValue(v, uuid, 'Password') ?? ''; sensitiveCodes.push('p') }
-    if (codes.has('m')) fields.m = rec.Email ?? ''
-    if (codes.has('2')) { fields['2'] = getTOTP(v, uuid).code ?? ''; sensitiveCodes.push('2') }
-    for (const n of fieldNums) {
-      const cf = rec.CustomFields?.[n - 1]
-      fields['f' + n] = cf ? (cf.Value !== null ? cf.Value : (getCustomFieldValue(v, uuid, cf.Name) ?? '')) : ''
-      if (cf?.Value === null) sensitiveCodes.push('f' + n)  // null = sensitive custom field
+  function autofillFieldValue(uuid, vaultUuid, code) {
+    const v = vaultUuid || dbKey
+    const rec = getRecordData(v, uuid)
+    if (code === 'u') return rec.Username ?? ''
+    if (code === 'p') return getFieldValue(v, uuid, 'Password') ?? ''
+    if (code === 'm') return rec.Email ?? ''
+    if (code === '2') return getTOTP(v, uuid).code ?? ''
+    if (code === 'notes') return getFieldValue(v, uuid, 'Notes') ?? ''
+    if (/^f[1-9]$/.test(code)) {
+      const cf = rec.CustomFields?.[parseInt(code.slice(1)) - 1]
+      return cf ? (cf.Value !== null ? cf.Value : (getCustomFieldValue(v, uuid, cf.Name) ?? '')) : ''
     }
+    return ''
+  }
 
+  function autofillFieldData(uuid, vaultUuid, code) {
+    if (code === '2') {
+      const data = getTOTP(vaultUuid || dbKey, uuid)
+      return { value: data.code ?? '', seconds: data.seconds, period: data.period }
+    }
+    return { value: autofillFieldValue(uuid, vaultUuid, code) }
+  }
+
+  async function autofillEncryptData(sessionKey, data) {
     const iv = crypto.getRandomValues(new Uint8Array(12))
-    const pt = new TextEncoder().encode(JSON.stringify(fields))
+    const pt = new TextEncoder().encode(JSON.stringify(data))
     const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, sessionKey, pt)
     return {
-      title: rec.Title, autotype, sensitiveCodes,
       iv: btoa(String.fromCharCode(...iv)),
       ciphertext: btoa(String.fromCharCode(...new Uint8Array(ct))),
     }
@@ -298,45 +303,6 @@
   }
 
   // ── Cross-profile autofill intent handler ────────────────────────────────
-
-  // Extracts plain credential fields for a record (same logic as autofillEncryptRecord
-  // but returns unencrypted fields for cross-profile blob encryption).
-  function buildRecordFields(uuid, vaultUuid) {
-    const v = vaultUuid || dbKey
-    const rec = getRecordData(v, uuid)
-    const autotype = rec.Autotype || '\\u\\t\\p\\n'
-    if (autofillValidateSequence(autotype)) throw new Error(`Invalid autotype: ${autotype}`)
-
-    const codes = new Set()
-    const fieldNums = new Set()
-    for (let i = 0; i < autotype.length; ) {
-      if (autotype[i] !== '\\') { i++; continue }
-      const code = autotype[i + 1]
-      if (!code) break
-      if (code === 'f') {
-        const d = autotype[i + 2]
-        if (d && /^[1-9]$/.test(d)) { fieldNums.add(parseInt(d)); i += 3 }
-        else { fieldNums.add(1); i += 2 }
-      } else if (code === 'w' || code === 'W') {
-        let j = i + 2, count = 0
-        while (j < autotype.length && count < 3 && /^[0-9]$/.test(autotype[j])) { j++; count++ }
-        i = j
-      } else { codes.add(code); i += 2 }
-    }
-
-    const fields = {}
-    const sensitiveCodes = []
-    if (codes.has('u')) fields.u = rec.Username ?? ''
-    if (codes.has('p')) { fields.p = getFieldValue(v, uuid, 'Password') ?? ''; sensitiveCodes.push('p') }
-    if (codes.has('m')) fields.m = rec.Email ?? ''
-    if (codes.has('2')) { fields['2'] = getTOTP(v, uuid).code ?? ''; sensitiveCodes.push('2') }
-    for (const n of fieldNums) {
-      const cf = rec.CustomFields?.[n - 1]
-      fields['f' + n] = cf ? (cf.Value !== null ? cf.Value : (getCustomFieldValue(v, uuid, cf.Name) ?? '')) : ''
-      if (cf?.Value === null) sensitiveCodes.push('f' + n)
-    }
-    return { autotype, sensitiveCodes, fields }
-  }
 
   // Encrypt data with the autofill popup's ECDH public key and send as a ws-relay reply.
   async function sha256B64(bytes) {
@@ -468,14 +434,29 @@
               if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo, error: 'Credentials require an exact saved URL match' }))
               return
             }
-            const rf = buildRecordFields(msg.uuid, msg.vaultUuid || null)
+            const meta = autofillRecordMeta(msg.uuid, msg.vaultUuid || null)
             await sbEncryptReply(msg.replyTo, msg.ecdh, [{
               uuid: msg.uuid, vaultUuid: msg.vaultUuid || null,
               title: rec.Title, matchType: 'search', existingUrl: rec.URL || '',
-              autotype: rf.autotype, sensitiveCodes: rf.sensitiveCodes, fields: rf.fields,
+              autotype: meta.autotype, fields: meta.fields,
             }], { delegateId: verified.id, requestHash })
           } catch(e) {
             if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo, error: e.message || 'Could not get credentials' }))
+          }
+          return
+        }
+        if (msg.msgType === 'field-value') {
+          try {
+            const rec = getRecordData(msg.vaultUuid || dbKey, msg.uuid)
+            if (canonicalURL(rec.URL || '') !== canonicalURL(msg.url || '')) {
+              if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo, error: 'Credentials require an exact saved URL match' }))
+              return
+            }
+            await sbEncryptReply(msg.replyTo, msg.ecdh, {
+              code: msg.query || '', ...autofillFieldData(msg.uuid, msg.vaultUuid || null, msg.query || ''),
+            }, { delegateId: verified.id, requestHash })
+          } catch(e) {
+            if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo, error: e.message || 'Could not get field value' }))
           }
           return
         }
@@ -620,7 +601,7 @@
           return
         }
 
-        // Targeted credential fetch
+        // Targeted record metadata fetch
         const uuid = msg.uuid || selectedUUID
         const vaultUuid = msg.uuid ? (msg.vaultUuid || null) : selectedVaultUuid
         if (!uuid) {
@@ -628,8 +609,24 @@
           return
         }
         try {
-          const result = await autofillEncryptRecord(sessionKey, uuid, vaultUuid)
+          const result = await autofillEncryptData(sessionKey, autofillRecordMeta(uuid, vaultUuid))
           ch.postMessage({ type: 'record', ...result, nonce: msg.nonce })
+        } catch (e) {
+          ch.postMessage({ type: 'error', message: e.message, nonce: msg.nonce })
+        }
+        return
+      }
+
+      if (msg.type === 'field-value') {
+        if (!sessionKey) {
+          ch.postMessage({ type: 'error', message: 'No secure session', nonce: msg.nonce })
+          return
+        }
+        try {
+          const result = await autofillEncryptData(sessionKey, {
+            code: msg.code || '', ...autofillFieldData(msg.uuid, msg.vaultUuid || null, msg.code || ''),
+          })
+          ch.postMessage({ type: 'field-value', ...result, nonce: msg.nonce })
         } catch (e) {
           ch.postMessage({ type: 'error', message: e.message, nonce: msg.nonce })
         }

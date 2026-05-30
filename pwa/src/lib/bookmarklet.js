@@ -18,10 +18,6 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, R
   if (window.__ppRunning) return
   window.__ppRunning = true
 
-  // Capture focused element before window.open() can blur it.
-  // isUsableInput is a function declaration so it is hoisted and available here.
-  var activeEl = isUsableInput(document.activeElement) ? document.activeElement : null
-
   var isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost'
   var currentCanonical = canonicalURL(window.location.href)
   var saveUrl = window.location.origin + window.location.pathname
@@ -51,16 +47,21 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, R
     var msg = e.data
     if (!msg) return
     if (msg.type === 'fill') {
-      // Autofill popup has chosen a record and the user has clicked a field (or one was pre-focused).
+      // Autofill popup has chosen an action and the user has clicked a field.
       // Remove the field-click listener so it doesn't fire again mid-fill.
       document.removeEventListener('click', onFieldClick, true)
-      var el = startEl || activeEl
+      var el = startEl
       executeAutotype(el, msg.autotype, msg.fields).then(function() {
-        try { pp.postMessage({ type: 'fill-done' }, PORTPASS_ORIGIN) } catch(_) {}
+        try { pp.postMessage({ type: 'fill-done', mode: msg.mode }, PORTPASS_ORIGIN) } catch(_) {}
         // Focus the autofill popup from the main-window context so the done state is visible.
         // (window.focus() from within autofill.html is blocked; pp.focus() from the opener works.)
         try { pp.focus() } catch(_) {}
-        cleanup()
+        if (msg.mode === 'single') {
+          startEl = null
+          document.addEventListener('click', onFieldClick, true)
+        } else {
+          cleanup()
+        }
       })
     } else if (msg.type === 'cancel') {
       cleanup()
@@ -91,7 +92,6 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, R
         isSecure: isSecure,
         delegateId: DELEGATE_ID,
         relayUrl: RELAY_URL,
-        hasActiveField: !!activeEl,
       }, PORTPASS_ORIGIN)
 
       // Register field-click listener (host page) and message handler (popup).

@@ -67,7 +67,8 @@ async function setupAutofillTest(context: BrowserContext): Promise<{ login: Page
 
 // Create a record in portpass and open its detail view.
 async function createRecord(portpass: Page, opts: {
-  title: string, username?: string, password?: string, autotype: string, url?: string
+  title: string, username?: string, password?: string, autotype: string, url?: string,
+  notes?: string, totpSecret?: string, custom?: { name: string, value: string, sensitive?: boolean },
 }) {
   await portpass.getByRole('button', { name: 'New', exact: true }).click()
   await portpass.getByPlaceholder('e.g. Bank of America').fill(opts.title)
@@ -77,6 +78,18 @@ async function createRecord(portpass: Page, opts: {
   }
   if (opts.url) {
     await portpass.getByLabel('URL').fill(opts.url)
+  }
+  if (opts.notes) {
+    await portpass.locator('textarea.input.mono').fill(opts.notes)
+  }
+  if (opts.totpSecret) {
+    await portpass.locator('input[placeholder="Base32 secret or otpauth:// URI"]').fill(opts.totpSecret)
+  }
+  if (opts.custom) {
+    await portpass.locator('button.add-custom-field').click()
+    await portpass.getByPlaceholder('Field name').fill(opts.custom.name)
+    await portpass.getByPlaceholder('Value').fill(opts.custom.value)
+    if (opts.custom.sensitive) await portpass.getByRole('button', { name: 'Hide value' }).click()
   }
   await portpass.locator('.mode-toggle').getByText('Raw').click()
   await portpass.locator('.autotype-input').fill(opts.autotype)
@@ -197,7 +210,7 @@ test.describe('Bookmarklet — autofill popup phases', () => {
     const popup = await activateBookmarklet(login, bookmarkletUrl)
     await expect(popup.locator('.selected-record-row')).toBeVisible({ timeout: 5000 })
     await expect(popup.locator('.selected-record-row')).toContainText('My Bank')
-    await expect(popup.locator('.pp-waiting-title')).toContainText('Click a field to begin')
+    await expect(popup.locator('.pp-arm')).toContainText('Click where to start Autofill')
   })
 
   test('\\u\\t\\p fills username, tabs to password, fills password', async ({ context }) => {
@@ -295,13 +308,23 @@ test.describe('Bookmarklet — autofill popup phases', () => {
     await popup.waitForEvent('close', { timeout: 5000 })
   })
 
-  test('Cancel button in waiting phase closes the autofill popup', async ({ context }) => {
+  test('tapping an armed action disarms it', async ({ context }) => {
     const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
-    await createRecord(portpass, { title: 'Site', autotype: '\\u\\p' })
+    await createRecord(portpass, { title: 'Site', username: 'alice', autotype: '\\u\\p' })
 
     const popup = await activateBookmarklet(login, bookmarkletUrl)
-    await popup.getByRole('button', { name: 'Cancel' }).click()
-    await expect.poll(() => popup.isClosed(), { timeout: 8000 }).toBe(true)
+    await expect(popup.locator('.pp-autofill-summary')).toHaveClass(/active/)
+    await popup.getByRole('button', { name: 'Click where to start Autofill' }).click()
+    await expect(popup.locator('.pp-autofill-summary')).not.toHaveClass(/active/)
+    await expect(popup.locator('.pp-arm')).toHaveCount(0)
+
+    await popup.locator('.pp-field-row', { hasText: 'Username' }).click()
+    await expect(popup.locator('.pp-field-row.active')).toContainText('Click where to insert Username')
+    await expect(popup.locator('.pp-field-row.active')).not.toContainText('Cancel')
+    await popup.locator('.pp-field-row.active').click()
+    await expect(popup.locator('.pp-field-row.active')).toHaveCount(0)
+    await expect(popup.locator('.pp-arm')).toHaveCount(0)
+    expect(popup.isClosed()).toBe(false)
   })
 
   test('search fallback shown when no URL matches', async ({ context }) => {
@@ -319,7 +342,7 @@ test.describe('Bookmarklet — autofill popup phases', () => {
     // No picker shown — popup goes directly to waiting.
     await expect(popup.locator('.rec-row')).toHaveCount(0)
     await expect(popup.locator('.selected-record-row')).toBeVisible()
-    await expect(popup.locator('.rec-match-badge')).toBeVisible()  // in SelectedRecordRow
+    await expect(popup.locator('.pp-autofill-summary')).toBeVisible()
   })
 
   test('fuzzy match row shows URL text and pencil; clicking transitions to waiting', async ({ context }) => {
@@ -365,6 +388,136 @@ test.describe('Bookmarklet — autofill popup phases', () => {
 
     const popup = await activateBookmarklet(login, bookmarkletUrl)
     await expect(popup.locator('.selected-record-row')).toContainText('No Autotype', { timeout: 5000 })
+  })
+
+  test('credential panel shows non-empty values and masks password until revealed', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await createRecord(portpass, {
+      title: 'Panel Site', username: 'alice', password: 'hunter2', autotype: '\\u\\t\\p',
+    })
+
+    const popup = await activateBookmarklet(login, bookmarkletUrl)
+    await expect(popup.locator('.pp-autofill-summary')).toContainText('Username → Tab → Password')
+    await expect(popup.locator('.pp-field-row', { hasText: 'Username' })).toContainText('alice')
+    const password = popup.locator('.pp-field-row', { hasText: 'Password' })
+    await expect(password).toContainText('••••••••')
+    await password.getByRole('button', { name: 'Reveal Password' }).click()
+    await expect(popup.locator('.pp-field-row', { hasText: 'Password' })).toContainText('hunter2')
+  })
+
+  test('single-value insertion keeps popup open and ready for another action', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await createRecord(portpass, {
+      title: 'Insert Site', username: 'alice', password: 'hunter2', autotype: '\\u\\t\\p',
+    })
+
+    const popup = await activateBookmarklet(login, bookmarkletUrl)
+    await expect(popup.locator('.pp-autofill-summary')).toHaveClass(/active/)
+    const password = popup.locator('.pp-field-row', { hasText: 'Password' })
+    await password.getByRole('button', { name: 'Reveal Password' }).click()
+    await expect(popup.locator('.pp-field-row', { hasText: 'Password' })).toContainText('hunter2')
+    await popup.locator('.pp-field-row', { hasText: 'Password' }).click()
+    await expect(popup.locator('.pp-field-row.active')).toContainText('Click where to insert Password')
+    await login.locator('#pass').click()
+    await expect(login.locator('#user')).toHaveValue('')
+    await expect(login.locator('#pass')).toHaveValue('hunter2')
+    await expect(popup.locator('.pp-autofill-summary')).toBeVisible()
+    await expect(popup.locator('.pp-autofill-summary')).not.toHaveClass(/active/)
+    await expect(popup.locator('.pp-arm')).toHaveCount(0)
+    await expect(popup.locator('.pp-field-row', { hasText: 'Password' })).toContainText('••••••••')
+    expect(popup.isClosed()).toBe(false)
+
+    await popup.locator('.pp-autofill-summary').click()
+    await expect(popup.locator('.pp-autofill-summary')).toHaveClass(/active/)
+    await expect(popup.locator('.pp-arm')).toContainText('Click where to start Autofill')
+    await popup.locator('.pp-field-row', { hasText: 'Username' }).click()
+    await login.locator('#user').click()
+    await expect(login.locator('#user')).toHaveValue('alice')
+    expect(popup.isClosed()).toBe(false)
+  })
+
+  test('focused page field does not start autofill until a new click', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await createRecord(portpass, {
+      title: 'Focus Site', username: 'alice', password: 'hunter2', autotype: '\\u\\t\\p',
+    })
+
+    await login.locator('#user').focus()
+    await activateBookmarklet(login, bookmarkletUrl)
+    await expect(login.locator('#user')).toHaveValue('')
+    await expect(login.locator('#pass')).toHaveValue('')
+    await login.locator('#user').click()
+    await expect(login.locator('#user')).toHaveValue('alice')
+    await expect(login.locator('#pass')).toHaveValue('hunter2')
+  })
+
+  test('unsupported autofill code shows the sequence warning state', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await createRecord(portpass, {
+      title: 'Warning Site', username: 'alice', password: 'hunter2', autotype: '\\u\\x\\t\\p',
+    })
+
+    const popup = await activateBookmarklet(login, bookmarkletUrl)
+    await expect(popup.locator('.pp-sequence.warn')).toBeVisible()
+    await expect(popup.locator('.pp-sequence.warn span')).toHaveAttribute('title', 'Portpass will skip unsupported code: \\x')
+    await expect(popup.locator('.pp-arm')).toHaveCount(0)
+  })
+
+  test('notes reveal on row click without arming insertion', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await createRecord(portpass, {
+      title: 'Notes Site', password: 'hunter2', autotype: '\\p', notes: 'private note',
+    })
+
+    const popup = await activateBookmarklet(login, bookmarkletUrl)
+    const notes = popup.locator('.pp-field-row', { hasText: 'Notes' })
+    await expect(notes).toContainText('••••••••')
+    await notes.click()
+    await expect(popup.locator('.pp-field-row', { hasText: 'Notes' })).toContainText('private note')
+    await expect(popup.locator('.pp-field-row.active')).toHaveCount(0)
+  })
+
+  test('sensitive custom field reveals lazily and can be inserted', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await createRecord(portpass, {
+      title: 'Custom Site', password: 'hunter2', autotype: '\\p',
+      custom: { name: 'PIN', value: '1234', sensitive: true },
+    })
+
+    const popup = await activateBookmarklet(login, bookmarkletUrl)
+    const pin = popup.locator('.pp-field-row', { hasText: 'PIN' })
+    await expect(pin).toContainText('••••••••')
+    await pin.getByRole('button', { name: 'Reveal PIN' }).click()
+    await expect(popup.locator('.pp-field-row', { hasText: 'PIN' })).toContainText('1234')
+    await popup.locator('.pp-field-row', { hasText: 'PIN' }).click()
+    await login.locator('#pass').click()
+    await expect(login.locator('#pass')).toHaveValue('1234')
+  })
+
+  test('revealed one-time code shows a draining bar and refreshes when it expires', async ({ context }) => {
+    test.setTimeout(50000)
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await createRecord(portpass, {
+      title: 'OTP Site', password: 'hunter2', autotype: '\\p',
+      totpSecret: 'JBSWY3DPEHPK3PXP',
+    })
+
+    const popup = await activateBookmarklet(login, bookmarkletUrl)
+    const otp = popup.locator('.pp-field-row', { hasText: 'One-time code' })
+    await otp.getByRole('button', { name: 'Reveal One-time code' }).click()
+    await expect(popup.locator('.pp-field-row', { hasText: 'One-time code' }).locator('.pp-totp-bar')).toBeVisible()
+    await popup.locator('.pp-field-row', { hasText: 'One-time code' }).getByRole('button', { name: 'Hide One-time code' }).click()
+    await expect(popup.locator('.pp-field-row', { hasText: 'One-time code' })).toContainText('••••••••')
+    await expect(popup.locator('.pp-field-row', { hasText: 'One-time code' }).locator('.pp-totp-bar')).toHaveCount(0)
+    await popup.locator('.pp-field-row', { hasText: 'One-time code' }).getByRole('button', { name: 'Reveal One-time code' }).click()
+    await expect(popup.locator('.pp-field-row', { hasText: 'One-time code' }).locator('.pp-totp-bar')).toBeVisible()
+    const initial = await popup.locator('.pp-field-row', { hasText: 'One-time code' }).locator('.pp-field-value').textContent()
+    await expect.poll(async () => {
+      return popup.locator('.pp-field-row', { hasText: 'One-time code' }).locator('.pp-field-value').textContent()
+    }, { timeout: 35000 }).not.toBe(initial)
+    await popup.locator('.pp-field-row', { hasText: 'One-time code' }).click()
+    await login.locator('#pass').click()
+    await expect(popup.locator('.pp-field-row', { hasText: 'One-time code' })).toContainText('••••••••')
   })
 
 })
