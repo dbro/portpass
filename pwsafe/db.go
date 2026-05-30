@@ -57,6 +57,37 @@ func (db *V3) DeleteRecord(uuidHex string) {
 	db.LastMod = time.Now()
 }
 
+func wipeBytes(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
+}
+
+// Wipe clears best-effort mutable secret material before releasing a database.
+// Go strings cannot be zeroed in place, but fixed-size keys and byte slices can.
+func (db *V3) Wipe() {
+	wipeBytes(db.CBCIV[:])
+	wipeBytes(db.EncryptionKey[:])
+	wipeBytes(db.HMAC[:])
+	wipeBytes(db.HMACKey[:])
+	wipeBytes(db.Salt[:])
+	wipeBytes(db.StretchedKey[:])
+	wipeBytes(db.Header.LastSaveBy)
+	wipeBytes(db.Header.LastSaveHost)
+	wipeBytes(db.Header.LastSaveUser)
+	for _, field := range db.Header.UnknownFields {
+		wipeBytes(field.Data)
+	}
+	for key, record := range db.Records {
+		wipeBytes(record.TwoFactorKey)
+		for _, field := range record.UnknownFields {
+			wipeBytes(field.Data)
+		}
+		delete(db.Records, key)
+	}
+	*db = V3{}
+}
+
 // Equal compares the content of two V3 DBs except for LastSave fields and fields with transient or changing values.
 // Groups Returns an slice of strings which match all groups used by records in the DB
 func (db V3) Groups() []string {

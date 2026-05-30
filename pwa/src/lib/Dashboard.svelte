@@ -10,7 +10,7 @@
     copyFieldToClipboard, copyCustomFieldToClipboard, copyTOTP as wasmCopyTOTP,
     getTOTP, getFieldValue, getCustomFieldValue,
   } from '../wasm.js'
-  import { addSecondaryCredential, removeSecondaryCredential } from './secondaryVaults.js'
+  import { addSecondaryCredential, updateSecondaryHandle, removeSecondaryCredential } from './secondaryVaults.js'
   import { getSwitchboardUrl, getCrossProfileEnabled } from './delegates.js'
   import { isBiometricEnrolledForFile, unlockWithBiometric } from './biometric.js'
   import { getDelegates, verifyDelegateById, recordFill } from './delegates.js'
@@ -753,7 +753,7 @@
       ))
       secondaryHead[sv.uuid] = data.slice(72, 152)
       try { secondaryModified[sv.uuid] = (await handle.getFile()).lastModified } catch {}
-      try { await addSecondaryCredential(dbKey, filename, sv.uuid, sv.masterPassword, handle) } catch {}
+      try { await updateSecondaryHandle(dbKey, sv.uuid, filename, handle) } catch {}
       showToast('Saved to ' + (sv.name || filename), null, 2000)
     } else {
       const fname = sv.filename ?? 'vault'
@@ -1241,6 +1241,11 @@
     onclosed()
   }
 
+  function closeSecondarySetup() {
+    secondarySetup = null
+    sheetOpen = true
+  }
+
   async function lockSecondaryVault(vaultUuid) {
     await removeSecondaryCredential(dbKey, vaultUuid)
     closeDatabase(vaultUuid)
@@ -1303,13 +1308,16 @@
 
   async function confirmSecondarySetup() {
     if (!secondarySetup?.password) return
-    secondarySetup = { ...secondarySetup, busy: true, error: '' }
+    const setup = secondarySetup
+    let secondaryPassword = setup.password
+    secondarySetup = { ...setup, password: '', busy: true, error: '' }
 
     // Biometric confirmation gesture if enrolled (proves identity without exposing master password)
-    if (secondarySetup.needsAuth) {
+    if (setup.needsAuth) {
       try {
         await unlockWithBiometric($selectedFile?.name ?? '')
       } catch (e) {
+        secondaryPassword = ''
         secondarySetup = { ...secondarySetup, busy: false,
           error: e.name === 'NotAllowedError' ? 'Authentication cancelled.' : 'Authentication failed: ' + e.message }
         return
@@ -1319,17 +1327,17 @@
     try {
       let secondaryUuid
       if (_secondaryHandle) {
-        secondaryUuid = await loadVaultFile(_secondaryHandle, secondarySetup.password)
+        secondaryUuid = await loadVaultFile(_secondaryHandle, secondaryPassword)
       } else {
         const buf = await _secondaryFallbackFile.arrayBuffer()
-        secondaryUuid = openDatabase(new Uint8Array(buf), secondarySetup.password)
+        secondaryUuid = openDatabase(new Uint8Array(buf), secondaryPassword)
       }
 
       if (secondaryUuid === dbKey) {
         // Don't closeDatabase here — same UUID means this IS the primary vault.
         // Closing it would remove the primary from WASM memory.
         secondarySetup = { ...secondarySetup, busy: false,
-          error: `"${secondarySetup.filename}" is already open as your primary vault and cannot also be added as a secondary vault.` }
+          error: `"${setup.filename}" is already open as your primary vault and cannot also be added as a secondary vault.` }
         return
       }
 
@@ -1337,7 +1345,7 @@
         // Don't closeDatabase here — this secondary is already in the WASM map.
         // Closing it would break the already-open secondary vault.
         secondarySetup = { ...secondarySetup, busy: false,
-          error: `"${secondarySetup.filename}" is already open as a secondary vault.` }
+          error: `"${setup.filename}" is already open as a secondary vault.` }
         return
       }
 
@@ -1348,18 +1356,17 @@
         try { const w = await _secondaryHandle.createWritable(); await w.abort(); readonly = false } catch {}
       }
 
-      await addSecondaryCredential(dbKey, secondarySetup.filename, secondaryUuid, secondarySetup.password, _secondaryHandle)
+      await addSecondaryCredential(dbKey, setup.filename, secondaryUuid, secondaryPassword, _secondaryHandle)
 
       secondaryVaults.update(vs => {
         const filtered = vs.filter(v => v.uuid !== secondaryUuid)
         return [...filtered, {
           handle: _secondaryHandle,
-          name: info?.name || secondarySetup.filename,
-          filename: secondarySetup.filename,
+          name: info?.name || setup.filename,
+          filename: setup.filename,
           readonly,
           items: items.map(i => ({ ...i, vaultUuid: secondaryUuid })),
           uuid: secondaryUuid,
-          masterPassword: secondarySetup.password,
         }]
       })
       if (_secondaryHandle) {
@@ -1370,6 +1377,8 @@
       sheetOpen = true
     } catch (e) {
       secondarySetup = { ...secondarySetup, busy: false, error: 'Wrong password or invalid file.' }
+    } finally {
+      secondaryPassword = ''
     }
   }
 
@@ -1546,8 +1555,8 @@
 
 {#if secondarySetup}
   <div class="modal-overlay" role="presentation"
-    onclick={e => { if (!secondarySetup.busy) secondarySetup = null; sheetOpen = true }}
-    onkeydown={e => { if (e.key === 'Escape' && !secondarySetup.busy) { secondarySetup = null; sheetOpen = true } }}>
+    onclick={e => { if (!secondarySetup.busy) closeSecondarySetup() }}
+    onkeydown={e => { if (e.key === 'Escape' && !secondarySetup.busy) closeSecondarySetup() }}>
     <div class="modal" role="dialog" aria-modal="true" tabindex="-1"
       onclick={e => e.stopPropagation()} onkeydown={e => e.stopPropagation()}>
       <div class="modal-title">Unlock {secondarySetup.filename}</div>
@@ -1573,7 +1582,7 @@
         <button class="btn btn-primary" disabled={!secondarySetup.password || secondarySetup.busy} onclick={confirmSecondarySetup}>
           {secondarySetup.busy ? 'Unlocking…' : secondarySetup.needsAuth ? 'Unlock & verify identity' : 'Unlock'}
         </button>
-        <button class="btn btn-ghost" disabled={secondarySetup.busy} onclick={() => { secondarySetup = null; sheetOpen = true }}>Cancel</button>
+        <button class="btn btn-ghost" disabled={secondarySetup.busy} onclick={closeSecondarySetup}>Cancel</button>
       </div>
     </div>
   </div>

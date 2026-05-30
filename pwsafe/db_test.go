@@ -35,6 +35,37 @@ func TestKeys(t *testing.T) {
 	assert.Equal(t, createdHMACKey, db.HMACKey)
 }
 
+func TestWipeClearsMutableSecretMaterial(t *testing.T) {
+	db := NewV3("test", "password")
+	db.EncryptionKey = [32]byte{1}
+	db.HMACKey = [32]byte{2}
+	db.HMAC = [32]byte{3}
+	db.CBCIV = [16]byte{4}
+	db.Header.LastSaveBy = []byte{5, 6}
+	db.Header.UnknownFields = []unknownField{{ID: 0xfe, Data: []byte{7, 8}}}
+	db.Records["record"] = Record{
+		Title:        "record",
+		Password:     "password",
+		TwoFactorKey: []byte{9, 10},
+		UnknownFields: []unknownField{
+			{ID: 0xfd, Data: []byte{11, 12}},
+		},
+	}
+
+	headerBytes := db.Header.LastSaveBy
+	headerUnknown := db.Header.UnknownFields[0].Data
+	totp := db.Records["record"].TwoFactorKey
+	recordUnknown := db.Records["record"].UnknownFields[0].Data
+
+	db.Wipe()
+
+	assert.Equal(t, V3{}, *db)
+	assert.Equal(t, []byte{0, 0}, headerBytes)
+	assert.Equal(t, []byte{0, 0}, headerUnknown)
+	assert.Equal(t, []byte{0, 0}, totp)
+	assert.Equal(t, []byte{0, 0}, recordUnknown)
+}
+
 func TestInvalidFile(t *testing.T) {
 	_, err := OpenPWSafeFile("./db.go", "password")
 	assert.Equal(t, err, errors.New("file is not a valid Password Safe v3 file"))

@@ -109,6 +109,7 @@
       localStorage.setItem(offerKey, '1')
       mode = 'offer-biometric'
     } else {
+      password = ''
       onopened()
     }
   }
@@ -159,6 +160,7 @@
       error = 'Wrong password or invalid file.'
       console.error(e)
     } finally {
+      if (mode !== 'offer-biometric') password = ''
       busy = false
     }
   }
@@ -167,6 +169,7 @@
     // 1. Guard against re-entry
     if (busy) return; busy = true
     error = ''
+    let biometricPassword = null
 
     try {
       const fname = fileHandle?.name ?? fallbackFile?.name
@@ -184,7 +187,6 @@
       }
 
       // 3. Authenticate with Biometric
-      let biometricPassword
       try {
         biometricPassword = await unlockWithBiometric(fname)
       } catch (e) {
@@ -214,13 +216,11 @@
         vaultUuid = openDatabase(new Uint8Array(buf), biometricPassword)
       } catch (e) {
         console.error("[DEBUG] Decryption failed. Error:", e)
-        biometricPassword = null
         await clearBiometricForFile(fname)
         biometricEnrolled = false
         error = 'Biometric/PIN unlock is out of date — please enter your master password.'
         return
       }
-      biometricPassword = null
 
       // 6. UI/State updates
       dbItems.set(getDatabaseData(vaultUuid))
@@ -238,22 +238,29 @@
       console.error(e)
       error = 'An unexpected error occurred.'
     } finally {
+      biometricPassword = null
       busy = false
     }
   }
 
   async function enableBiometric() {
+    if (!password) {
+      error = 'Enable biometric/PIN unlock later from vault settings.'
+      return
+    }
     busy = true; error = ''
     try {
       const info = getDatabaseInfo($selectedFile?.uuid ?? '')
       const fname = fallbackFile?.name ?? fileHandle?.name
       await enrollBiometric(password, info?.uuid, fname)
       biometricEnrolled = true
+      password = ''
       onopened()
     } catch (e) {
       error = e.message
       console.error(e)
     } finally {
+      password = ''
       busy = false
     }
   }
@@ -265,10 +272,12 @@
       const vaultUuid = createDatabase(password)
       dbItems.set(getDatabaseData(vaultUuid))
       selectedFile.set({ handle: null, name: 'New vault', uuid: vaultUuid })
+      password = ''
       onopened()
     } catch (e) {
       error = e.message
     } finally {
+      password = ''
       busy = false
     }
   }
@@ -280,7 +289,12 @@
       const opened = []
       for (const cred of credentials) {
         const handle = cred.handle
-        if (!handle) continue // no stored handle; user must manually re-link
+        let secondaryPassword = cred.masterPassword
+        cred.masterPassword = ''
+        if (!handle) {
+          secondaryPassword = ''
+          continue // no stored handle; user must manually re-link
+        }
         try {
           if (handle.requestPermission) {
             let perm = await handle.requestPermission({ mode: 'readwrite' })
@@ -289,7 +303,7 @@
               if (perm !== 'granted') continue
             }
           }
-          const vaultUuid = await loadVaultFile(handle, cred.masterPassword)
+          const vaultUuid = await loadVaultFile(handle, secondaryPassword)
           if (vaultUuid !== cred.vaultUuid) { closeDatabase(vaultUuid); continue }
           const info  = getDatabaseInfo(vaultUuid)
           const items = getDatabaseData(vaultUuid)
@@ -299,9 +313,12 @@
             handle, name: info?.name || handle.name,
             filename: handle.name, readonly,
             items: items.map(i => ({ ...i, vaultUuid })),
-            uuid: vaultUuid, masterPassword: cred.masterPassword,
+            uuid: vaultUuid,
           })
-        } catch {}
+        } catch {
+        } finally {
+          secondaryPassword = ''
+        }
       }
       secondaryVaults.set(opened)
     } catch {}
@@ -430,11 +447,11 @@
 
       {#if error}<div class="unlock-error">{error}</div>{/if}
 
-      <button class="btn btn-primary" disabled={busy} onclick={enableBiometric}>
+      <button class="btn btn-primary" disabled={!password || busy} onclick={enableBiometric}>
         {busy ? 'Setting up…' : 'Enable biometric/PIN unlock'}
       </button>
 
-      <button class="btn-text muted" onclick={onopened}>Not now</button>
+      <button class="btn-text muted" onclick={() => { password = ''; onopened() }}>Not now</button>
     </div>
   </div>
 

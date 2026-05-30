@@ -60,6 +60,8 @@ func openDB(this js.Value, args []js.Value) interface{} {
 	uuid := vaultUUID(newDB)
 	if _, exists := databases[uuid]; !exists {
 		databases[uuid] = newDB
+	} else {
+		newDB.Wipe()
 	}
 
 	result, _ := json.Marshal(map[string]string{"uuid": uuid})
@@ -73,6 +75,9 @@ func createDatabase(this js.Value, args []js.Value) interface{} {
 	}
 	newDB := pwsafe.NewV3("", args[0].String())
 	uuid := vaultUUID(newDB)
+	if old, exists := databases[uuid]; exists {
+		old.Wipe()
+	}
 	databases[uuid] = newDB
 	result, _ := json.Marshal(map[string]string{"uuid": uuid})
 	return string(result)
@@ -83,7 +88,11 @@ func closeDB(this js.Value, args []js.Value) interface{} {
 	if len(args) != 1 {
 		return "invalid arguments: expected (vaultUuid)"
 	}
-	delete(databases, args[0].String())
+	uuid := args[0].String()
+	if db, ok := databases[uuid]; ok {
+		db.Wipe()
+		delete(databases, uuid)
+	}
 	return nil
 }
 

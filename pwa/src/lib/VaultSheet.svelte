@@ -49,6 +49,13 @@
     showSetupPw = false
   }
 
+  function closeSetup() {
+    setupMode = false
+    setupPassword = ''
+    setupError = ''
+    showSetupPw = false
+  }
+
   function focusOnMount(node) {
     setTimeout(() => node.focus(), 0)
   }
@@ -66,10 +73,9 @@
       }
       await enrollBiometric(setupPassword, info?.uuid, filename)
       biometricEnrolled = true
-      setupMode = false
-      setupPassword = ''
-      showSetupPw = false
+      closeSetup()
     } catch (e) {
+      setupPassword = ''
       if (e.name === 'NotAllowedError') {
         setupError = 'Setup cancelled.'
       } else if (e.message?.includes('decrypt')) {
@@ -924,8 +930,8 @@
 <!-- ── Biometric setup modal ───────────────────────────────────────────────── -->
 {#if setupMode}
   <div class="modal-overlay" role="presentation"
-    onclick={e => { e.stopPropagation(); setupMode = false; setupError = '' }}
-    onkeydown={e => { if (e.key === 'Escape') { setupMode = false; setupError = '' } }}>
+    onclick={e => { e.stopPropagation(); closeSetup() }}
+    onkeydown={e => { if (e.key === 'Escape') closeSetup() }}>
     <div class="modal" role="dialog" aria-modal="true" tabindex="-1" onclick={e => e.stopPropagation()} onkeydown={e => e.stopPropagation()}>
       <div class="modal-title">Enable biometric/PIN unlock</div>
       <p class="modal-desc muted">Confirm your master password to set up biometric unlock.</p>
@@ -943,7 +949,7 @@
       </div>
       {#if setupError}<div class="unlock-error" style="font-size:13px">{setupError}</div>{/if}
       <div class="modal-actions">
-        <button class="btn btn-ghost" onclick={() => { setupMode = false; setupError = '' }}>Cancel</button>
+        <button class="btn btn-ghost" onclick={closeSetup}>Cancel</button>
         <button class="btn btn-primary" disabled={!setupPassword || setupBusy} onclick={doSetup}>
           {setupBusy ? 'Setting up…' : 'Enable'}
         </button>

@@ -13,6 +13,7 @@ async function load()    { return (await get(STORAGE_KEY)) ?? {} }
 async function save(all) { await set(STORAGE_KEY, all) }
 
 // Returns [{filename, vaultUuid, handle, masterPassword}] for the given primary vault.
+// Callers must treat masterPassword as transient and avoid storing it in app state.
 export async function getSecondaryCredentials(primaryVaultUuid) {
   const all     = await load()
   const entries = all[primaryVaultUuid] ?? []
@@ -38,6 +39,24 @@ export async function addSecondaryCredential(primaryVaultUuid, filename, vaultUu
     if (e.name === 'DataCloneError') {
       all[primaryVaultUuid] = all[primaryVaultUuid].map(entry =>
         entry.vaultUuid === vaultUuid ? { ...entry, handle: null } : entry
+      )
+      await save(all)
+    } else throw e
+  }
+}
+
+export async function updateSecondaryHandle(primaryVaultUuid, secondaryVaultUuid, filename, handle) {
+  const all = await load()
+  if (!all[primaryVaultUuid]) return
+  all[primaryVaultUuid] = all[primaryVaultUuid].map(e =>
+    e.vaultUuid === secondaryVaultUuid ? { ...e, filename, handle } : e
+  )
+  try {
+    await save(all)
+  } catch (e) {
+    if (e.name === 'DataCloneError') {
+      all[primaryVaultUuid] = all[primaryVaultUuid].map(entry =>
+        entry.vaultUuid === secondaryVaultUuid ? { ...entry, handle: null } : entry
       )
       await save(all)
     } else throw e
