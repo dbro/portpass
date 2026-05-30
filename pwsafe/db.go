@@ -30,6 +30,11 @@ type V3 struct {
 	StretchedKey  [sha256.Size]byte
 }
 
+const (
+	defaultStretchIterations uint32 = 262144
+	maxStretchIterations     uint32 = 10_000_000
+)
+
 // NewV3 - create and initialize a new pwsafe.V3 db
 func NewV3(name, password string) *V3 {
 	var db V3
@@ -167,12 +172,19 @@ func (db V3) Search(query string, mode int) []string {
 // SetPassword Sets the password that will be used to encrypt the file on next save
 func (db *V3) SetPassword(pw string) error {
 	// First recalculate the Salt and set iter
-	db.Iter = 262144
+	db.Iter = defaultStretchIterations
 	if _, err := rand.Read(db.Salt[:]); err != nil {
 		return err
 	}
 	db.calculateStretchKey(pw)
 	db.LastMod = time.Now()
+	return nil
+}
+
+func validateStretchIterations(iter uint32) error {
+	if iter == 0 || iter > maxStretchIterations {
+		return fmt.Errorf("invalid stretch iteration count %d", iter)
+	}
 	return nil
 }
 
@@ -205,6 +217,9 @@ func (db *V3) calculateHMAC(unencrypted []byte) {
 
 // calculateStretchKey Using the db Salt and Iter along with the passwd calculate the stretch key
 func (db *V3) calculateStretchKey(passwd string) {
+	if err := validateStretchIterations(db.Iter); err != nil {
+		panic(err)
+	}
 	iterations := int(db.Iter)
 	salted := append([]byte(passwd), db.Salt[:]...)
 	defer func() {

@@ -1,10 +1,13 @@
 package pwsafe
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -140,6 +143,21 @@ func TestDBModifications(t *testing.T) {
 func TestBadPassword(t *testing.T) {
 	_, err := OpenPWSafeFile("./test_dbs/simple.dat", "badpass")
 	assert.Equal(t, err, errors.New("invalid password"))
+}
+
+func TestRejectsInvalidStretchIterations(t *testing.T) {
+	for _, iter := range []uint32{0, maxStretchIterations + 1} {
+		var buf bytes.Buffer
+		buf.WriteString("PWS3")
+		buf.Write(make([]byte, 32))
+		assert.NoError(t, binary.Write(&buf, binary.LittleEndian, iter))
+
+		var db V3
+		_, err := db.Decrypt(bytes.NewReader(buf.Bytes()), "password")
+		if assert.Error(t, err) {
+			assert.True(t, strings.Contains(err.Error(), "invalid stretch iteration count"))
+		}
+	}
 }
 
 func TestRecordFieldVariations_EmptyFields(t *testing.T) {

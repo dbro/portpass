@@ -35,6 +35,9 @@ func (db *V3) Decrypt(reader io.Reader, passwd string) (int, error) {
 	if err := binary.Read(cr, binary.LittleEndian, &db.Iter); err != nil {
 		return cr.BytesRead, err
 	}
+	if err := validateStretchIterations(db.Iter); err != nil {
+		return cr.BytesRead, err
+	}
 
 	// Verify the password
 	db.calculateStretchKey(passwd)
