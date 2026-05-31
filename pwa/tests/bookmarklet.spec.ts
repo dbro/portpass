@@ -17,10 +17,18 @@ const LOGIN_FORM_HTML = `<!doctype html><html><body>
 
 // Creates a paired autofill profile via the VaultSheet UI and returns its
 // bookmarklet URL. The URL must not contain private key material.
+async function expandAutofillSetup(portpass: Page) {
+  const addBookmarklet = portpass.getByRole('button', { name: '+ Add same-profile bookmarklet' })
+  if (!await addBookmarklet.isVisible()) {
+    await portpass.getByRole('button', { name: '+ Create a new autofill bookmarklet' }).click()
+  }
+}
+
 async function createDelegateBookmarklet(portpass: Page): Promise<string> {
   await portpass.locator('.vault-pill').click()
   await expect(portpass.locator('.vault-settings-body')).toBeVisible()
 
+  await expandAutofillSetup(portpass)
   await portpass.getByRole('button', { name: '+ Add same-profile bookmarklet' }).click()
   await portpass.getByPlaceholder('e.g. Chrome — work profile').fill('test')
   await portpass.locator('.vs-bookmarklet-chip:not(.chip-inactive)').waitFor({ timeout: 5000 })
@@ -185,6 +193,7 @@ test.describe('Bookmarklet — autofill popup phases', () => {
     expect(token).toMatch(/^ppair1_/)
 
     await portpass.locator('.vault-pill').click()
+    await expandAutofillSetup(portpass)
     await expect(portpass.getByText('In your everyday browser')).toBeVisible()
     await portpass.getByRole('button', { name: '+ Pair everyday profile' }).click()
     await portpass.getByPlaceholder('ppair1_...').fill(token)
@@ -197,6 +206,7 @@ test.describe('Bookmarklet — autofill popup phases', () => {
   test('wrong autofill pairing token is rejected', async ({ context }) => {
     const { portpass } = await setupAutofillTest(context)
     await portpass.locator('.vault-pill').click()
+    await expandAutofillSetup(portpass)
     await portpass.getByRole('button', { name: '+ Pair everyday profile' }).click()
     await portpass.getByPlaceholder('ppair1_...').fill('ppair1_not-a-token')
     await expect(portpass.locator('.unlock-error')).toContainText('Pairing token')
@@ -359,6 +369,9 @@ test.describe('Bookmarklet — autofill popup phases', () => {
     // Clicking the row transitions to waiting.
     await popup.locator('.rec-row').first().click()
     await expect(popup.locator('.selected-record-row')).toBeVisible({ timeout: 5000 })
+    await expect(popup.getByRole('button', { name: 'Choose a different password' })).toBeVisible()
+    await popup.getByRole('button', { name: 'Choose a different password' }).click()
+    await expect(popup.locator('.rec-row')).toBeVisible()
   })
 
   test('record name and URL have title attributes for overflow tooltip', async ({ context }) => {
@@ -474,6 +487,11 @@ test.describe('Bookmarklet — autofill popup phases', () => {
     await expect(notes).toContainText('••••••••')
     await notes.click()
     await expect(popup.locator('.pp-field-row', { hasText: 'Notes' })).toContainText('private note')
+    const rowBox = await notes.boundingBox()
+    const labelBox = await notes.locator('.pp-field-label').boundingBox()
+    const valueBox = await notes.locator('.pp-notes-value').boundingBox()
+    expect(valueBox?.y).toBeGreaterThan(labelBox?.y ?? 0)
+    expect(valueBox?.width).toBeGreaterThan((rowBox?.width ?? 0) - 40)
     await expect(popup.locator('.pp-field-row.active')).toHaveCount(0)
   })
 

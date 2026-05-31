@@ -48,6 +48,8 @@
   let hasDelegates = $state(false)
   let searchWasActive = false
   let preSearchSelection = null
+  let autofillNearMatchKeys = $state(null)
+  let autofillNearMatchUrl = $state('')
 
   $effect(() => {
     void $delegatesVersion
@@ -418,6 +420,11 @@
           if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo }))
           return
         }
+        if (msg.msgType === 'view-near-matches') {
+          showAutofillNearMatches(msg.url || '')
+          if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo }))
+          return
+        }
         if (msg.msgType === 'save-url') {
           try { await autofillSaveURL(msg.uuid, msg.vaultUuid || null, msg.url) } catch {}
           if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo }))
@@ -710,6 +717,34 @@
       console.error(e)
       showToast('Could not load record.')
     }
+  }
+
+  function autofillRecordKey(uuid, vaultUuid = null) {
+    return `${vaultUuid || ''}:${uuid}`
+  }
+
+  function clearAutofillNearMatches() {
+    autofillNearMatchKeys = null
+    autofillNearMatchUrl = ''
+  }
+
+  function showAutofillNearMatches(url) {
+    if ((isEditing && editDirty) || (sheetOpen && vaultDirty)) {
+      showToast('Finish editing before showing autofill near matches.')
+      return
+    }
+    const matches = autofillFindRecords(url).filter(r => r.matchType !== 'exact')
+    autofillNearMatchKeys = matches.map(r => autofillRecordKey(r.uuid, r.vaultUuid))
+    autofillNearMatchUrl = canonicalURL(url)
+    query = ''
+    clearTimeout(_debounceTimer)
+    debouncedQuery = ''
+    sheetOpen = false
+    vaultDirty = false
+    isEditing = false
+    isNew = false
+    editDirty = false
+    loadRecordSelection(null)
   }
 
   function startEdit() {
@@ -1426,6 +1461,10 @@
     function sortedEntries(items, vaultUuid) {
       let list = items
       if (pendingDeleteUUID) list = list.filter(i => i.uuid !== pendingDeleteUUID)
+      if (autofillNearMatchKeys) {
+        const included = new Set(autofillNearMatchKeys)
+        list = list.filter(i => included.has(autofillRecordKey(i.uuid, vaultUuid)))
+      }
       if (debouncedQuery.trim()) {
         const result = vaultSearchResults.get(vaultUuid ?? '')
         if (result) {
@@ -1554,6 +1593,7 @@
     const inSearch = e.target === searchInput
 
     if (e.key === 'Escape') {
+      if (autofillNearMatchKeys) { clearAutofillNearMatches(); return }
       if (showHelp) { showHelp = false; return }
       if (inSearch && query) { query = ''; clearTimeout(_debounceTimer); debouncedQuery = ''; return }
       if (inSearch) { searchInput?.blur(); return }
@@ -1697,17 +1737,27 @@
       type="text"
       placeholder="Search vault"
       bind:value={query}
+      oninput={clearAutofillNearMatches}
       bind:this={searchInput}
       use:focusOnMount
     />
     {#if query}
-      <button class="icon-btn-flat" onclick={() => { query = ''; clearTimeout(_debounceTimer); debouncedQuery = '' }} aria-label="Clear search">
+      <button class="icon-btn-flat" onclick={() => { clearAutofillNearMatches(); query = ''; clearTimeout(_debounceTimer); debouncedQuery = '' }} aria-label="Clear search">
         <Icon name="x" size={16} stroke="var(--text-soft)"/>
       </button>
     {/if}
   </div>
 
-  <RecordList query={debouncedQuery} {selectedUUID} {selectedVaultUuid} {collapseSeq} excludeUUID={pendingDeleteUUID} storageKey={dbKey} primaryVaultName={vaultName} ontap={selectRecord} oncopy={copyToClipboard} oncopytotp={copyTOTPForUUID} onwasmcopyfield={copyFieldViaWasm} onwasmcopycustomfield={copyCustomFieldViaWasm}/>
+  {#if autofillNearMatchKeys}
+    <div class="autofill-near-match-filter muted">
+      Near URL matches for {autofillNearMatchUrl}
+      <button class="icon-btn-flat" onclick={clearAutofillNearMatches} aria-label="Clear autofill near matches">
+        <Icon name="x" size={14} stroke="var(--text-soft)"/>
+      </button>
+    </div>
+  {/if}
+
+  <RecordList query={debouncedQuery} includeKeys={autofillNearMatchKeys} {selectedUUID} {selectedVaultUuid} {collapseSeq} excludeUUID={pendingDeleteUUID} storageKey={dbKey} primaryVaultName={vaultName} ontap={selectRecord} oncopy={copyToClipboard} oncopytotp={copyTOTPForUUID} onwasmcopyfield={copyFieldViaWasm} onwasmcopycustomfield={copyCustomFieldViaWasm}/>
 
   <!-- FAB (mobile) -->
   <button class="fab" onclick={startNew} aria-label="New">
@@ -1852,6 +1902,28 @@
 </div>
 
 <style>
+  .autofill-near-match-filter {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 7px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-2);
+    font-size: 12px;
+  }
+
+  :global(.vault-app.is-desktop) .autofill-near-match-filter {
+    grid-column: 1;
+    grid-row: 3;
+    align-self: start;
+    z-index: 2;
+  }
+
+  :global(.vault-app.is-desktop) .autofill-near-match-filter + :global(.list-collapsible) {
+    padding-top: 35px;
+  }
+
   .help-backdrop {
     position: fixed;
     inset: 0;

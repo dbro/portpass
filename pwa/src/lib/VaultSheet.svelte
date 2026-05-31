@@ -188,6 +188,7 @@
   let pairDelegateError = $state('')
   let pairDelegatePreview = $state(null)
   let pairDelegateBusy = $state(false)
+  let autofillSetupOpen = $state(false)
 
   let chipUsed   = $derived(chipDragged || chipLinked)
   let canUseChip = $derived(!!newDelegateName.trim() && !!newDelegatePubKeySpki)
@@ -518,9 +519,6 @@
   {#if bookmarkletsSupported}
   <div class="vault-section">
     <div class="vault-section-title">AUTOFILL</div>
-    <p class="muted" style="font-size:14px;margin:0 0 14px;line-height:1.5">
-      Fill logins straight from this vault. Set up either method — or both.
-    </p>
     {#if delegates.length > 0}
       <div class="delegate-list">
         {#each delegates as d}
@@ -537,6 +535,13 @@
         {/each}
       </div>
     {/if}
+    <button class="vs-autofill-setup-toggle" onclick={() => autofillSetupOpen = !autofillSetupOpen}>
+      {autofillSetupOpen ? '− Hide autofill bookmarklet setup' : '+ Create a new autofill bookmarklet'}
+    </button>
+    {#if autofillSetupOpen}
+    <p class="muted" style="font-size:14px;margin:0 0 14px;line-height:1.5">
+      Fill logins straight from this vault. Set up either method — or both.
+    </p>
     <div class="vs-autofill-options">
       <div class="vs-autofill-card">
         <div class="vs-option-heading-row">
@@ -624,6 +629,7 @@
         </div>
       {/if}
     </div>
+    {/if}
   </div>
   {/if}
 
@@ -1404,6 +1410,21 @@
     font-size: 13px;
     padding: 0;
   }
+
+  .vs-autofill-setup-toggle {
+    display: block;
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--accent);
+    cursor: pointer;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    text-align: left;
+  }
+  .vs-autofill-setup-toggle:hover { text-decoration: underline; }
 
   .delegate-advanced-body {
     margin-top: 12px;

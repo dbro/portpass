@@ -212,10 +212,16 @@ body {
 /* ── Selected credential panel ── */
 .pp-record-head {
   display:flex; align-items:center; justify-content:space-between;
-  min-height:40px; padding:0 18px 0 38px; background:var(--accent-soft);
+  min-height:40px; padding:0 18px; background:var(--accent-soft);
   border-bottom:1px solid var(--border); flex-shrink:0;
 }
-.pp-record-title { font-size:13px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.pp-record-back {
+  display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  width:24px; height:24px; margin-right:4px; padding:0; border:0; border-radius:5px;
+  color:var(--accent); background:none; cursor:pointer;
+}
+.pp-record-back:hover { background:var(--surface-2) }
+.pp-record-title { flex:1; min-width:0; font-size:13px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
 .pp-view-record {
   display:flex; align-items:center; gap:5px; color:var(--accent); border:0; background:none;
   font:inherit; font-size:12px; font-weight:700; cursor:pointer;
@@ -258,8 +264,11 @@ body {
 .pp-field-row.active { padding:0 }
 .pp-field-row.active .pp-field-main { padding:0 17px; background:var(--accent-soft) }
 .pp-field-row.active .pp-arm { min-height:42px }
-.pp-notes .pp-field-main { align-items:flex-start; padding-top:11px }
-.pp-notes-value { white-space:pre-wrap; line-height:1.4; max-height:90px; overflow:auto }
+.pp-notes .pp-field-main { min-height:36px; padding-top:7px }
+.pp-notes-value {
+  display:block; width:100%; max-width:none; padding:0 0 9px;
+  white-space:pre-wrap; line-height:1.4; max-height:90px; overflow:auto;
+}
 .pp-totp-bar { height:2px; background:var(--border); overflow:hidden }
 .pp-totp-bar-fill { height:100%; background:var(--accent); transition:width 1s linear }
 </style>
@@ -347,12 +356,12 @@ body {
   var SVG_WARN   = '<svg width="13" height="13"' + _S + ' stroke-width="1.6"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>'
   var SVG_SEARCH_ICO = '<svg width="16" height="16"' + _S + ' stroke-width="1.6"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.3-4.3"/></svg>'
   var SVG_X_ICO      = '<svg width="16" height="16"' + _S + ' stroke-width="1.6"><path d="M6 6l12 12M18 6 6 18"/></svg>'
+  var SVG_BACK       = '<svg width="15" height="15"' + _S + ' stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>'
   var SVG_PENCIL = '<svg width="13" height="13"' + _S + ' stroke-width="1.6"><path d="M4 20h4l10-10-4-4L4 16v4Z"/><path d="m14 6 4 4"/></svg>'
   var SVG_UNDO   = '<svg width="13" height="13"' + _S + ' stroke-width="1.6"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>'
   var SVG_COPY   = '<svg width="15" height="15"' + _S + ' stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>'
   var SVG_EYE    = '<svg width="15" height="15"' + _S + ' stroke-width="1.8"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="2.5"/></svg>'
   var SVG_EYE_OFF= '<svg width="15" height="15"' + _S + ' stroke-width="1.8"><path d="m3 3 18 18"/><path d="M10.6 6.2A11 11 0 0 1 12 6c6.5 0 10 6 10 6a17 17 0 0 1-3.1 3.6"/><path d="M6.6 6.7C3.6 8.5 2 12 2 12s3.5 6 10 6a10 10 0 0 0 3.4-.6"/></svg>'
-  var SVG_EXTERNAL='<svg width="14" height="14"' + _S + ' stroke-width="2"><path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>'
   var SVG_CHECK_SM = '<svg width="12" height="12"' + _S + ' stroke-width="2.2"><path d="m5 12 5 5L20 7"/></svg>'
   var SVG_CHECK_MD = '<svg width="24" height="24"' + _S + ' stroke-width="2"><path d="m5 12 5 5L20 7"/></svg>'
   // Large error icons (40px)
@@ -612,6 +621,9 @@ body {
       },
       viewRecord: function(uuid, vu) {
         return cpSignAndSend('view-record', { url: uuid, uuid: uuid, vaultUuid: vu || null })
+      },
+      viewNearMatches: function() {
+        return cpSignAndSend('view-near-matches', { url: currentUrl })
       },
       saveUrl: function(uuid, vu) { wsSaveUrl(uuid, vu) },
       notifyFilled: function() { wsNotifyFilled() }
@@ -1385,6 +1397,7 @@ body {
     armedCode = 'sequence'
     showWaiting(null)
     $transport.fill(rec.uuid, rec.vaultUuid).then(function(cred) {
+      if (chosen !== rec) return
       if (!cred) { sendError('Could not get credentials'); return }
       pendingCredentials = cred
       showWaiting(cred)
@@ -1515,7 +1528,7 @@ body {
     bar.className = 'pp-view-link-bar'
     var btn = document.createElement('button')
     btn.className = 'pp-view-link'
-    btn.textContent = 'Show in Portpass Tab'
+    btn.textContent = 'Select in Portpass'
     btn.onclick = function() {
       var p = (chosen && $transport) ? $transport.viewRecord(chosen.uuid, chosen.vaultUuid || null) : null
       if (p && p.then) p.catch(function(){}).then(function() { window.close() })
@@ -1528,12 +1541,20 @@ body {
   function makeCredentialHead() {
     var head = document.createElement('div')
     head.className = 'pp-record-head selected-record-row'
+    if (previousPhase) {
+      var back = document.createElement('button')
+      back.className = 'pp-record-back'
+      back.setAttribute('aria-label', 'Choose a different password')
+      back.innerHTML = SVG_BACK
+      back.onclick = function(e) { e.stopPropagation(); goBack() }
+      head.appendChild(back)
+    }
     var title = document.createElement('div')
     title.className = 'pp-record-title'
     title.textContent = chosen.title
     var view = document.createElement('button')
     view.className = 'pp-view-record'
-    view.innerHTML = 'View ' + SVG_EXTERNAL
+    view.textContent = 'Select in Portpass'
     view.onclick = function() {
       var p = $transport.viewRecord(chosen.uuid, chosen.vaultUuid || null)
       if (p && p.catch) p.catch(function(){})
@@ -1586,7 +1607,8 @@ body {
     var value = document.createElement('div')
     value.className = 'pp-field-value' + (field.notes ? ' pp-notes-value' : '')
     value.textContent = field.sensitive && !field.revealed ? '••••••••' : (field.value || '')
-    main.appendChild(label); main.appendChild(value)
+    main.appendChild(label)
+    if (!field.notes) main.appendChild(value)
     if (field.sensitive) {
       var eye = document.createElement('button')
       eye.className = 'pp-field-action'
@@ -1596,6 +1618,7 @@ body {
       main.appendChild(eye)
     }
     row.appendChild(main)
+    if (field.notes) row.appendChild(value)
     if (field.code === '2' && field.revealed && field.period) {
       var bar = document.createElement('div')
       bar.className = 'pp-totp-bar'
@@ -2031,8 +2054,17 @@ body {
       : 'No near matches were found.'
     var line2 = document.createElement('button')
     line2.className = 'pp-footer-btn'
-    line2.textContent = 'View in Portpass'
-    line2.onclick = function() { window.open(PORTPASS_URL, '_blank', 'noopener'); window.close() }
+    line2.textContent = 'Show in Portpass vault profile'
+    line2.onclick = function() {
+      line2.disabled = true
+      line2.textContent = 'Showing in Portpass…'
+      $transport.viewNearMatches().then(function() {
+        line2.textContent = 'Shown in Portpass. Switch to your vault profile to review.'
+      }).catch(function() {
+        line2.disabled = false
+        line2.textContent = 'Could not update Portpass. Try again.'
+      })
+    }
     ph.appendChild(line1)
     ph.appendChild(line2)
     $content.appendChild(ph)
