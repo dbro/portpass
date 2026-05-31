@@ -18,7 +18,7 @@ You decide where to store your vault file: on-device, self-hosted, or in a cloud
 * runs on all your devices: **mobile, tablet, and desktop**
 * stores each vault as a file on your device, for easy **sync/backup/sharing**
 * unlocks vault files using WebAuthn methods: **fingerprint, face recognition, and PIN**
-* **fills login forms on websites** using a bookmarklet in two clicks (desktop only). No browser extension with excessive permissions, no copying secrets to the system clipboard
+* **fills login forms on websites** using a bookmarklet picker (desktop only). No browser extension with excessive permissions, no copying secrets to the system clipboard
 * generates strong passwords
 * keeps a history of previous password values
 * generates **one-time codes (TOTP)** for two-factor authentication (2FA)
@@ -32,7 +32,7 @@ You decide where to store your vault file: on-device, self-hosted, or in a cloud
 
 ## Installation
 
-Portpass runs in a browser (Chrome, Safari, Firefox, Edge) and can be installed as anapp on your device. This style of installing a web page as an app icon is called a "Progressive Web App" or PWA. Installation involves visiting a web page and then telling your browser to create an app icon (like a bookmark) on your homescreen. This caches the Portpass code locally, and Portpass does not communicate with any remote servers. Safari, Chrome, and Edge browsers support installing as standalone webpage apps like this. There is no app store involved, and the process is the same on mobile and desktop.
+Portpass runs in a browser (Chrome, Safari, Firefox, Edge) and can be installed as an app on your device. This style of installing a web page as an app icon is called a "Progressive Web App" or PWA. Installation involves visiting a web page and then telling your browser to create an app icon (like a bookmark) on your homescreen. This caches the Portpass code locally, and Portpass does not communicate with any remote servers. Safari, Chrome, and Edge browsers support installing as standalone webpage apps like this. There is no app store involved, and the process is the same on mobile and desktop.
 
 * Open [https://dbro.github.io/portpass/](https://dbro.github.io/portpass/) in your browser
 * When prompted, tap "Add to Home Screen" (iOS/Android) or "Install" (desktop)
@@ -130,21 +130,23 @@ The Chrome browser routes biometric/PIN unlock setup through [Google Password Ma
 
 ## Autofill
 
-Portpass can fill login forms automatically to simplify your login experiences on desktop websites. This feature is only available on desktop browsers, and the settings are not visible when using a mobile device. It works using a bookmarklet that Portpass creates for you, and it avoids copying passwords into the clipboard where malicious apps could try to eavesdrop. The streamlined process involves **two clicks** and never leaves the browser window, and can handle situations with multiple URL matches and fuzzy matching.
+Portpass can fill login forms automatically to simplify your login experiences on desktop websites. This feature is only available on desktop browsers, and the settings are not visible when using a mobile device. It works using a bookmarklet that Portpass creates for you, and it avoids copying passwords into the clipboard where malicious apps could try to eavesdrop. The picker stays inside the browser window and can handle situations with multiple URL matches and fuzzy matching.
 
 1. Visit a webpage with a login form you want to fill in
-2. (optional) **Click on the first field** you want filled (e.g. username)
-3. **Click the bookmarklet** in your browser's bookmarks bar
+2. **Click the bookmarklet** in your browser's bookmarks bar
+3. Choose a matching password if Portpass does not select one automatically
+4. In the popup, leave **Autofill** selected or choose one field value to insert
+5. Click the destination field on the webpage
 
-Portpass finds matching vault entries by URL, lets you pick one if there are multiple matches, and fills the form fields following the record's Autofill sequence.
+Portpass finds matching vault entries by URL, lets you pick one if there are multiple matches, and fills the form fields following the record's Autofill sequence. You can also insert one field at a time, reveal sensitive values when needed, or search all unlocked vaults from the picker.
 
-<img src="https://github.com/user-attachments/assets/b8c833f3-39a8-412b-bbd3-ac957f675861" width="80%" alt="Screenshots of autofill operation">
+<img src="https://github.com/user-attachments/assets/46de7dff-c3e1-4dc4-a6e4-fd9088417033" width="80%" alt="Screenshots of autofill operation">
 
 ### How Autofill works
 
-A `javascript:` bookmarklet in your browser's bookmarks bar opens a small picker popup when you click it on a login page. The popup shows credentials that match the current page's URL. Click a record and Portpass fills the fields directly, following the record's Autofill sequence setting (default: fill username -> Tab -> fill password -> Submit).
+A `javascript:` bookmarklet in your browser's bookmarks bar opens a small picker popup when you click it on a login page. The popup shows credentials that match the current page's URL and automatically opens the credential panel when there is one exact match. The panel defaults to the record's Autofill sequence (fill username -> Tab -> fill password -> Submit), but you can select an individual field instead. After you click the destination field on the webpage, Portpass fills the selected value or sequence directly.
 
-The bookmarklet itself is not a secret and contains no private key. It opens Portpass's `autofill.html` popup, which holds a non-extractable signing key in Portpass-origin browser storage for that profile. Portpass stores the matching public key as a revocable autofill delegate. Requests are signed by the popup, and credential replies are encrypted to a fresh per-session key.
+The bookmarklet itself is not a secret and contains no private key. It opens Portpass's `autofill.html` popup, which holds a non-extractable signing key in Portpass-origin browser storage for that profile. Portpass stores the matching public key as a revocable autofill delegate. Requests are signed by the popup, and credential replies are encrypted to a fresh per-session key. The popup initially receives field metadata; sensitive values are requested only when you reveal them or insert them.
 
 No credentials pass through the clipboard at any point -- this matters on Windows and Linux, where clipboard contents can be read by any running process, and in browsers where extensions with clipboard permission could read a copied password before it is pasted.
 
@@ -152,30 +154,30 @@ In same-profile autofill, Portpass searches all unlocked vaults for URLs that ma
 
 In cross-profile autofill, credential release is stricter: Portpass only sends credentials over the relay for exact authorized URL matches. If there is no exact match, it returns metadata only, such as the count of near matches, and prompts you to view or update the record inside Portpass.
 
-### Setting up autofill
+### Setting up an autofill bookmarklet
 
 1. Open Portpass and unlock your vault.
 2. Open vault settings (tap the vault name in the top bar).
-3. Under **Autofill**, click **+ New bookmarklet**. Give it a name (e.g. "Chrome — main profile") and click **Create**.
-4. Drag the chip to your browser's bookmarks bar. If the bar is hidden, click **Copy link** and add the bookmark manually.
+3. Under **Autofill**, click **+ Create a new autofill bookmarklet**, then **+ Add same-profile bookmarklet**.
+4. Give it a name (e.g. "Chrome — main profile"), drag the chip to your browser's bookmarks bar, and click **Save and Close**. If the bar is hidden, click **Copy link** and add the bookmark manually.
+
+<img src="https://github.com/user-attachments/assets/468bd877-581e-4d07-a350-713953aac0c1" width="35%" alt="Screenshot of autofill sequence configuration">
 
 For cross-profile setup, start the [switchboard](https://github.com/dbro/switchboard) as a background service on your machine before using the bookmarklet. See the repo README for instructions to run switchboard automatically in the background.
 
 Cross-profile setup uses a separate pairing ceremony because the filling profile and the clean Portpass profile do not share browser storage:
 
-1. In the filling browser profile, open `https://dbro.github.io/portpass/autofill.html?pair=1`.
-2. Click **Create pairing token** and copy the `ppair1_...` token.
-3. In the clean Portpass profile, open vault settings -> **Autofill** -> **Add autofill profile**.
-4. Paste the token, compare the short pairing code, and click **Pair profile**.
-5. Drag or copy the generated bookmarklet into the filling profile's bookmarks bar.
+1. In the clean Portpass profile, open vault settings -> **Autofill** -> **+ Create a new autofill bookmarklet**.
+2. Under **Cross-profile pairing**, open the pairing-page URL shown in your everyday browser profile.
+3. In the everyday profile, name and install the bookmarklet, then copy the `ppair1_...` token.
+4. Back in the clean Portpass profile, click **+ Pair everyday profile**, paste the token, compare the short pairing code, and click **Pair everyday profile**.
 
-<img src="https://github.com/user-attachments/assets/677ce196-f282-4de6-8506-407905e077c4" width="35%" alt="Screenshot of autofill bookmarklet creation">
 
-### Autofill form field configuration
+### Autofill sequence configurations for websites
 
 Each entry in Portpass has an optional field called **Autofill sequence** that describes what and where to fill in the login form. It is based on keyboard actions, which most web login forms support natively. The visual representation shows each action as a separate unit:
 
-<img src="https://github.com/user-attachments/assets/904b1e76-d650-4673-9054-6d6a17ae431a" width="35%" alt="Screenshot of autofill sequence configuration">
+<img src="https://github.com/user-attachments/assets/677ce196-f282-4de6-8506-407905e077c4" width="35%" alt="Screenshot of autofill bookmarklet creation">
 
 The text representation is also possible, and is easier to document here. The default `\u\t\p\n` covers most sites and means: fill username, tab to the next field, fill password, press enter to submit. You can customise this for unusual login flows (e.g. single-field pages, sites that require an email, sites with two-factor code fields).
 

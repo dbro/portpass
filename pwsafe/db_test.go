@@ -35,6 +35,37 @@ func TestKeys(t *testing.T) {
 	assert.Equal(t, createdHMACKey, db.HMACKey)
 }
 
+func TestWipeClearsMutableSecretMaterial(t *testing.T) {
+	db := NewV3("test", "password")
+	db.EncryptionKey = [32]byte{1}
+	db.HMACKey = [32]byte{2}
+	db.HMAC = [32]byte{3}
+	db.CBCIV = [16]byte{4}
+	db.Header.LastSaveBy = []byte{5, 6}
+	db.Header.UnknownFields = []unknownField{{ID: 0xfe, Data: []byte{7, 8}}}
+	db.Records["record"] = Record{
+		Title:        "record",
+		Password:     "password",
+		TwoFactorKey: []byte{9, 10},
+		UnknownFields: []unknownField{
+			{ID: 0xfd, Data: []byte{11, 12}},
+		},
+	}
+
+	headerBytes := db.Header.LastSaveBy
+	headerUnknown := db.Header.UnknownFields[0].Data
+	totp := db.Records["record"].TwoFactorKey
+	recordUnknown := db.Records["record"].UnknownFields[0].Data
+
+	db.Wipe()
+
+	assert.Equal(t, V3{}, *db)
+	assert.Equal(t, []byte{0, 0}, headerBytes)
+	assert.Equal(t, []byte{0, 0}, headerUnknown)
+	assert.Equal(t, []byte{0, 0}, totp)
+	assert.Equal(t, []byte{0, 0}, recordUnknown)
+}
+
 func TestInvalidFile(t *testing.T) {
 	_, err := OpenPWSafeFile("./db.go", "password")
 	assert.Equal(t, err, errors.New("file is not a valid Password Safe v3 file"))
@@ -90,6 +121,55 @@ func TestSearchModeAllIncludesCustomFields(t *testing.T) {
 
 	hits = db.Search("hidden", 0)
 	assert.Len(t, hits, 0, "sensitive custom field value must not be searched")
+}
+
+func TestSearchAutoSelect(t *testing.T) {
+	db := NewV3("test", "pw")
+	firstFallback := db.SetRecord(Record{Title: "Alpha", Group: "A"})
+	notesMatch := db.SetRecord(Record{Title: "Bravo", Group: "B", Notes: "needle appears here"})
+	urlContains := db.SetRecord(Record{Title: "Charlie", Group: "C", URL: "https://www.example.com/login"})
+	urlStarts := db.SetRecord(Record{Title: "Delta", Group: "D", URL: "https://www.needle.example.com"})
+	titleContains := db.SetRecord(Record{Title: "My Needle", Group: "E"})
+	titleStarts := db.SetRecord(Record{Title: "Needle Keeper", Group: "F"})
+	ordered := []string{firstFallback, notesMatch, urlContains, urlStarts, titleContains, titleStarts}
+
+	uuid, score, ok := db.SearchAutoSelect("needle", ordered)
+	assert.True(t, ok)
+	assert.Equal(t, titleStarts, uuid)
+	assert.Equal(t, 10013, score)
+
+	uuid, score, ok = db.SearchAutoSelect("example", ordered[:4])
+	assert.True(t, ok)
+	assert.Equal(t, urlContains, uuid)
+	assert.Equal(t, 30011, score)
+
+	uuid, score, ok = db.SearchAutoSelect("appears", ordered[:2])
+	assert.True(t, ok)
+	assert.Equal(t, notesMatch, uuid)
+	assert.Equal(t, 50019, score)
+
+	uuid, score, ok = db.SearchAutoSelect("fallback", ordered[:1])
+	assert.True(t, ok, "a single filtered result should still auto-select")
+	assert.Equal(t, firstFallback, uuid)
+	assert.Equal(t, 60005, score)
+
+	_, _, ok = db.SearchAutoSelect("fallback", ordered[:2])
+	assert.False(t, ok, "multiple fallback-only candidates should not auto-select")
+}
+
+func TestSearchWithAutoSelect(t *testing.T) {
+	db := NewV3("test", "pw")
+	db.SetRecord(Record{Title: "Alpha", Group: "Shared"})
+	db.SetRecord(Record{Title: "Bravo", Group: "Shared"})
+
+	results := db.SearchWithAutoSelect("Shared", 0)
+	assert.Len(t, results.UUIDs, 2)
+	assert.Empty(t, results.AutoSelectUUID, "group-only multi-match should not auto-select")
+
+	results = db.SearchWithAutoSelect("Alpha", 0)
+	assert.Len(t, results.UUIDs, 1)
+	assert.NotEmpty(t, results.AutoSelectUUID)
+	assert.Equal(t, 10005, results.AutoSelectScore)
 }
 
 func TestSetRecordTimes(t *testing.T) {

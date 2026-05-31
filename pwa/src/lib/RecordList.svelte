@@ -5,7 +5,7 @@
   import { searchRecords, getRecordData } from '../wasm.js'
   import Icon from './Icon.svelte'
 
-  let { selectedUUID = null, selectedVaultUuid = null, excludeUUID = null, query = '', primaryVaultName = '', collapseSeq = '', ontap, oncopy, oncopytotp, onwasmcopyfield = null, onwasmcopycustomfield = null, storageKey = null } = $props()
+  let { selectedUUID = null, selectedVaultUuid = null, excludeUUID = null, includeKeys = null, query = '', primaryVaultName = '', collapseSeq = '', ontap, oncopy, oncopytotp, onwasmcopyfield = null, onwasmcopycustomfield = null, storageKey = null } = $props()
 
   function loadGroupState() {
     if (!storageKey) return {}
@@ -172,6 +172,11 @@
   function buildGroups(items, q, vaultUuid) {
     let list = items
     if (excludeUUID) list = list.filter(i => i.uuid !== excludeUUID)
+    if (includeKeys) {
+      const included = new Set(includeKeys)
+      const keyVaultUuid = vaultUuid === storageKey ? '' : (vaultUuid || '')
+      list = list.filter(i => included.has(`${keyVaultUuid}:${i.uuid}`))
+    }
     if (q.trim() && vaultUuid) {
       try {
         const matched = new Set(searchRecords(vaultUuid, q, 0))
@@ -251,7 +256,7 @@
   })
 
   function isVaultOpen(name) {
-    if (query.trim()) return true
+    if (query.trim() || includeKeys) return true
     return name in openVaults ? openVaults[name] : true
   }
   function toggleVault(name) { openVaults = { ...openVaults, [name]: !isVaultOpen(name) } }
@@ -263,7 +268,7 @@
   }
 
   function isOpen(group) {
-    if (query.trim()) return true
+    if (query.trim() || includeKeys) return true
     if (group in openGroups) return openGroups[group]
     return true
   }

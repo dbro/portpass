@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/pborman/uuid"
 )
@@ -29,6 +30,11 @@ type V3 struct {
 	Salt          [32]byte
 	StretchedKey  [sha256.Size]byte
 }
+
+const (
+	defaultStretchIterations uint32 = 262144
+	maxStretchIterations     uint32 = 10_000_000
+)
 
 // NewV3 - create and initialize a new pwsafe.V3 db
 func NewV3(name, password string) *V3 {
@@ -50,6 +56,37 @@ func uuidKey(uuid [16]byte) string {
 func (db *V3) DeleteRecord(uuidHex string) {
 	delete(db.Records, uuidHex)
 	db.LastMod = time.Now()
+}
+
+func wipeBytes(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
+}
+
+// Wipe clears best-effort mutable secret material before releasing a database.
+// Go strings cannot be zeroed in place, but fixed-size keys and byte slices can.
+func (db *V3) Wipe() {
+	wipeBytes(db.CBCIV[:])
+	wipeBytes(db.EncryptionKey[:])
+	wipeBytes(db.HMAC[:])
+	wipeBytes(db.HMACKey[:])
+	wipeBytes(db.Salt[:])
+	wipeBytes(db.StretchedKey[:])
+	wipeBytes(db.Header.LastSaveBy)
+	wipeBytes(db.Header.LastSaveHost)
+	wipeBytes(db.Header.LastSaveUser)
+	for _, field := range db.Header.UnknownFields {
+		wipeBytes(field.Data)
+	}
+	for key, record := range db.Records {
+		wipeBytes(record.TwoFactorKey)
+		for _, field := range record.UnknownFields {
+			wipeBytes(field.Data)
+		}
+		delete(db.Records, key)
+	}
+	*db = V3{}
 }
 
 // Equal compares the content of two V3 DBs except for LastSave fields and fields with transient or changing values.
@@ -164,15 +201,159 @@ func (db V3) Search(query string, mode int) []string {
 	return results
 }
 
+type SearchResults struct {
+	UUIDs           []string `json:"uuids"`
+	AutoSelectUUID  string   `json:"autoSelectUuid,omitempty"`
+	AutoSelectScore int      `json:"autoSelectScore,omitempty"`
+}
+
+// SearchWithAutoSelect returns matching UUIDs and, for main search, the record
+// that should be shown automatically. The auto-select decision is made from the
+// filtered result set ordered like the record list: group, then title.
+func (db V3) SearchWithAutoSelect(query string, mode int) SearchResults {
+	uuids := db.Search(query, mode)
+	result := SearchResults{UUIDs: uuids}
+	if mode != 0 || strings.TrimSpace(query) == "" || len(uuids) == 0 {
+		return result
+	}
+	if uuid, score, ok := db.SearchAutoSelect(query, db.sortUUIDsForRecordList(uuids)); ok {
+		result.AutoSelectUUID = uuid
+		result.AutoSelectScore = score
+	}
+	return result
+}
+
+type SearchSelectionCandidate struct {
+	UUID      string
+	VaultUUID string
+	Record    Record
+}
+
+// SelectSearchRecord returns the one record that should be shown automatically.
+// candidates must already be filtered and sorted in the caller's visible order.
+func SelectSearchRecord(query string, candidates []SearchSelectionCandidate) (SearchSelectionCandidate, int, bool) {
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" || len(candidates) == 0 {
+		return SearchSelectionCandidate{}, 0, false
+	}
+
+	var best SearchSelectionCandidate
+	bestScore := 70000
+	for _, candidate := range candidates {
+		score := searchAutoSelectScore(candidate.Record, q)
+		if score < bestScore {
+			best = candidate
+			bestScore = score
+			if score < 20000 {
+				break
+			}
+		}
+	}
+	if bestScore < 60000 {
+		return best, bestScore, true
+	}
+	if len(candidates) == 1 {
+		return candidates[0], fallbackAutoSelectScore(candidates[0].Record), true
+	}
+	return SearchSelectionCandidate{}, 0, false
+}
+
+// SearchAutoSelect returns the record that should be shown automatically from
+// orderedUUIDs for a single vault.
+func (db V3) SearchAutoSelect(query string, orderedUUIDs []string) (string, int, bool) {
+	candidates := make([]SearchSelectionCandidate, 0, len(orderedUUIDs))
+	for _, id := range orderedUUIDs {
+		rec, ok := db.Records[id]
+		if !ok {
+			continue
+		}
+		candidates = append(candidates, SearchSelectionCandidate{UUID: id, Record: rec})
+	}
+	match, score, ok := SelectSearchRecord(query, candidates)
+	return match.UUID, score, ok
+}
+
+func searchAutoSelectScore(rec Record, q string) int {
+	title := strings.ToLower(rec.Title)
+	host := normalizeSearchHost(rec.URL)
+	notes := strings.ToLower(rec.Notes)
+	switch {
+	case strings.HasPrefix(title, q):
+		return autoSelectScore(1, rec.Title)
+	case strings.Contains(title, q):
+		return autoSelectScore(2, rec.Title)
+	case strings.HasPrefix(host, q):
+		return autoSelectScore(3, host)
+	case strings.Contains(host, q):
+		return autoSelectScore(4, host)
+	case strings.Contains(notes, q):
+		return autoSelectScore(5, rec.Notes)
+	default:
+		return fallbackAutoSelectScore(rec)
+	}
+}
+
+func fallbackAutoSelectScore(rec Record) int {
+	return autoSelectScore(6, rec.Title)
+}
+
+func autoSelectScore(criterion int, matched string) int {
+	n := utf8.RuneCountInString(matched)
+	if n > 9999 {
+		n = 9999
+	}
+	return criterion*10000 + n
+}
+
+func normalizeSearchHost(url string) string {
+	host := strings.ToLower(strings.TrimSpace(url))
+	if i := strings.Index(host, "://"); i >= 0 {
+		host = host[i+3:]
+	}
+	host = strings.TrimPrefix(host, "www.")
+	if i := strings.IndexAny(host, "/?#"); i >= 0 {
+		host = host[:i]
+	}
+	return host
+}
+
+func (db V3) sortUUIDsForRecordList(uuids []string) []string {
+	sorted := append([]string(nil), uuids...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		a := db.Records[sorted[i]]
+		b := db.Records[sorted[j]]
+		ag := a.Group
+		if ag == "" {
+			ag = "Ungrouped"
+		}
+		bg := b.Group
+		if bg == "" {
+			bg = "Ungrouped"
+		}
+		if ag != bg {
+			return ag < bg
+		}
+		return a.Title < b.Title
+	})
+	return sorted
+}
+
 // SetPassword Sets the password that will be used to encrypt the file on next save
 func (db *V3) SetPassword(pw string) error {
 	// First recalculate the Salt and set iter
-	db.Iter = 262144
+	db.Iter = defaultStretchIterations
 	if _, err := rand.Read(db.Salt[:]); err != nil {
 		return err
 	}
 	db.calculateStretchKey(pw)
 	db.LastMod = time.Now()
+	return nil
+}
+
+func validateStretchIterations(iter uint32) error {
+	if iter == 0 || iter > maxStretchIterations {
+		return fmt.Errorf("invalid stretch iteration count %d", iter)
+	}
 	return nil
 }
 
@@ -205,6 +386,9 @@ func (db *V3) calculateHMAC(unencrypted []byte) {
 
 // calculateStretchKey Using the db Salt and Iter along with the passwd calculate the stretch key
 func (db *V3) calculateStretchKey(passwd string) {
+	if err := validateStretchIterations(db.Iter); err != nil {
+		panic(err)
+	}
 	iterations := int(db.Iter)
 	salted := append([]byte(passwd), db.Salt[:]...)
 	defer func() {

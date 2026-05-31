@@ -99,7 +99,7 @@ Both modes use the **delegate model**: each paired autofill profile has an ECDSA
 
 ## Biometric/PIN unlock
 
-The optional biometric/PIN unlock feature uses your fingerprint, face, or PIN to encrypt your master password on-device. The encrypted password is stored in your browser's local storage (IndexedDB), and the decryption key is derived from your biometric via the WebAuthn PRF extension and it never leaves your device. When biometric/PIN unlock is used, the master password is decrypted from your device's secure storage and passed directly to the vault-opening function. Portpass explicitly clears the master password variable immediately after the vault opens and it is not retained in JavaScript memory beyond that single call.
+The optional biometric/PIN unlock feature uses your fingerprint, face, or PIN to encrypt your master password on-device. The encrypted password is stored in your browser's local storage (IndexedDB), and the decryption key is derived from your biometric via the WebAuthn PRF extension and it never leaves your device. When biometric/PIN unlock is used, the master password is decrypted from your device's secure storage and passed directly to the vault-opening function. Portpass drops JavaScript references to the master password immediately after use, though JavaScript strings cannot be wiped in place by application code.
 
 An attacker with physical access to your device and browser profile could extract the ciphertext from IndexedDB, but cannot decrypt it without the biometric credential held in your device's secure hardware.
 
@@ -109,7 +109,7 @@ If your master password changes, re-enroll biometric/PIN unlock. The old enrollm
 
 ## Secondary vault associations
 
-When secondary vaults are linked to a primary vault, their master passwords are stored encrypted in your browser's IndexedDB. The encryption uses AES-256-GCM with a key derived inside the WASM engine from the primary vault's stretched key and this key never appears in JavaScript. JavaScript only ever handles ciphertext and nonces, which are not sensitive.
+When secondary vaults are linked to a primary vault, their master passwords are stored encrypted in your browser's IndexedDB. The encryption uses AES-256-GCM with a key derived inside the WASM engine from the primary vault's stretched key and this key never appears in JavaScript. JavaScript receives a decrypted secondary master password only transiently when opening that secondary vault, then drops references after use; the reactive application state stores vault metadata, not secondary master passwords.
 
 **Changing the primary vault's master password** generates a new encryption key and any previously linked secondary vaults will no longer auto-unlock and must be re-linked.
 
@@ -123,7 +123,7 @@ Portpass automatically clears the clipboard 30 seconds after you copy a password
 
 Any password manager that uses the clipboard to transfer passwords — including native apps such as 1Password and Bitwarden — shares this exposure. A browser extension with `clipboardRead` permission can call `navigator.clipboard.readText()` at any time and capture whatever is currently in the clipboard, regardless of which app placed it there. This applies equally to passwords copied from Portpass, from a native password manager, or typed by hand and then cut.
 
-Portpass's 30-second autoclear and the Autocopy bookmarklet's immediate post-paste clear both reduce the exposure window, but neither can prevent an actively polling adversary from reading the clipboard before the clear fires.
+Portpass's 30-second autoclear reduces the exposure window, but it cannot prevent an actively polling adversary from reading the clipboard before the clear fires. Autofill avoids this clipboard exposure entirely by writing values directly into webpage fields.
 
 **Checking which extensions have clipboard access.** In Chrome, open `chrome://extensions/` → Details → Permissions for each extension individually. In Firefox, go to `about:addons` → click the extension → Permissions tab. Neither browser provides a consolidated view; you must check each extension one by one. Any extension you do not recognise and trust that lists clipboard read access should be treated as a risk.
 
@@ -161,6 +161,8 @@ This prevents the masquerade attack: a malicious page script can open the popup 
 
 After authentication, credentials are encrypted with ECDH P-256 + AES-256-GCM. The session key is ephemeral -- a fresh ECDH key pair is generated for each autofill session. Credential replies are bound to the request ID, previous message hash, delegate ID, and recipient before encryption. Credentials in transit are ciphertext only; no key material appears on the channel.
 
+The picker initially receives field metadata rather than every secret value. Sensitive field values are fetched only when the user reveals a field or arms it for insertion. This reduces the time secrets are retained by the popup.
+
 ### Cross-profile relay server
 
 The switchboard (`localhost:7577`) is a dumb pipe: it stores and forwards signed requests and encrypted replies without needing to inspect their contents. It binds to `127.0.0.1` only and is not accessible over the network. Portpass treats the relay as untrusted transport that may observe metadata, delay, drop, replay, reorder, or inject packets. Signatures, timestamps, nonces, reply binding, and encryption provide the security properties; the relay itself is not trusted.
@@ -177,9 +179,10 @@ Cross-profile credential release is intentionally stricter than same-profile aut
 
 ## Implementation notes
 
-- **Memory**: the salted password buffer used during key stretching is zeroed immediately after use.
+- **Memory**: the salted password buffer used during key stretching is zeroed immediately after use. When a vault closes or is replaced, Portpass also best-effort wipes mutable key buffers and byte slices before releasing the in-memory database. Go and JavaScript strings cannot be wiped in place by application code.
 - **Timing**: password comparison uses a constant-time XOR accumulator to prevent timing side-channel attacks.
-- **KDF**: the vault key is derived using SHA-256 iterated 262,144 times (the [pwsafe v3 format minimum](https://github.com/pwsafe/pwsafe/blob/master/docs/formatV3.txt)), making offline brute-force attacks significantly more costly.
+- **Authentication before replacement**: Portpass parses and authenticates an opened vault into a temporary database, then replaces the live in-memory database only after the file HMAC has been verified.
+- **KDF**: new vaults derive keys using SHA-256 iterated 262,144 times (the [pwsafe v3 format minimum](https://github.com/pwsafe/pwsafe/blob/master/docs/formatV3.txt)). Existing vaults retain their stored iteration count. Portpass rejects zero iterations and counts above 10,000,000 to prevent malformed files from causing excessive work during unlock.
 
 ---
 

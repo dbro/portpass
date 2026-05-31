@@ -81,4 +81,39 @@ test.describe('Search', () => {
     await expect(page.locator('.hl-primary').first()).toBeVisible()
   })
 
+  test('active search shows and highlights the best matching record without reordering', async ({ page }) => {
+    await openVault(page)
+    await page.getByPlaceholder('Search vault').fill('entry')
+
+    await expect(page.locator('.record-row').nth(0)).toContainText('three entry 3')
+    await expect(page.locator('.record-row').nth(1)).toContainText('three entry 1')
+    await expect(page.locator('.record-row').nth(2)).toContainText('three entry 2')
+    await expect(page.locator('.record-title')).toHaveText('three entry 3')
+    await expect(page.locator('.record-row.is-selected')).toContainText('three entry 3')
+  })
+
+  test('clearing search restores the record selected before search began', async ({ page }) => {
+    await openVault(page)
+    await page.locator('.record-row', { hasText: 'three entry 1' }).click()
+    await expect(page.locator('.record-title')).toHaveText('three entry 1')
+
+    await page.getByPlaceholder('Search vault').fill('group3.com')
+    await expect(page.locator('.record-title')).toHaveText('three entry 3')
+    await expect(page.locator('.record-row.is-selected')).toContainText('three entry 3')
+
+    await page.getByLabel('Clear search').click()
+    await expect(page.locator('.record-title')).toHaveText('three entry 1')
+    await expect(page.locator('.record-row.is-selected')).toContainText('three entry 1')
+  })
+
+  test('clicking a result during search keeps that search selection', async ({ page }) => {
+    await openVault(page)
+    await page.getByPlaceholder('Search vault').fill('entry')
+    await expect(page.locator('.record-title')).toHaveText('three entry 3')
+
+    await page.locator('.record-row', { hasText: 'three entry 2' }).click()
+    await expect(page.locator('.record-title')).toHaveText('three entry 2')
+    await expect(page.locator('.record-row.is-selected')).toContainText('three entry 2')
+  })
+
 })

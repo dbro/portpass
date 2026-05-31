@@ -208,6 +208,69 @@ body {
 }
 .pp-status { padding: 12px 14px; font-size: 13px; color: var(--text-muted) }
 .pp-error-inline { padding: 12px 14px; font-size: 13px; color: var(--red) }
+
+/* ── Selected credential panel ── */
+.pp-record-head {
+  display:flex; align-items:center; justify-content:space-between;
+  min-height:40px; padding:0 18px; background:var(--accent-soft);
+  border-bottom:1px solid var(--border); flex-shrink:0;
+}
+.pp-record-back {
+  display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  width:24px; height:24px; margin-right:4px; padding:0; border:0; border-radius:5px;
+  color:var(--accent); background:none; cursor:pointer;
+}
+.pp-record-back:hover { background:var(--surface-2) }
+.pp-record-title { flex:1; min-width:0; font-size:13px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.pp-view-record {
+  display:flex; align-items:center; gap:5px; color:var(--accent); border:0; background:none;
+  font:inherit; font-size:12px; font-weight:700; cursor:pointer;
+}
+.pp-panel { display:flex; flex-direction:column; min-height:0 }
+.pp-autofill-summary {
+  display:flex; align-items:center; gap:14px; padding:12px 17px 9px;
+  font-size:12px; flex-shrink:0; cursor:pointer;
+}
+.pp-autofill-summary.active { background:var(--accent-soft); border-left:3px solid var(--accent); padding-left:14px }
+.pp-autofill-label { font-weight:800; letter-spacing:.04em; color:var(--text); flex-shrink:0 }
+.pp-sequence { margin-left:auto; color:var(--accent); text-align:right; line-height:1.35 }
+.pp-sequence.warn { color:var(--orange) }
+.pp-arm {
+  display:flex; align-items:center; gap:10px; min-height:49px; padding:8px 17px;
+  border-left:3px solid var(--accent); background:var(--accent-soft); color:var(--accent);
+  border-top:0; border-right:0; border-bottom:0; width:100%; text-align:left;
+  font:inherit; cursor:pointer;
+}
+.pp-arm-icon { font-size:18px; flex-shrink:0 }
+.pp-arm-text { flex:1; min-width:0; font-size:13px }
+.pp-arm-text strong { font-weight:800 }
+.pp-insert-divider {
+  display:flex; align-items:center; gap:10px; padding:11px 16px 5px;
+  color:var(--text-soft); font-size:11px; font-weight:800; letter-spacing:.08em; flex-shrink:0;
+}
+.pp-insert-divider:before,.pp-insert-divider:after { content:""; height:1px; background:var(--border); flex:1 }
+.pp-field-row { padding:0 17px; cursor:pointer }
+.pp-field-main {
+  min-height:41px; display:flex; align-items:center; gap:10px;
+}
+.pp-field-label { color:var(--text); font-size:13px; font-weight:700; flex:1; min-width:0 }
+.pp-field-value {
+  color:var(--text-muted); font:12px ui-monospace,monospace; max-width:190px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.pp-field-action {
+  border:0; background:none; color:var(--text-muted); cursor:pointer; display:flex; padding:2px;
+}
+.pp-field-row.active { padding:0 }
+.pp-field-row.active .pp-field-main { padding:0 17px; background:var(--accent-soft) }
+.pp-field-row.active .pp-arm { min-height:42px }
+.pp-notes .pp-field-main { min-height:36px; padding-top:7px }
+.pp-notes-value {
+  display:block; width:100%; max-width:none; padding:0 0 9px;
+  white-space:pre-wrap; line-height:1.4; max-height:90px; overflow:auto;
+}
+.pp-totp-bar { height:2px; background:var(--border); overflow:hidden }
+.pp-totp-bar-fill { height:100%; background:var(--accent); transition:width 1s linear }
 </style>
 </head>
 <body>
@@ -293,9 +356,12 @@ body {
   var SVG_WARN   = '<svg width="13" height="13"' + _S + ' stroke-width="1.6"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>'
   var SVG_SEARCH_ICO = '<svg width="16" height="16"' + _S + ' stroke-width="1.6"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.3-4.3"/></svg>'
   var SVG_X_ICO      = '<svg width="16" height="16"' + _S + ' stroke-width="1.6"><path d="M6 6l12 12M18 6 6 18"/></svg>'
+  var SVG_BACK       = '<svg width="15" height="15"' + _S + ' stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>'
   var SVG_PENCIL = '<svg width="13" height="13"' + _S + ' stroke-width="1.6"><path d="M4 20h4l10-10-4-4L4 16v4Z"/><path d="m14 6 4 4"/></svg>'
   var SVG_UNDO   = '<svg width="13" height="13"' + _S + ' stroke-width="1.6"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>'
   var SVG_COPY   = '<svg width="15" height="15"' + _S + ' stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>'
+  var SVG_EYE    = '<svg width="15" height="15"' + _S + ' stroke-width="1.8"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="2.5"/></svg>'
+  var SVG_EYE_OFF= '<svg width="15" height="15"' + _S + ' stroke-width="1.8"><path d="m3 3 18 18"/><path d="M10.6 6.2A11 11 0 0 1 12 6c6.5 0 10 6 10 6a17 17 0 0 1-3.1 3.6"/><path d="M6.6 6.7C3.6 8.5 2 12 2 12s3.5 6 10 6a10 10 0 0 0 3.4-.6"/></svg>'
   var SVG_CHECK_SM = '<svg width="12" height="12"' + _S + ' stroke-width="2.2"><path d="m5 12 5 5L20 7"/></svg>'
   var SVG_CHECK_MD = '<svg width="24" height="24"' + _S + ' stroke-width="2"><path d="m5 12 5 5L20 7"/></svg>'
   // Large error icons (40px)
@@ -342,14 +408,17 @@ body {
   var $transport = null
   var _pendingSearch = null  // resolve fn for an in-flight search
   var _pendingFill = null    // resolve fn for an in-flight fill-uuid
+  var _pendingValue = null   // resolve fn for an in-flight lazy field fetch
 
   // Phase state
   var chosen = null           // the selected record object
   var previousPhase = null    // 'pick' or 'norecords' — for Back button
   var lastRecords = []        // saved for Back navigation
-  var pendingCredentials = null  // {autotype, fields, sensitiveCodes} waiting to be sent
+  var pendingCredentials = null  // selected record metadata and lazily loaded values
   var fieldClicked = false    // bookmarklet reported a field was clicked
-  var hasActiveField = false  // bookmarklet had a pre-focused field at activation
+  var armedCode = 'sequence'  // null, 'sequence', or one field code
+  var pendingFillMode = null  // compatibility fallback for older installed bookmarklets
+  var otpRefreshTimer = null
 
   var $content       = document.getElementById('pp-content')
   var $subheader     = document.getElementById('pp-subheader')
@@ -432,7 +501,6 @@ body {
     saveUrl = msg.saveUrl || currentUrl
     isSecure = !!msg.isSecure
     delegateId = msg.delegateId || null
-    hasActiveField = !!msg.hasActiveField
     if (msg.relayUrl) wsRelayUrl = msg.relayUrl.replace(/^http/, 'ws').replace(/\/ws$/, '') + '/ws'
 
     if ($urlDisplay) { $urlDisplay.textContent = currentUrl; $urlDisplay.title = currentUrl }
@@ -464,7 +532,18 @@ body {
       fieldClicked = true
       pendingFill()
     } else if (msg.type === 'fill-done') {
-      showDone()
+      var mode = msg.mode || pendingFillMode
+      pendingFillMode = null
+      if (mode === 'single') {
+        ;(pendingCredentials.fields || []).forEach(function(field) {
+          if (field.sensitive) field.revealed = false
+        })
+        armedCode = null
+        fieldClicked = false
+        showWaiting(pendingCredentials)
+      } else {
+        showDone()
+      }
     } else if (msg.type === 'fill-error') {
       showErrorPhase(detectErrorPhase(msg.error || ''))
     }
@@ -536,8 +615,15 @@ body {
         if (!results || !results.length) throw new Error('Could not get credentials')
         return results[0]
       },
+      fieldValue: async function(uuid, vu, code) {
+        var blob = await cpSignAndSend('field-value', { url: currentUrl, uuid: uuid, vaultUuid: vu || null, query: code })
+        return decryptReply(blob, blob.replyTo)
+      },
       viewRecord: function(uuid, vu) {
         return cpSignAndSend('view-record', { url: uuid, uuid: uuid, vaultUuid: vu || null })
+      },
+      viewNearMatches: function() {
+        return cpSignAndSend('view-near-matches', { url: currentUrl })
       },
       saveUrl: function(uuid, vu) { wsSaveUrl(uuid, vu) },
       notifyFilled: function() { wsNotifyFilled() }
@@ -833,7 +919,6 @@ body {
     'use strict'
     if (window.__ppRunning) return
     window.__ppRunning = true
-    var activeEl = isUsableInput(document.activeElement) ? document.activeElement : null
     var isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost'
     var currentCanonical = canonicalURL(window.location.href)
     var saveUrl = window.location.origin + window.location.pathname
@@ -862,11 +947,16 @@ body {
       if (!msg) return
       if (msg.type === 'fill') {
         document.removeEventListener('click', onFieldClick, true)
-        var el = startEl || activeEl
+        var el = startEl
         executeAutotype(el, msg.autotype, msg.fields).then(function() {
-          try { pp.postMessage({ type: 'fill-done' }, PORTPASS_ORIGIN) } catch(_) {}
+          try { pp.postMessage({ type: 'fill-done', mode: msg.mode }, PORTPASS_ORIGIN) } catch(_) {}
           try { pp.focus() } catch(_) {}
-          cleanup()
+          if (msg.mode === 'single') {
+            startEl = null
+            document.addEventListener('click', onFieldClick, true)
+          } else {
+            cleanup()
+          }
         })
       } else if (msg.type === 'cancel') cleanup()
     }
@@ -887,7 +977,6 @@ body {
           isSecure: isSecure,
           delegateId: DELEGATE_ID,
           relayUrl: RELAY_URL,
-          hasActiveField: !!activeEl,
         }, PORTPASS_ORIGIN)
         window.addEventListener('message', onPopupMessage)
         document.addEventListener('click', onFieldClick, true)
@@ -1305,34 +1394,100 @@ body {
     previousPhase = fromPhase   // null → no Back button
     fieldClicked = false
     pendingCredentials = null
-    showWaiting(null)  // autotype chips shown once credentials arrive below
+    armedCode = 'sequence'
+    showWaiting(null)
     $transport.fill(rec.uuid, rec.vaultUuid).then(function(cred) {
+      if (chosen !== rec) return
       if (!cred) { sendError('Could not get credentials'); return }
-      updateWaitingWithAutotype(cred.autotype)
       pendingCredentials = cred
-      pendingFill()
+      showWaiting(cred)
     }).catch(function(e) { sendError(e.message || 'Autofill failed') })
   }
 
-  // Triggers fill when credentials AND a field signal (hasActiveField or fieldClicked) are ready.
-  function pendingFill() {
+  function fieldByCode(code) {
+    return pendingCredentials && (pendingCredentials.fields || []).find(function(f) { return f.code === code })
+  }
+
+  function loadFieldValue(code) {
+    var field = fieldByCode(code)
+    if (!field) return Promise.resolve('')
+    if (code !== '2' && Object.prototype.hasOwnProperty.call(field, 'value')) return Promise.resolve(field.value || '')
+    return $transport.fieldValue(chosen.uuid, chosen.vaultUuid || null, code).then(function(result) {
+      field.value = result && Object.prototype.hasOwnProperty.call(result, 'value') ? result.value : ''
+      if (code === '2') {
+        field.seconds = result && result.seconds
+        field.period = result && result.period
+      }
+      return field.value
+    })
+  }
+
+  function sequenceFieldCodes(seq) {
+    var codes = [], toks = parseAutotypeTokens(seq || '')
+    toks.forEach(function(tok) {
+      if (tok.code && codes.indexOf(tok.code) < 0) codes.push(tok.code)
+    })
+    return codes
+  }
+
+  function armField(code) {
+    if (armedCode === code) {
+      armedCode = null
+      fieldClicked = false
+      showWaiting(pendingCredentials)
+      return
+    }
+    armedCode = code
+    fieldClicked = false
+    var field = fieldByCode(code)
+    // OTP values age quickly: fetch them only when revealed or immediately before insertion.
+    if (field && field.sensitive && code !== '2') loadFieldValue(code).catch(function(e) { sendError(e.message || 'Could not get field value') })
+    showWaiting(pendingCredentials)
+  }
+
+  function armSequence() {
+    armedCode = armedCode === 'sequence' ? null : 'sequence'
+    fieldClicked = false
+    showWaiting(pendingCredentials)
+  }
+
+  function updateOtpRefresh() {
+    if (otpRefreshTimer) { clearInterval(otpRefreshTimer); otpRefreshTimer = null }
+    var otp = fieldByCode('2')
+    if (!otp || !otp.revealed) return
+    otpRefreshTimer = setInterval(function() {
+      loadFieldValue('2').then(function() {
+        if (!otp.revealed) return
+        var row = $content.querySelector('.pp-field-row[data-code="2"]')
+        var value = row && row.querySelector('.pp-field-value')
+        var fill = row && row.querySelector('.pp-totp-bar-fill')
+        if (value) value.textContent = otp.value || ''
+        if (fill) fill.style.width = ((otp.seconds || 0) / otp.period * 100) + '%'
+      }).catch(function() {})
+    }, 1000)
+  }
+
+  // Triggers fill only after a new host-page field click.
+  async function pendingFill() {
     if (!pendingCredentials) return
-    if (!hasActiveField && !fieldClicked) return
+    if (!fieldClicked) return
 
-    var cred = pendingCredentials
-    pendingCredentials = null
-
-    // HTTP security check
-    if (!isSecure && sequenceHasSensitiveCode(cred.autotype || '', cred.sensitiveCodes || [])) {
+    var codes = armedCode === 'sequence' ? sequenceFieldCodes(pendingCredentials.autotype) : [armedCode]
+    var hasSensitive = codes.some(function(code) { var f = fieldByCode(code); return f && f.sensitive })
+    if (!isSecure && hasSensitive) {
       showErrorPhase('http')
       return
     }
-
-    if (window.opener && bookmarkletOrigin) {
-      window.opener.postMessage(
-        { type: 'fill', autotype: cred.autotype, fields: cred.fields },
-        bookmarkletOrigin
-      )
+    try {
+      var fields = {}
+      await Promise.all(codes.map(async function(code) { fields[code] = await loadFieldValue(code) }))
+      var autotype = armedCode === 'sequence' ? pendingCredentials.autotype : '\\' + armedCode
+      if (window.opener && bookmarkletOrigin) {
+        pendingFillMode = armedCode === 'sequence' ? 'sequence' : 'single'
+        window.opener.postMessage({ type: 'fill', mode: pendingFillMode, autotype: autotype, fields: fields }, bookmarkletOrigin)
+      }
+    } catch(e) {
+      sendError(e.message || 'Could not get credentials')
     }
   }
 
@@ -1373,7 +1528,7 @@ body {
     bar.className = 'pp-view-link-bar'
     var btn = document.createElement('button')
     btn.className = 'pp-view-link'
-    btn.textContent = 'Show in Portpass Tab'
+    btn.textContent = 'Select in Portpass'
     btn.onclick = function() {
       var p = (chosen && $transport) ? $transport.viewRecord(chosen.uuid, chosen.vaultUuid || null) : null
       if (p && p.then) p.catch(function(){}).then(function() { window.close() })
@@ -1383,58 +1538,156 @@ body {
     return bar
   }
 
-  function showWaiting(autotype) {
+  function makeCredentialHead() {
+    var head = document.createElement('div')
+    head.className = 'pp-record-head selected-record-row'
+    if (previousPhase) {
+      var back = document.createElement('button')
+      back.className = 'pp-record-back'
+      back.setAttribute('aria-label', 'Choose a different password')
+      back.innerHTML = SVG_BACK
+      back.onclick = function(e) { e.stopPropagation(); goBack() }
+      head.appendChild(back)
+    }
+    var title = document.createElement('div')
+    title.className = 'pp-record-title'
+    title.textContent = chosen.title
+    var view = document.createElement('button')
+    view.className = 'pp-view-record'
+    view.textContent = 'Select in Portpass'
+    view.onclick = function() {
+      var p = $transport.viewRecord(chosen.uuid, chosen.vaultUuid || null)
+      if (p && p.catch) p.catch(function(){})
+    }
+    head.appendChild(title); head.appendChild(view)
+    return head
+  }
+
+  function makeArmBanner(prefix, strong) {
+    var banner = document.createElement('button')
+    banner.type = 'button'
+    banner.className = 'pp-arm'
+    var icon = document.createElement('span')
+    icon.className = 'pp-arm-icon'
+    icon.textContent = '↪'
+    var text = document.createElement('div')
+    text.className = 'pp-arm-text'
+    text.appendChild(document.createTextNode(prefix))
+    var b = document.createElement('strong')
+    b.textContent = strong
+    text.appendChild(b)
+    banner.appendChild(icon); banner.appendChild(text)
+    return banner
+  }
+
+  function toggleReveal(field) {
+    field.revealGeneration = (field.revealGeneration || 0) + 1
+    var generation = field.revealGeneration
+    if (field.revealed) {
+      field.revealed = false
+      showWaiting(pendingCredentials)
+      return
+    }
+    loadFieldValue(field.code).then(function() {
+      if (field.revealGeneration !== generation) return
+      field.revealed = true
+      showWaiting(pendingCredentials)
+    }).catch(function(e) { sendError(e.message || 'Could not get field value') })
+  }
+
+  function makeFieldRow(field) {
+    var row = document.createElement('div')
+    row.className = 'pp-field-row' + (field.notes ? ' pp-notes' : '') + (armedCode === field.code ? ' active' : '')
+    row.dataset.code = field.code
+    var main = document.createElement('div')
+    main.className = 'pp-field-main'
+    var label = document.createElement('div')
+    label.className = 'pp-field-label'
+    label.textContent = field.label
+    var value = document.createElement('div')
+    value.className = 'pp-field-value' + (field.notes ? ' pp-notes-value' : '')
+    value.textContent = field.sensitive && !field.revealed ? '••••••••' : (field.value || '')
+    main.appendChild(label)
+    if (!field.notes) main.appendChild(value)
+    if (field.sensitive) {
+      var eye = document.createElement('button')
+      eye.className = 'pp-field-action'
+      eye.setAttribute('aria-label', field.revealed ? 'Hide ' + field.label : 'Reveal ' + field.label)
+      eye.innerHTML = field.revealed ? SVG_EYE_OFF : SVG_EYE
+      eye.onclick = function(e) { e.stopPropagation(); toggleReveal(field) }
+      main.appendChild(eye)
+    }
+    row.appendChild(main)
+    if (field.notes) row.appendChild(value)
+    if (field.code === '2' && field.revealed && field.period) {
+      var bar = document.createElement('div')
+      bar.className = 'pp-totp-bar'
+      var fill = document.createElement('div')
+      fill.className = 'pp-totp-bar-fill'
+      fill.style.width = ((field.seconds || 0) / field.period * 100) + '%'
+      bar.appendChild(fill)
+      row.appendChild(bar)
+    }
+    if (!field.notes && armedCode === field.code) row.appendChild(makeArmBanner('Click where to insert ', field.label))
+    row.onclick = function() { field.notes ? toggleReveal(field) : armField(field.code) }
+    return row
+  }
+
+  function showWaiting(cred) {
+    if (otpRefreshTimer) { clearInterval(otpRefreshTimer); otpRefreshTimer = null }
     hideSearchUI()
     $subheader.style.display = 'none'
     $content.innerHTML = ''
-    $content.appendChild(makeSelectedRecordRow(chosen))
-    $content.appendChild(makeViewLinkBar())
-
-    var center = document.createElement('div')
-    center.className = 'pp-phase-center'
-
-    var illus = document.createElement('div')
-    illus.className = 'pp-waiting-illus'
-    illus.innerHTML = SVG_WAITING
-
-    var title = document.createElement('div')
-    title.className = 'pp-waiting-title'
-    title.textContent = 'Click a field to begin'
-
-    var sub = document.createElement('div')
-    sub.className = 'pp-waiting-sub'
-    sub.textContent = autotype ? waitingSubText(autotype) : 'Click any username or password field on the page'
-
-    center.appendChild(illus)
-    center.appendChild(title)
-    center.appendChild(sub)
-    if (autotype) {
-      var chips = buildSequenceChips(autotype)
-      if (chips) center.appendChild(chips)
+    $content.appendChild(makeCredentialHead())
+    if (!cred) {
+      var loading = document.createElement('div')
+      loading.className = 'pp-status'
+      loading.textContent = 'Loading password…'
+      $content.appendChild(loading)
+      return
     }
-    $content.appendChild(center)
-
-    // Footer with Back (if applicable) and Cancel
-    var footer = document.createElement('div')
-    footer.className = 'pp-footer'
-    if (previousPhase !== null) {
-      var backBtn = document.createElement('button')
-      backBtn.className = 'pp-footer-btn'
-      backBtn.textContent = '← Back'
-      backBtn.onclick = goBack
-      footer.appendChild(backBtn)
-    } else {
-      footer.appendChild(document.createElement('span'))  // spacer
+    var panel = document.createElement('div')
+    panel.className = 'pp-panel'
+    var summary = document.createElement('div')
+    summary.className = 'pp-autofill-summary' + (armedCode === 'sequence' ? ' active' : '')
+    var label = document.createElement('div')
+    label.className = 'pp-autofill-label'
+    label.textContent = 'AUTOFILL'
+    var seq = document.createElement('div')
+    var warning = warnAutotype(cred.autotype)
+    seq.className = 'pp-sequence' + (warning ? ' warn' : '')
+    seq.textContent = sequenceLabel(cred.autotype)
+    if (warning) {
+      seq.appendChild(document.createTextNode(' '))
+      var warn = document.createElement('span')
+      warn.title = warning
+      warn.innerHTML = SVG_WARN
+      seq.appendChild(warn)
     }
-    var cancelBtn = document.createElement('button')
-    cancelBtn.className = 'pp-footer-btn'
-    cancelBtn.textContent = 'Cancel'
-    cancelBtn.onclick = function() { window.close() }
-    footer.appendChild(cancelBtn)
-    $content.appendChild(footer)
+    summary.appendChild(label); summary.appendChild(seq); panel.appendChild(summary)
+    if (!warning) summary.onclick = armSequence
+    if (armedCode === 'sequence' && !warning) {
+      var autofillBanner = makeArmBanner('Click where to start ', 'Autofill')
+      autofillBanner.onclick = function(e) {
+        e.preventDefault()
+        e.stopPropagation()
+        armedCode = null
+        fieldClicked = false
+        showWaiting(pendingCredentials)
+      }
+      panel.appendChild(autofillBanner)
+    }
+    var divider = document.createElement('div')
+    divider.className = 'pp-insert-divider'
+    divider.textContent = 'OR INSERT A FIELD VALUE'
+    panel.appendChild(divider)
+    ;(cred.fields || []).forEach(function(field) { panel.appendChild(makeFieldRow(field)) })
+    $content.appendChild(panel)
+    updateOtpRefresh()
   }
 
   function showDone() {
+    if (otpRefreshTimer) { clearInterval(otpRefreshTimer); otpRefreshTimer = null }
     if ($transport && $transport.notifyFilled) $transport.notifyFilled()
     hideSearchUI()
     $subheader.style.display = 'none'
@@ -1475,6 +1728,7 @@ body {
   }
 
   function showErrorPhase(errorPhase, rawMsg) {
+    if (otpRefreshTimer) { clearInterval(otpRefreshTimer); otpRefreshTimer = null }
     hideSearchUI()
     $subheader.style.display = 'none'
     $content.innerHTML = ''
@@ -1539,6 +1793,7 @@ body {
 
   // Back button: return to previous phase, clear chosen record and pending state.
   function goBack() {
+    if (otpRefreshTimer) { clearInterval(otpRefreshTimer); otpRefreshTimer = null }
     chosen = null
     pendingCredentials = null
     fieldClicked = false
@@ -1799,8 +2054,17 @@ body {
       : 'No near matches were found.'
     var line2 = document.createElement('button')
     line2.className = 'pp-footer-btn'
-    line2.textContent = 'View in Portpass'
-    line2.onclick = function() { window.open(PORTPASS_URL, '_blank', 'noopener'); window.close() }
+    line2.textContent = 'Show in Portpass vault profile'
+    line2.onclick = function() {
+      line2.disabled = true
+      line2.textContent = 'Showing in Portpass…'
+      $transport.viewNearMatches().then(function() {
+        line2.textContent = 'Shown in Portpass. Switch to your vault profile to review.'
+      }).catch(function() {
+        line2.disabled = false
+        line2.textContent = 'Could not update Portpass. Try again.'
+      })
+    }
     ph.appendChild(line1)
     ph.appendChild(line2)
     $content.appendChild(ph)
@@ -1885,6 +2149,12 @@ body {
           ch.postMessage({ type: 'query', uuid: uuid, vaultUuid: vu || null, nonce: nonce })
         })
       },
+      fieldValue: function(uuid, vu, code) {
+        return new Promise(function(resolve) {
+          _pendingValue = resolve
+          ch.postMessage({ type: 'field-value', uuid: uuid, vaultUuid: vu || null, code: code, nonce: nonce })
+        })
+      },
       viewRecord: function(uuid, vu) {
         ch.postMessage({ type: 'view-record', uuid: uuid, vaultUuid: vu || null, nonce: nonce })
       },
@@ -1915,11 +2185,23 @@ body {
             var iv = Uint8Array.from(atob(msg.iv), function(c) { return c.charCodeAt(0) })
             var ct = Uint8Array.from(atob(msg.ciphertext), function(c) { return c.charCodeAt(0) })
             var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, sessionKey, ct)
-            res({ autotype: msg.autotype, fields: JSON.parse(new TextDecoder().decode(pt)), sensitiveCodes: msg.sensitiveCodes || [] })
+            res(JSON.parse(new TextDecoder().decode(pt)))
           } catch(_) { res(null) }
         })()
-      } else {
-        deliverFill(msg)
+      }
+      return
+    }
+    if (msg.type === 'field-value') {
+      if (_pendingValue) {
+        var valueRes = _pendingValue; _pendingValue = null
+        ;(async function() {
+          try {
+            var iv = Uint8Array.from(atob(msg.iv), function(c) { return c.charCodeAt(0) })
+            var ct = Uint8Array.from(atob(msg.ciphertext), function(c) { return c.charCodeAt(0) })
+            var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, sessionKey, ct)
+            valueRes(JSON.parse(new TextDecoder().decode(pt)))
+          } catch(_) { valueRes(null) }
+        })()
       }
       return
     }
@@ -1931,18 +2213,6 @@ body {
       return
     }
     if (msg.type === 'error') sendError(msg.message)
-  }
-
-  async function deliverFill(msg) {
-    try {
-      var iv = Uint8Array.from(atob(msg.iv), function(c) { return c.charCodeAt(0) })
-      var ct = Uint8Array.from(atob(msg.ciphertext), function(c) { return c.charCodeAt(0) })
-      var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, sessionKey, ct)
-      var fields = JSON.parse(new TextDecoder().decode(pt))
-      pendingCredentials = { autotype: msg.autotype, fields: fields, sensitiveCodes: msg.sensitiveCodes || [] }
-      updateWaitingWithAutotype(msg.autotype)
-      pendingFill()
-    } catch(_) { sendError('Failed to decrypt credentials') }
   }
 
   // ── Error handling ─────────────────────────────────────────────────────────
@@ -1963,31 +2233,6 @@ body {
     return p.slice(0, p.lastIndexOf('/') + 1)
   }())
 
-  function sequenceHasSensitiveCode(seq, sensitiveCodes) {
-    if (!sensitiveCodes || !sensitiveCodes.length) return false
-    var i = 0
-    while (i < seq.length) {
-      if (seq[i] !== '\\') { i++; continue }
-      var code = seq[i + 1]
-      if (!code) break
-      if (code === '\\') { i += 2; continue }
-      if (code === 'f') {
-        var d = seq[i + 2]
-        var fieldCode = (d && /^[1-9]$/.test(d)) ? 'f' + d : 'f1'
-        if (sensitiveCodes.indexOf(fieldCode) >= 0) return true
-        i += (d && /^[0-9]$/.test(d)) ? 3 : 2
-      } else if (code === 'w' || code === 'W') {
-        var j = i + 2, count = 0
-        while (j < seq.length && count < 3 && /^[0-9]$/.test(seq[j])) { j++; count++ }
-        i = count ? j : i + 2
-      } else {
-        if (sensitiveCodes.indexOf(code) >= 0) return true
-        i += 2
-      }
-    }
-    return false
-  }
-
   function parseAutotypeTokens(seq) {
     if (!seq) return []
     var toks = [], lit = '', i = 0
@@ -1998,10 +2243,10 @@ body {
       var c = seq[i + 1]
       if (c === '\\') { lit += '\\'; i += 2; continue }
       fl()
-      if      (c === 'u') { toks.push({ type: 'field', label: 'Username' }); i += 2 }
-      else if (c === 'p') { toks.push({ type: 'field', label: 'Password' }); i += 2 }
-      else if (c === 'm') { toks.push({ type: 'field', label: 'Email' }); i += 2 }
-      else if (c === '2') { toks.push({ type: 'field', label: 'One-time code' }); i += 2 }
+      if      (c === 'u') { toks.push({ type: 'field', code: 'u', label: 'Username' }); i += 2 }
+      else if (c === 'p') { toks.push({ type: 'field', code: 'p', label: 'Password' }); i += 2 }
+      else if (c === 'm') { toks.push({ type: 'field', code: 'm', label: 'Email' }); i += 2 }
+      else if (c === '2') { toks.push({ type: 'field', code: '2', label: 'One-time code' }); i += 2 }
       else if (c === 't') { toks.push({ type: 'nav', label: 'Tab', suffix: '→' }); i += 2 }
       else if (c === 's') { toks.push({ type: 'nav', label: 'Shift-Tab', suffix: '←' }); i += 2 }
       else if (c === 'n') { toks.push({ type: 'nav', label: 'Enter', suffix: '↵' }); i += 2 }
@@ -2010,8 +2255,8 @@ body {
         if (d !== undefined && /^[0-9]$/.test(d)) {
           var n = parseInt(d)
           if (n === 0) { toks.push({ type: 'error', label: '\\f0 invalid' }); i += 3 }
-          else { toks.push({ type: 'field', label: 'Custom ' + n }); i += 3 }
-        } else { toks.push({ type: 'field', label: 'Custom 1' }); i += 2 }
+          else { toks.push({ type: 'field', code: 'f' + n, label: 'Custom ' + n }); i += 3 }
+        } else { toks.push({ type: 'field', code: 'f1', label: 'Custom 1' }); i += 2 }
       } else if (c === 'w' || c === 'W') {
         var j = i + 2, cnt = 0
         while (j < seq.length && cnt < 3 && /^[0-9]$/.test(seq[j])) { j++; cnt++ }
@@ -2021,6 +2266,35 @@ body {
     }
     fl()
     return toks
+  }
+
+  function warnAutotype(seq) {
+    if (!seq) return ''
+    var supported = { u:1, p:1, t:1, n:1, m:1, 2:1, s:1, '\\':1, f:1, w:1, W:1 }
+    var unknown = [], i = 0
+    while (i < seq.length) {
+      if (seq[i] !== '\\') { i++; continue }
+      if (i + 1 >= seq.length) break
+      var code = seq[i + 1]
+      if (code === 'f') i += seq[i + 2] !== undefined && /^[0-9]$/.test(seq[i + 2]) ? 3 : 2
+      else if (code === 'w' || code === 'W') {
+        var j = i + 2, count = 0
+        while (j < seq.length && count < 3 && /^[0-9]$/.test(seq[j])) { j++; count++ }
+        i = count ? j : i + 2
+      } else {
+        if (!supported[code] && unknown.indexOf('\\' + code) < 0) unknown.push('\\' + code)
+        i += 2
+      }
+    }
+    return unknown.length ? 'Portpass will skip unsupported code' + (unknown.length > 1 ? 's' : '') + ': ' + unknown.join(', ') : ''
+  }
+
+  function sequenceLabel(seq) {
+    return parseAutotypeTokens(seq).map(function(tok) {
+      if (tok.type === 'nav') return tok.label
+      if (tok.type === 'field') return fieldByCode(tok.code)?.label || tok.label
+      return tok.label
+    }).join(' → ')
   }
 
   function waitingSubText(seq) {
@@ -2064,17 +2338,6 @@ body {
       }
     })
     return wrap
-  }
-
-  function updateWaitingWithAutotype(autotype) {
-    var sub = $content.querySelector('.pp-waiting-sub')
-    if (!sub) return
-    sub.textContent = waitingSubText(autotype)
-    var center = $content.querySelector('.pp-phase-center')
-    if (center && !center.querySelector('.pp-chips-row')) {
-      var chips = buildSequenceChips(autotype)
-      if (chips) center.appendChild(chips)
-    }
   }
 
   function canonicalURL(href) {

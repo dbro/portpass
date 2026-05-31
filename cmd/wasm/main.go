@@ -60,6 +60,8 @@ func openDB(this js.Value, args []js.Value) interface{} {
 	uuid := vaultUUID(newDB)
 	if _, exists := databases[uuid]; !exists {
 		databases[uuid] = newDB
+	} else {
+		newDB.Wipe()
 	}
 
 	result, _ := json.Marshal(map[string]string{"uuid": uuid})
@@ -73,6 +75,9 @@ func createDatabase(this js.Value, args []js.Value) interface{} {
 	}
 	newDB := pwsafe.NewV3("", args[0].String())
 	uuid := vaultUUID(newDB)
+	if old, exists := databases[uuid]; exists {
+		old.Wipe()
+	}
 	databases[uuid] = newDB
 	result, _ := json.Marshal(map[string]string{"uuid": uuid})
 	return string(result)
@@ -83,7 +88,11 @@ func closeDB(this js.Value, args []js.Value) interface{} {
 	if len(args) != 1 {
 		return "invalid arguments: expected (vaultUuid)"
 	}
-	delete(databases, args[0].String())
+	uuid := args[0].String()
+	if db, ok := databases[uuid]; ok {
+		db.Wipe()
+		delete(databases, uuid)
+	}
 	return nil
 }
 
@@ -446,6 +455,22 @@ func searchRecords(this js.Value, args []js.Value) interface{} {
 	mode := args[2].Int() // 0=all fields, 1=names only, 2=URL exact match
 	uuids := db.Search(query, mode)
 	jsonData, err := json.Marshal(uuids)
+	if err != nil {
+		return fmt.Sprintf("json marshal error: %s", err)
+	}
+	return string(jsonData)
+}
+
+func searchRecordResults(this js.Value, args []js.Value) interface{} {
+	db, _, ok := getDB(args)
+	if !ok {
+		return "database not open"
+	}
+	if len(args) != 3 {
+		return "invalid arguments: expected (vaultUuid, query, mode)"
+	}
+	result := db.SearchWithAutoSelect(args[1].String(), args[2].Int())
+	jsonData, err := json.Marshal(result)
 	if err != nil {
 		return fmt.Sprintf("json marshal error: %s", err)
 	}
@@ -863,6 +888,7 @@ func main() {
 	js.Global().Set("deleteRecord", js.FuncOf(deleteRecord))
 	js.Global().Set("UpdateDBFields", js.FuncOf(updateDBFields))
 	js.Global().Set("searchRecords", js.FuncOf(searchRecords))
+	js.Global().Set("searchRecordResults", js.FuncOf(searchRecordResults))
 	js.Global().Set("getSuggestion", js.FuncOf(getSuggestion))
 	js.Global().Set("getTOTP", js.FuncOf(getTOTP))
 	js.Global().Set("copyFieldToClipboard", js.FuncOf(copyFieldToClipboard))

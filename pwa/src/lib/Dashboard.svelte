@@ -1,16 +1,16 @@
 <script>
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import { get } from 'svelte/store'
   import { selectedFile, dbItems, secondaryVaults, toast, clipboardSession, clipboardContext, switchboardUrl, switchboardConnected, crossProfileEnabled, delegatesVersion } from '../store.js'
   import {
     openDatabase,
     getRecordData, getDatabaseData, saveDatabase, getDatabaseInfo,
     updateRecordFields, updateDBFields, deleteRecord as wasmDeleteRecord,
-    searchRecords, closeDatabase, loadVaultFile,
+    searchRecords, searchRecordResults, closeDatabase, loadVaultFile,
     copyFieldToClipboard, copyCustomFieldToClipboard, copyTOTP as wasmCopyTOTP,
     getTOTP, getFieldValue, getCustomFieldValue,
   } from '../wasm.js'
-  import { addSecondaryCredential, removeSecondaryCredential } from './secondaryVaults.js'
+  import { addSecondaryCredential, updateSecondaryHandle, removeSecondaryCredential } from './secondaryVaults.js'
   import { getSwitchboardUrl, getCrossProfileEnabled } from './delegates.js'
   import { isBiometricEnrolledForFile, unlockWithBiometric } from './biometric.js'
   import { getDelegates, verifyDelegateById, recordFill } from './delegates.js'
@@ -46,6 +46,10 @@
   let dbKey        = $state('')
   let lastSave     = $state('')
   let hasDelegates = $state(false)
+  let searchWasActive = false
+  let preSearchSelection = null
+  let autofillNearMatchKeys = $state(null)
+  let autofillNearMatchUrl = $state('')
 
   $effect(() => {
     void $delegatesVersion
@@ -225,51 +229,56 @@
       .map(({ _d, ...rest }) => rest)
   }
 
-  // Encrypt credentials for a specific record using the given AES-GCM session key.
-  async function autofillEncryptRecord(sessionKey, uuid, vaultUuid) {
+  function autofillRecordMeta(uuid, vaultUuid) {
     const v = vaultUuid || dbKey
     const rec = getRecordData(v, uuid)
     const autotype = rec.Autotype || '\\u\\t\\p\\n'
     const parseErr = autofillValidateSequence(autotype)
     if (parseErr) throw new Error(`Could not parse autofill sequence: ${autotype}`)
-
-    // Parse sequence to determine which fields are referenced.
-    const codes = new Set()
-    const fieldNums = new Set()
-    for (let i = 0; i < autotype.length; ) {
-      if (autotype[i] !== '\\') { i++; continue }
-      const code = autotype[i + 1]
-      if (!code) break
-      if (code === 'f') {
-        const d = autotype[i + 2]
-        if (d && /^[1-9]$/.test(d)) { fieldNums.add(parseInt(d)); i += 3 }
-        else { fieldNums.add(1); i += 2 }
-      } else if (code === 'w' || code === 'W') {
-        let j = i + 2, count = 0
-        while (j < autotype.length && count < 3 && /^[0-9]$/.test(autotype[j])) { j++; count++ }
-        i = j
-      } else {
-        codes.add(code); i += 2
-      }
+    return {
+      title: rec.Title, autotype,
+      fields: [
+        rec.Username ? { code: 'u', label: 'Username', value: rec.Username } : null,
+        rec.Password !== '' && rec.Password !== undefined ? { code: 'p', label: 'Password', sensitive: true } : null,
+        rec.Email ? { code: 'm', label: 'Email', value: rec.Email } : null,
+        rec.TwoFactorKey !== undefined ? { code: '2', label: 'One-time code', sensitive: true } : null,
+        ...(rec.CustomFields || []).slice(0, 9).filter(cf => cf.Value !== '').map((cf, i) => ({
+          code: 'f' + (i + 1), label: cf.Name, sensitive: !!cf.Sensitive,
+          ...(cf.Sensitive ? {} : { value: cf.Value }),
+        })),
+        rec.Notes !== '' && rec.Notes !== undefined ? { code: 'notes', label: 'Notes', sensitive: true, notes: true } : null,
+      ].filter(Boolean),
     }
+  }
 
-    const fields = {}
-    const sensitiveCodes = []  // field codes whose values are sensitive (blocked on HTTP)
-    if (codes.has('u')) fields.u = rec.Username ?? ''
-    if (codes.has('p')) { fields.p = getFieldValue(v, uuid, 'Password') ?? ''; sensitiveCodes.push('p') }
-    if (codes.has('m')) fields.m = rec.Email ?? ''
-    if (codes.has('2')) { fields['2'] = getTOTP(v, uuid).code ?? ''; sensitiveCodes.push('2') }
-    for (const n of fieldNums) {
-      const cf = rec.CustomFields?.[n - 1]
-      fields['f' + n] = cf ? (cf.Value !== null ? cf.Value : (getCustomFieldValue(v, uuid, cf.Name) ?? '')) : ''
-      if (cf?.Value === null) sensitiveCodes.push('f' + n)  // null = sensitive custom field
+  function autofillFieldValue(uuid, vaultUuid, code) {
+    const v = vaultUuid || dbKey
+    const rec = getRecordData(v, uuid)
+    if (code === 'u') return rec.Username ?? ''
+    if (code === 'p') return getFieldValue(v, uuid, 'Password') ?? ''
+    if (code === 'm') return rec.Email ?? ''
+    if (code === '2') return getTOTP(v, uuid).code ?? ''
+    if (code === 'notes') return getFieldValue(v, uuid, 'Notes') ?? ''
+    if (/^f[1-9]$/.test(code)) {
+      const cf = rec.CustomFields?.[parseInt(code.slice(1)) - 1]
+      return cf ? (cf.Value !== null ? cf.Value : (getCustomFieldValue(v, uuid, cf.Name) ?? '')) : ''
     }
+    return ''
+  }
 
+  function autofillFieldData(uuid, vaultUuid, code) {
+    if (code === '2') {
+      const data = getTOTP(vaultUuid || dbKey, uuid)
+      return { value: data.code ?? '', seconds: data.seconds, period: data.period }
+    }
+    return { value: autofillFieldValue(uuid, vaultUuid, code) }
+  }
+
+  async function autofillEncryptData(sessionKey, data) {
     const iv = crypto.getRandomValues(new Uint8Array(12))
-    const pt = new TextEncoder().encode(JSON.stringify(fields))
+    const pt = new TextEncoder().encode(JSON.stringify(data))
     const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, sessionKey, pt)
     return {
-      title: rec.Title, autotype, sensitiveCodes,
       iv: btoa(String.fromCharCode(...iv)),
       ciphertext: btoa(String.fromCharCode(...new Uint8Array(ct))),
     }
@@ -296,45 +305,6 @@
   }
 
   // ── Cross-profile autofill intent handler ────────────────────────────────
-
-  // Extracts plain credential fields for a record (same logic as autofillEncryptRecord
-  // but returns unencrypted fields for cross-profile blob encryption).
-  function buildRecordFields(uuid, vaultUuid) {
-    const v = vaultUuid || dbKey
-    const rec = getRecordData(v, uuid)
-    const autotype = rec.Autotype || '\\u\\t\\p\\n'
-    if (autofillValidateSequence(autotype)) throw new Error(`Invalid autotype: ${autotype}`)
-
-    const codes = new Set()
-    const fieldNums = new Set()
-    for (let i = 0; i < autotype.length; ) {
-      if (autotype[i] !== '\\') { i++; continue }
-      const code = autotype[i + 1]
-      if (!code) break
-      if (code === 'f') {
-        const d = autotype[i + 2]
-        if (d && /^[1-9]$/.test(d)) { fieldNums.add(parseInt(d)); i += 3 }
-        else { fieldNums.add(1); i += 2 }
-      } else if (code === 'w' || code === 'W') {
-        let j = i + 2, count = 0
-        while (j < autotype.length && count < 3 && /^[0-9]$/.test(autotype[j])) { j++; count++ }
-        i = j
-      } else { codes.add(code); i += 2 }
-    }
-
-    const fields = {}
-    const sensitiveCodes = []
-    if (codes.has('u')) fields.u = rec.Username ?? ''
-    if (codes.has('p')) { fields.p = getFieldValue(v, uuid, 'Password') ?? ''; sensitiveCodes.push('p') }
-    if (codes.has('m')) fields.m = rec.Email ?? ''
-    if (codes.has('2')) { fields['2'] = getTOTP(v, uuid).code ?? ''; sensitiveCodes.push('2') }
-    for (const n of fieldNums) {
-      const cf = rec.CustomFields?.[n - 1]
-      fields['f' + n] = cf ? (cf.Value !== null ? cf.Value : (getCustomFieldValue(v, uuid, cf.Name) ?? '')) : ''
-      if (cf?.Value === null) sensitiveCodes.push('f' + n)
-    }
-    return { autotype, sensitiveCodes, fields }
-  }
 
   // Encrypt data with the autofill popup's ECDH public key and send as a ws-relay reply.
   async function sha256B64(bytes) {
@@ -450,6 +420,11 @@
           if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo }))
           return
         }
+        if (msg.msgType === 'view-near-matches') {
+          showAutofillNearMatches(msg.url || '')
+          if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo }))
+          return
+        }
         if (msg.msgType === 'save-url') {
           try { await autofillSaveURL(msg.uuid, msg.vaultUuid || null, msg.url) } catch {}
           if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo }))
@@ -466,14 +441,29 @@
               if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo, error: 'Credentials require an exact saved URL match' }))
               return
             }
-            const rf = buildRecordFields(msg.uuid, msg.vaultUuid || null)
+            const meta = autofillRecordMeta(msg.uuid, msg.vaultUuid || null)
             await sbEncryptReply(msg.replyTo, msg.ecdh, [{
               uuid: msg.uuid, vaultUuid: msg.vaultUuid || null,
               title: rec.Title, matchType: 'search', existingUrl: rec.URL || '',
-              autotype: rf.autotype, sensitiveCodes: rf.sensitiveCodes, fields: rf.fields,
+              autotype: meta.autotype, fields: meta.fields,
             }], { delegateId: verified.id, requestHash })
           } catch(e) {
             if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo, error: e.message || 'Could not get credentials' }))
+          }
+          return
+        }
+        if (msg.msgType === 'field-value') {
+          try {
+            const rec = getRecordData(msg.vaultUuid || dbKey, msg.uuid)
+            if (canonicalURL(rec.URL || '') !== canonicalURL(msg.url || '')) {
+              if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo, error: 'Credentials require an exact saved URL match' }))
+              return
+            }
+            await sbEncryptReply(msg.replyTo, msg.ecdh, {
+              code: msg.query || '', ...autofillFieldData(msg.uuid, msg.vaultUuid || null, msg.query || ''),
+            }, { delegateId: verified.id, requestHash })
+          } catch(e) {
+            if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo, error: e.message || 'Could not get field value' }))
           }
           return
         }
@@ -618,7 +608,7 @@
           return
         }
 
-        // Targeted credential fetch
+        // Targeted record metadata fetch
         const uuid = msg.uuid || selectedUUID
         const vaultUuid = msg.uuid ? (msg.vaultUuid || null) : selectedVaultUuid
         if (!uuid) {
@@ -626,8 +616,24 @@
           return
         }
         try {
-          const result = await autofillEncryptRecord(sessionKey, uuid, vaultUuid)
+          const result = await autofillEncryptData(sessionKey, autofillRecordMeta(uuid, vaultUuid))
           ch.postMessage({ type: 'record', ...result, nonce: msg.nonce })
+        } catch (e) {
+          ch.postMessage({ type: 'error', message: e.message, nonce: msg.nonce })
+        }
+        return
+      }
+
+      if (msg.type === 'field-value') {
+        if (!sessionKey) {
+          ch.postMessage({ type: 'error', message: 'No secure session', nonce: msg.nonce })
+          return
+        }
+        try {
+          const result = await autofillEncryptData(sessionKey, {
+            code: msg.code || '', ...autofillFieldData(msg.uuid, msg.vaultUuid || null, msg.code || ''),
+          })
+          ch.postMessage({ type: 'field-value', ...result, nonce: msg.nonce })
         } catch (e) {
           ch.postMessage({ type: 'error', message: e.message, nonce: msg.nonce })
         }
@@ -680,6 +686,18 @@
   })
 
   // Load a record by UUID. vaultUuid is null for primary vault records.
+  function loadRecordSelection(uuid, vaultUuid = null) {
+    if (!uuid) {
+      record = null
+      selectedUUID = null
+      selectedVaultUuid = null
+      return
+    }
+    record = getRecordData(vaultUuid || dbKey, uuid)
+    selectedUUID = uuid
+    selectedVaultUuid = vaultUuid
+  }
+
   function selectRecord(uuid, vaultUuid = null) {
     if (isEditing && editDirty) {
       if (!confirm('Discard unsaved changes?')) return
@@ -694,13 +712,39 @@
     isNew = false
     editDirty = false
     try {
-      record = getRecordData(vaultUuid || dbKey, uuid)
-      selectedUUID = uuid
-      selectedVaultUuid = vaultUuid
+      loadRecordSelection(uuid, vaultUuid)
     } catch (e) {
       console.error(e)
       showToast('Could not load record.')
     }
+  }
+
+  function autofillRecordKey(uuid, vaultUuid = null) {
+    return `${vaultUuid || ''}:${uuid}`
+  }
+
+  function clearAutofillNearMatches() {
+    autofillNearMatchKeys = null
+    autofillNearMatchUrl = ''
+  }
+
+  function showAutofillNearMatches(url) {
+    if ((isEditing && editDirty) || (sheetOpen && vaultDirty)) {
+      showToast('Finish editing before showing autofill near matches.')
+      return
+    }
+    const matches = autofillFindRecords(url).filter(r => r.matchType !== 'exact')
+    autofillNearMatchKeys = matches.map(r => autofillRecordKey(r.uuid, r.vaultUuid))
+    autofillNearMatchUrl = canonicalURL(url)
+    query = ''
+    clearTimeout(_debounceTimer)
+    debouncedQuery = ''
+    sheetOpen = false
+    vaultDirty = false
+    isEditing = false
+    isNew = false
+    editDirty = false
+    loadRecordSelection(null)
   }
 
   function startEdit() {
@@ -753,7 +797,7 @@
       ))
       secondaryHead[sv.uuid] = data.slice(72, 152)
       try { secondaryModified[sv.uuid] = (await handle.getFile()).lastModified } catch {}
-      try { await addSecondaryCredential(dbKey, filename, sv.uuid, sv.masterPassword, handle) } catch {}
+      try { await updateSecondaryHandle(dbKey, sv.uuid, filename, handle) } catch {}
       showToast('Saved to ' + (sv.name || filename), null, 2000)
     } else {
       const fname = sv.filename ?? 'vault'
@@ -1241,6 +1285,11 @@
     onclosed()
   }
 
+  function closeSecondarySetup() {
+    secondarySetup = null
+    sheetOpen = true
+  }
+
   async function lockSecondaryVault(vaultUuid) {
     await removeSecondaryCredential(dbKey, vaultUuid)
     closeDatabase(vaultUuid)
@@ -1303,13 +1352,16 @@
 
   async function confirmSecondarySetup() {
     if (!secondarySetup?.password) return
-    secondarySetup = { ...secondarySetup, busy: true, error: '' }
+    const setup = secondarySetup
+    let secondaryPassword = setup.password
+    secondarySetup = { ...setup, password: '', busy: true, error: '' }
 
     // Biometric confirmation gesture if enrolled (proves identity without exposing master password)
-    if (secondarySetup.needsAuth) {
+    if (setup.needsAuth) {
       try {
         await unlockWithBiometric($selectedFile?.name ?? '')
       } catch (e) {
+        secondaryPassword = ''
         secondarySetup = { ...secondarySetup, busy: false,
           error: e.name === 'NotAllowedError' ? 'Authentication cancelled.' : 'Authentication failed: ' + e.message }
         return
@@ -1319,17 +1371,17 @@
     try {
       let secondaryUuid
       if (_secondaryHandle) {
-        secondaryUuid = await loadVaultFile(_secondaryHandle, secondarySetup.password)
+        secondaryUuid = await loadVaultFile(_secondaryHandle, secondaryPassword)
       } else {
         const buf = await _secondaryFallbackFile.arrayBuffer()
-        secondaryUuid = openDatabase(new Uint8Array(buf), secondarySetup.password)
+        secondaryUuid = openDatabase(new Uint8Array(buf), secondaryPassword)
       }
 
       if (secondaryUuid === dbKey) {
         // Don't closeDatabase here — same UUID means this IS the primary vault.
         // Closing it would remove the primary from WASM memory.
         secondarySetup = { ...secondarySetup, busy: false,
-          error: `"${secondarySetup.filename}" is already open as your primary vault and cannot also be added as a secondary vault.` }
+          error: `"${setup.filename}" is already open as your primary vault and cannot also be added as a secondary vault.` }
         return
       }
 
@@ -1337,7 +1389,7 @@
         // Don't closeDatabase here — this secondary is already in the WASM map.
         // Closing it would break the already-open secondary vault.
         secondarySetup = { ...secondarySetup, busy: false,
-          error: `"${secondarySetup.filename}" is already open as a secondary vault.` }
+          error: `"${setup.filename}" is already open as a secondary vault.` }
         return
       }
 
@@ -1348,18 +1400,17 @@
         try { const w = await _secondaryHandle.createWritable(); await w.abort(); readonly = false } catch {}
       }
 
-      await addSecondaryCredential(dbKey, secondarySetup.filename, secondaryUuid, secondarySetup.password, _secondaryHandle)
+      await addSecondaryCredential(dbKey, setup.filename, secondaryUuid, secondaryPassword, _secondaryHandle)
 
       secondaryVaults.update(vs => {
         const filtered = vs.filter(v => v.uuid !== secondaryUuid)
         return [...filtered, {
           handle: _secondaryHandle,
-          name: info?.name || secondarySetup.filename,
-          filename: secondarySetup.filename,
+          name: info?.name || setup.filename,
+          filename: setup.filename,
           readonly,
           items: items.map(i => ({ ...i, vaultUuid: secondaryUuid })),
           uuid: secondaryUuid,
-          masterPassword: secondarySetup.password,
         }]
       })
       if (_secondaryHandle) {
@@ -1370,6 +1421,8 @@
       sheetOpen = true
     } catch (e) {
       secondarySetup = { ...secondarySetup, busy: false, error: 'Wrong password or invalid file.' }
+    } finally {
+      secondaryPassword = ''
     }
   }
 
@@ -1388,17 +1441,36 @@
   let showHelp      = $state(false)
   let collapseSeq   = $state('')
 
+  let vaultSearchResults = $derived.by(() => {
+    const results = new Map()
+    if (!debouncedQuery.trim()) return results
+    try {
+      results.set('', searchRecordResults(dbKey, debouncedQuery, 0))
+    } catch {}
+    for (const sv of $secondaryVaults) {
+      try {
+        results.set(sv.uuid, searchRecordResults(sv.uuid, debouncedQuery, 0))
+      } catch {}
+    }
+    return results
+  })
+
   // Flat ordered {uuid, vaultUuid} list spanning all open vaults, matching RecordList's sort.
   // vaultUuid is null for primary vault records (selectRecord defaults to dbKey).
   let flatList = $derived.by(() => {
     function sortedEntries(items, vaultUuid) {
       let list = items
       if (pendingDeleteUUID) list = list.filter(i => i.uuid !== pendingDeleteUUID)
+      if (autofillNearMatchKeys) {
+        const included = new Set(autofillNearMatchKeys)
+        list = list.filter(i => included.has(autofillRecordKey(i.uuid, vaultUuid)))
+      }
       if (debouncedQuery.trim()) {
-        try {
-          const matched = new Set(searchRecords(vaultUuid ?? dbKey, debouncedQuery, 0))
+        const result = vaultSearchResults.get(vaultUuid ?? '')
+        if (result) {
+          const matched = new Set(result.uuids ?? [])
           list = list.filter(i => matched.has(i.uuid))
-        } catch {}
+        }
       }
       return [...list].sort((a, b) => {
         const ga = a.group || 'Ungrouped', gb = b.group || 'Ungrouped'
@@ -1410,6 +1482,69 @@
       ...sortedEntries($dbItems, null),
       ...$secondaryVaults.flatMap(sv => sortedEntries(sv.items ?? [], sv.uuid)),
     ]
+  })
+
+  function bestSearchMatch(searchText, candidates) {
+    if (!searchText.trim() || candidates.length === 0) return null
+    let best = null
+    let bestScore = Infinity
+    for (const candidate of candidates) {
+      const result = vaultSearchResults.get(candidate.vaultUuid ?? '')
+      if (result?.autoSelectUuid === candidate.uuid && Number.isFinite(result.autoSelectScore)) {
+        if (result.autoSelectScore < bestScore) {
+          best = candidate
+          bestScore = result.autoSelectScore
+        }
+      }
+    }
+    return best
+  }
+
+  $effect(() => {
+    const searchText = debouncedQuery.trim()
+    const hasSearch = !!searchText
+
+    if (hasSearch && !searchWasActive) {
+      untrack(() => {
+        preSearchSelection = { uuid: selectedUUID, vaultUuid: selectedVaultUuid }
+        searchWasActive = true
+      })
+    }
+
+    if (!hasSearch) {
+      if (searchWasActive && !isEditing && !isNew) {
+        const restore = preSearchSelection
+        searchWasActive = false
+        preSearchSelection = null
+        try {
+          loadRecordSelection(restore?.uuid ?? null, restore?.vaultUuid ?? null)
+        } catch (e) {
+          console.error(e)
+          showToast('Could not restore previous record.')
+        }
+      } else if (searchWasActive && (isEditing || isNew)) {
+        searchWasActive = false
+        preSearchSelection = null
+      }
+      return
+    }
+
+    if (isEditing || isNew || sheetOpen) return
+
+    const best = bestSearchMatch(searchText, flatList)
+    if (!best) return
+
+    const alreadySelected = untrack(() =>
+      selectedUUID === best.uuid && selectedVaultUuid === best.vaultUuid
+    )
+    if (alreadySelected) return
+
+    try {
+      loadRecordSelection(best.uuid, best.vaultUuid)
+    } catch (e) {
+      console.error(e)
+      showToast('Could not load best search match.')
+    }
   })
 
   async function copyRecordField(field) {
@@ -1458,6 +1593,7 @@
     const inSearch = e.target === searchInput
 
     if (e.key === 'Escape') {
+      if (autofillNearMatchKeys) { clearAutofillNearMatches(); return }
       if (showHelp) { showHelp = false; return }
       if (inSearch && query) { query = ''; clearTimeout(_debounceTimer); debouncedQuery = ''; return }
       if (inSearch) { searchInput?.blur(); return }
@@ -1546,8 +1682,8 @@
 
 {#if secondarySetup}
   <div class="modal-overlay" role="presentation"
-    onclick={e => { if (!secondarySetup.busy) secondarySetup = null; sheetOpen = true }}
-    onkeydown={e => { if (e.key === 'Escape' && !secondarySetup.busy) { secondarySetup = null; sheetOpen = true } }}>
+    onclick={e => { if (!secondarySetup.busy) closeSecondarySetup() }}
+    onkeydown={e => { if (e.key === 'Escape' && !secondarySetup.busy) closeSecondarySetup() }}>
     <div class="modal" role="dialog" aria-modal="true" tabindex="-1"
       onclick={e => e.stopPropagation()} onkeydown={e => e.stopPropagation()}>
       <div class="modal-title">Unlock {secondarySetup.filename}</div>
@@ -1573,7 +1709,7 @@
         <button class="btn btn-primary" disabled={!secondarySetup.password || secondarySetup.busy} onclick={confirmSecondarySetup}>
           {secondarySetup.busy ? 'Unlocking…' : secondarySetup.needsAuth ? 'Unlock & verify identity' : 'Unlock'}
         </button>
-        <button class="btn btn-ghost" disabled={secondarySetup.busy} onclick={() => { secondarySetup = null; sheetOpen = true }}>Cancel</button>
+        <button class="btn btn-ghost" disabled={secondarySetup.busy} onclick={closeSecondarySetup}>Cancel</button>
       </div>
     </div>
   </div>
@@ -1601,17 +1737,27 @@
       type="text"
       placeholder="Search vault"
       bind:value={query}
+      oninput={clearAutofillNearMatches}
       bind:this={searchInput}
       use:focusOnMount
     />
     {#if query}
-      <button class="icon-btn-flat" onclick={() => { query = ''; clearTimeout(_debounceTimer); debouncedQuery = '' }} aria-label="Clear search">
+      <button class="icon-btn-flat" onclick={() => { clearAutofillNearMatches(); query = ''; clearTimeout(_debounceTimer); debouncedQuery = '' }} aria-label="Clear search">
         <Icon name="x" size={16} stroke="var(--text-soft)"/>
       </button>
     {/if}
   </div>
 
-  <RecordList query={debouncedQuery} {selectedUUID} {selectedVaultUuid} {collapseSeq} excludeUUID={pendingDeleteUUID} storageKey={dbKey} primaryVaultName={vaultName} ontap={selectRecord} oncopy={copyToClipboard} oncopytotp={copyTOTPForUUID} onwasmcopyfield={copyFieldViaWasm} onwasmcopycustomfield={copyCustomFieldViaWasm}/>
+  {#if autofillNearMatchKeys}
+    <div class="autofill-near-match-filter muted">
+      Near URL matches for {autofillNearMatchUrl}
+      <button class="icon-btn-flat" onclick={clearAutofillNearMatches} aria-label="Clear autofill near matches">
+        <Icon name="x" size={14} stroke="var(--text-soft)"/>
+      </button>
+    </div>
+  {/if}
+
+  <RecordList query={debouncedQuery} includeKeys={autofillNearMatchKeys} {selectedUUID} {selectedVaultUuid} {collapseSeq} excludeUUID={pendingDeleteUUID} storageKey={dbKey} primaryVaultName={vaultName} ontap={selectRecord} oncopy={copyToClipboard} oncopytotp={copyTOTPForUUID} onwasmcopyfield={copyFieldViaWasm} onwasmcopycustomfield={copyCustomFieldViaWasm}/>
 
   <!-- FAB (mobile) -->
   <button class="fab" onclick={startNew} aria-label="New">
@@ -1756,6 +1902,28 @@
 </div>
 
 <style>
+  .autofill-near-match-filter {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 7px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-2);
+    font-size: 12px;
+  }
+
+  :global(.vault-app.is-desktop) .autofill-near-match-filter {
+    grid-column: 1;
+    grid-row: 3;
+    align-self: start;
+    z-index: 2;
+  }
+
+  :global(.vault-app.is-desktop) .autofill-near-match-filter + :global(.list-collapsible) {
+    padding-top: 35px;
+  }
+
   .help-backdrop {
     position: fixed;
     inset: 0;
