@@ -175,6 +175,15 @@ test.describe('Bookmarklet — autofill popup phases', () => {
     await expect(login.locator('#pass')).toHaveValue('')
   })
 
+  test('bookmarklet reports separate browser profile when its signing key is absent', async ({ context }) => {
+    const { login } = await setupAutofillTest(context)
+    const unpairedUrl = makeDelegateBookmarkletUrl(PORTPASS_URL, 'afp1_unpaired', 'http://localhost:7577')
+
+    const popup = await activateBookmarklet(login, unpairedUrl, { clickRow: false })
+    await expect(popup.locator('.pp-error-title')).toHaveText('Browser profile not paired')
+    await expect(popup.locator('.pp-phase-center')).toContainText('Private windows use separate temporary storage')
+  })
+
   test('cross-profile pairing token can be imported and shows bookmarklet without private key', async ({ context }) => {
     const { portpass } = await setupAutofillTest(context)
     const pairing = await context.newPage()
@@ -194,7 +203,7 @@ test.describe('Bookmarklet — autofill popup phases', () => {
 
     await portpass.locator('.vault-pill').click()
     await expandAutofillSetup(portpass)
-    await expect(portpass.getByText('In your everyday browser')).toBeVisible()
+    await expect(portpass.getByText('In the filling browser or private window')).toBeVisible()
     await portpass.getByRole('button', { name: '+ Pair everyday profile' }).click()
     await portpass.getByPlaceholder('ppair1_...').fill(token)
     await expect(portpass.locator('.vs-install-warning')).toContainText('Confirm this matches')

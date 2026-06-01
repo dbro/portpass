@@ -521,11 +521,11 @@ body {
 
     loadPairedProfile(delegateId).then(function(profile) {
       pairedProfile = profile
-      if (!pairedProfile) { sendError('Autofill profile is not paired — create a new bookmarklet in Portpass'); return }
+      if (!pairedProfile) { sendError('Autofill profile is not paired in this browser profile'); return }
       cpPubSpkiB64 = pairedProfile.publicKeyB64 || btoa(String.fromCharCode.apply(null, new Uint8Array(pairedProfile.publicKey || [])))
       startProbe()
     }).catch(function() {
-      sendError('Autofill profile is not paired — create a new bookmarklet in Portpass')
+      sendError('Autofill profile is not paired in this browser profile')
     })
   }
 
@@ -1133,7 +1133,7 @@ body {
     var help = document.createElement('div')
     help.className = 'pp-waiting-sub'
     help.style.cssText = 'text-align:left;font-size:16px;line-height:1.45;margin-top:-14px'
-    help.textContent = 'This creates a signing key that stays in this browser. Pair it with your vault profile so Portpass will trust autofill requests from here.'
+    help.textContent = 'This creates a signing key that stays in this browser profile. Pair it with your vault profile so Portpass will trust autofill requests from here. Private windows must be paired again after the private session closes.'
     wrap.appendChild(help)
 
     function step(num, heading, body) {
@@ -1746,6 +1746,7 @@ body {
 
   function detectErrorPhase(msg) {
     var lm = (msg || '').toLowerCase()
+    if (/profile is not paired|not paired in this browser profile/.test(lm))   return 'unpaired'
     if (/cannot connect|websocket relay|no subscriber/.test(lm))             return 'noconn'
     if (/vault.*lock|is locked/.test(lm) || /open a record/.test(lm))       return 'locked'
     if (/autofill sequence|no autofill|autotype|could not parse/.test(lm))   return 'noseq'
@@ -1764,6 +1765,10 @@ body {
       multiinstance: { icon: SVG_WARN_LG, color: 'var(--orange)', title: 'Multiple Portpass windows open',
                        body: 'More than one Portpass window is open. Close all but one and try again, or use the secondary vault feature to access multiple vaults from one window.',
                        action: null },
+      unpaired: { icon: SVG_WARN_LG, color: 'var(--orange)', title: 'Browser profile not paired',
+                  body: ["This browser profile does not contain the bookmarklet's signing key.",
+                         "Private windows use separate temporary storage. To autofill here, open the cross-profile pairing page in this private window and pair it through the local relay. Pair again after the private session closes."],
+                  action: null },
       noconn: { icon: SVG_WARN_LG, color: 'var(--orange)', title: 'Portpass not found',
                 body: ["Portpass isn't open in this browser profile.",
                        "Open and unlock Portpass, then try again — or start the websocket relay and open Portpass in a separate browser profile for cross-profile autofill."],

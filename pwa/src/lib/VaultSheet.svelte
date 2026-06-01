@@ -564,12 +564,12 @@
           </span>
         </div>
         <p class="muted vs-option-copy">
-          Keep Portpass in this clean vault profile and fill from your everyday browser. Best protection from extensions; needs a one-time pairing.
+          Keep Portpass in this clean vault profile and fill from another browser profile or a private window. Best protection from extensions; private windows must pair again after the private session closes.
         </p>
         <div class="vs-step">
           <span class="vs-step-num">1</span>
           <div>
-            <div class="vs-step-title">In your everyday browser <span class="vs-profile-badge">OTHER PROFILE</span></div>
+            <div class="vs-step-title">In the filling browser or private window <span class="vs-profile-badge">OTHER PROFILE</span></div>
             <div class="muted vs-step-copy">Open <span class="mono">{pairingPageUrl}</span>, name and install the bookmarklet, then copy the pairing token.</div>
           </div>
         </div>
