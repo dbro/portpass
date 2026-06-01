@@ -528,7 +528,7 @@
           <div class="delegate-row">
             <div class="delegate-info">
               <span class="delegate-name">{d.name}</span>
-              <span class="delegate-meta muted">Created {fmtDate(d.created)}{d.displayCode ? ' · ' + d.displayCode : ''} · {total} {total === 1 ? 'page filled' : 'pages filled'} ({mode}){lastTs ? ' · Last filled ' + fmtRelative(lastTs) : ''}</span>
+              <span class="delegate-meta muted">Created {fmtDate(d.created)}{d.displayCode ? ' · ' + d.displayCode : ''} · {total} {total === 1 ? 'autofill use' : 'autofill uses'} ({mode}){lastTs ? ' · Last used ' + fmtRelative(lastTs) : ''}</span>
             </div>
             <button class="delegate-revoke" onclick={() => revokeOne(d.id)}>Revoke</button>
           </div>

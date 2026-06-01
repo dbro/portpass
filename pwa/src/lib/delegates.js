@@ -120,8 +120,8 @@ export async function verifyDelegateById(vaultUuid, delegateId, message, signatu
   }
 }
 
-// Record a successful page fill for a delegate. Called when autofill.html shows
-// its done/checkmark screen — once per page filled, not per field or connection.
+// Record a successful autofill popup use for a delegate. autofill.html calls
+// this once after the popup's first successful insertion.
 export async function recordFill(vaultUuid, delegateId, channel) {
   const all = await load()
   const list = (all[vaultUuid] ?? []).map(migrate)

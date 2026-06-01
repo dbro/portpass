@@ -226,7 +226,7 @@ test.describe('VaultSheet autofill installation UI', () => {
     await page.locator('.vs-close-btn').click()
     await expect(page.locator('.modal-title', { hasText: 'New same-profile bookmarklet' })).not.toBeVisible()
     await expect(page.locator('.delegate-name', { hasText: 'Test' })).toBeVisible()
-    await expect(page.locator('.delegate-row', { hasText: 'Test' }).locator('.delegate-meta')).toContainText('0 pages filled (same profile)')
+    await expect(page.locator('.delegate-row', { hasText: 'Test' }).locator('.delegate-meta')).toContainText('0 autofill uses (same profile)')
   })
 
   test('bookmarklet is not visible on per-vault detail page', async ({ page }) => {

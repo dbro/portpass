@@ -418,7 +418,9 @@ body {
   var fieldClicked = false    // bookmarklet reported a field was clicked
   var armedCode = 'sequence'  // null, 'sequence', or one field code
   var pendingFillMode = null  // compatibility fallback for older installed bookmarklets
+  var didInsertionsHappen = false
   var otpRefreshTimer = null
+  var idleCloseTimer = null
 
   var $content       = document.getElementById('pp-content')
   var $subheader     = document.getElementById('pp-subheader')
@@ -465,6 +467,10 @@ body {
     showPairingSetup()
     return
   }
+
+  window.addEventListener('focus', clearIdleCloseTimer)
+  window.addEventListener('blur', startIdleCloseTimer)
+  if (!document.hasFocus()) startIdleCloseTimer()
 
   // ── Startup: generate ECDH key pair, signal ready ─────────────────────────
   crypto.subtle.generateKey(
@@ -532,6 +538,8 @@ body {
       fieldClicked = true
       pendingFill()
     } else if (msg.type === 'fill-done') {
+      notifyFilledOnce()
+      startIdleCloseTimer()
       var mode = msg.mode || pendingFillMode
       pendingFillMode = null
       if (mode === 'single') {
@@ -1688,7 +1696,6 @@ body {
 
   function showDone() {
     if (otpRefreshTimer) { clearInterval(otpRefreshTimer); otpRefreshTimer = null }
-    if ($transport && $transport.notifyFilled) $transport.notifyFilled()
     hideSearchUI()
     $subheader.style.display = 'none'
     $content.innerHTML = ''
@@ -1716,6 +1723,29 @@ body {
 
     try { window.focus() } catch(_) {}
     setTimeout(function() { window.close() }, 1500)
+  }
+
+  function notifyFilledOnce() {
+    if (didInsertionsHappen) return
+    didInsertionsHappen = true
+    if ($transport && $transport.notifyFilled) $transport.notifyFilled()
+  }
+
+  function clearIdleCloseTimer() {
+    if (!idleCloseTimer) return
+    clearTimeout(idleCloseTimer)
+    idleCloseTimer = null
+  }
+
+  function startIdleCloseTimer() {
+    clearIdleCloseTimer()
+    if (document.hasFocus()) return
+    idleCloseTimer = setTimeout(function() {
+      if (window.opener && bookmarkletOrigin) {
+        try { window.opener.postMessage({ type: 'cancel' }, bookmarkletOrigin) } catch(_) {}
+      }
+      window.close()
+    }, 60000)
   }
 
   function detectErrorPhase(msg) {

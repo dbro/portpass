@@ -200,7 +200,7 @@ test.describe('Bookmarklet — autofill popup phases', () => {
     await expect(portpass.locator('.vs-install-warning')).toContainText('Confirm this matches')
     await portpass.getByRole('button', { name: 'Pair everyday profile', exact: true }).click()
     await expect(portpass.locator('.delegate-row', { hasText: 'Everyday profile' })).toBeVisible()
-    await expect(portpass.locator('.delegate-row', { hasText: 'Everyday profile' }).locator('.delegate-meta')).toContainText('0 pages filled (cross profile)')
+    await expect(portpass.locator('.delegate-row', { hasText: 'Everyday profile' }).locator('.delegate-meta')).toContainText('0 autofill uses (cross profile)')
   })
 
   test('wrong autofill pairing token is rejected', async ({ context }) => {
@@ -447,6 +447,54 @@ test.describe('Bookmarklet — autofill popup phases', () => {
     await login.locator('#user').click()
     await expect(login.locator('#user')).toHaveValue('alice')
     expect(popup.isClosed()).toBe(false)
+  })
+
+  test('single-value insertions count as one autofill use per popup load', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await createRecord(portpass, {
+      title: 'Count Site', username: 'alice', password: 'hunter2', autotype: '\\u\\t\\p',
+    })
+
+    const popup = await activateBookmarklet(login, bookmarkletUrl)
+    await popup.locator('.pp-field-row', { hasText: 'Username' }).click()
+    await login.locator('#user').click()
+    await expect(login.locator('#user')).toHaveValue('alice')
+
+    await popup.locator('.pp-field-row', { hasText: 'Password' }).click()
+    await login.locator('#pass').click()
+    await expect(login.locator('#pass')).toHaveValue('hunter2')
+
+    await portpass.locator('.vault-pill').click()
+    await expect(portpass.locator('.delegate-row', { hasText: 'test' }).locator('.delegate-meta')).toContainText('1 autofill use (same profile)')
+  })
+
+  test('unfocused popup closes after one minute unless it regains focus', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await createRecord(portpass, {
+      title: 'Idle Site', username: 'alice', password: 'hunter2', autotype: '\\u\\t\\p',
+    })
+
+    const popup = await activateBookmarklet(login, bookmarkletUrl)
+    await popup.clock.install()
+    await popup.evaluate(() => {
+      Object.defineProperty(document, 'hasFocus', { configurable: true, value: () => false })
+      window.dispatchEvent(new Event('blur'))
+    })
+    await popup.clock.fastForward(59000)
+    await popup.evaluate(() => {
+      Object.defineProperty(document, 'hasFocus', { configurable: true, value: () => true })
+      window.dispatchEvent(new Event('focus'))
+    })
+    await popup.clock.fastForward(60000)
+    expect(popup.isClosed()).toBe(false)
+
+    const closePromise = popup.waitForEvent('close')
+    await popup.evaluate(() => {
+      Object.defineProperty(document, 'hasFocus', { configurable: true, value: () => false })
+      window.dispatchEvent(new Event('blur'))
+    })
+    await popup.clock.fastForward(60000)
+    await closePromise
   })
 
   test('focused page field does not start autofill until a new click', async ({ context }) => {
