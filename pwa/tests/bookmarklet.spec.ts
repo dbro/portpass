@@ -512,6 +512,31 @@ test.describe('Bookmarklet — autofill popup phases', () => {
     await expect(login.locator('#pass')).toHaveValue('1234')
   })
 
+  test('named custom field token fills the matching custom field value', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await createRecord(portpass, {
+      title: 'Custom Sequence Site', password: 'hunter2', autotype: '\\v{PIN}',
+      custom: { name: 'PIN', value: '1234', sensitive: true },
+    })
+
+    const popup = await activateBookmarklet(login, bookmarkletUrl)
+    await expect(popup.locator('.pp-autofill-summary')).toContainText('PIN')
+    await login.locator('#pass').click()
+    await expect(login.locator('#pass')).toHaveValue('1234')
+  })
+
+  test('named custom field token types nothing when no custom field matches', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await createRecord(portpass, {
+      title: 'Missing Custom Site', password: 'hunter2', autotype: '\\v{Missing}',
+    })
+
+    await activateBookmarklet(login, bookmarkletUrl)
+    await login.locator('#pass').fill('existing')
+    await login.locator('#pass').click()
+    await expect(login.locator('#pass')).toHaveValue('')
+  })
+
   test('revealed one-time code shows a draining bar and refreshes when it expires', async ({ context }) => {
     test.setTimeout(50000)
     const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)

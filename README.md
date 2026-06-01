@@ -187,7 +187,7 @@ The text representation is also possible, and is easier to document here. The de
 | `\p` | Password |
 | `\m` | Email |
 | `\2` | One-time code (TOTP) |
-| `\fN` | Nth custom field (N is between 1 and 9) |
+| `\v{name}` | Custom field whose name matches `name` |
 | `\t` | Tab to next field |
 | `\s` | Shift-Tab (previous field) |
 | `\n` | Submit form |
@@ -198,7 +198,7 @@ The text representation is also possible, and is easier to document here. The de
 |---|---|
 | `\p\n` | fill password, submit form | 
 | `\u\n\W5\2` | fill username, submit form, wait 5 seconds, fill one-time code |
-| `\f1\t\f2\t\f3` | fill custom field #1 (eg credit card number), tab, fill custom field #2 (eg. expiration date), tab, fill custom field #3 (eg. CVN number) |
+| `\v{Card number}\t\v{Expiration date}\t\v{CVN}` | fill three named custom fields, separated by tabs |
 
 ### Best practices with Autofill
 
@@ -210,7 +210,7 @@ See [SECURITY.md](SECURITY.md) for a full description of how the delegate model 
 
 ### Differences from Official Password Safe app Autotype
 
-The official desktop Password Safe app has a function called "Autotype" that can insert keystrokes into other apps. Portpass uses the browser's javascript to inject values directly into the DOM. Portpass adds a new code for custom fields (\fN) which the official Password Safe app does not support.
+The official desktop Password Safe app has a function called "Autotype" that can insert keystrokes into other apps. Portpass uses the browser's javascript to inject values directly into the DOM and supports the same named custom-field code (`\v{name}`).
 
 ### Same-profile and cross-profile autofill
 

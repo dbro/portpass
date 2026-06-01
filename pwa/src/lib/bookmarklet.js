@@ -156,11 +156,11 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, R
       if (!code) break
       if (code === '\\') {
         lit += '\\'; i += 2
-      } else if (code === 'f') {
+      } else if (code === 'v' && seq[i + 2] === '{') {
         if (lit) { tokens.push({ type: 'lit', text: lit }); lit = '' }
-        var d = seq[i + 2]
-        if (d && /^[1-9]$/.test(d)) { tokens.push({ type: 'f', n: parseInt(d) }); i += 3 }
-        else { tokens.push({ type: 'f', n: 1 }); i += 2 }
+        var end = seq.indexOf('}', i + 3)
+        if (end < 0) break
+        tokens.push({ type: 'v', name: seq.slice(i + 3, end) }); i = end + 1
       } else if (code === 'w' || code === 'W') {
         if (lit) { tokens.push({ type: 'lit', text: lit }); lit = '' }
         var j = i + 2, count = 0
@@ -230,8 +230,8 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, R
       var tok = tokens[i]
       if (tok.type === 'delay') {
         await new Promise(function(r) { setTimeout(r, tok.ms) })
-      } else if (tok.type === 'lit' || tok.type === 'f') {
-        if (el) fillField(el, tok.type === 'f' ? (fields['f' + tok.n] || '') : tok.text)
+      } else if (tok.type === 'lit' || tok.type === 'v') {
+        if (el) fillField(el, tok.type === 'v' ? (fields['v{' + tok.name + '}'] || '') : tok.text)
       } else {
         var code = tok.code
         if (code === 'u' || code === 'p' || code === 'm' || code === '2') {

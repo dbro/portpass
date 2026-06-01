@@ -242,8 +242,8 @@
         rec.Password !== '' && rec.Password !== undefined ? { code: 'p', label: 'Password', sensitive: true } : null,
         rec.Email ? { code: 'm', label: 'Email', value: rec.Email } : null,
         rec.TwoFactorKey !== undefined ? { code: '2', label: 'One-time code', sensitive: true } : null,
-        ...(rec.CustomFields || []).slice(0, 9).filter(cf => cf.Value !== '').map((cf, i) => ({
-          code: 'f' + (i + 1), label: cf.Name, sensitive: !!cf.Sensitive,
+        ...(rec.CustomFields || []).slice(0, 9).filter(cf => cf.Value !== '').map(cf => ({
+          code: `v{${cf.Name}}`, label: cf.Name, sensitive: !!cf.Sensitive,
           ...(cf.Sensitive ? {} : { value: cf.Value }),
         })),
         rec.Notes !== '' && rec.Notes !== undefined ? { code: 'notes', label: 'Notes', sensitive: true, notes: true } : null,
@@ -259,8 +259,9 @@
     if (code === 'm') return rec.Email ?? ''
     if (code === '2') return getTOTP(v, uuid).code ?? ''
     if (code === 'notes') return getFieldValue(v, uuid, 'Notes') ?? ''
-    if (/^f[1-9]$/.test(code)) {
-      const cf = rec.CustomFields?.[parseInt(code.slice(1)) - 1]
+    const customFieldMatch = /^v\{([^}]*)\}$/.exec(code)
+    if (customFieldMatch) {
+      const cf = rec.CustomFields?.find(cf => cf.Name === customFieldMatch[1])
       return cf ? (cf.Value !== null ? cf.Value : (getCustomFieldValue(v, uuid, cf.Name) ?? '')) : ''
     }
     return ''
@@ -503,14 +504,11 @@
       if (seq[i] !== '\\') { i++; continue }
       if (i + 1 >= seq.length) return 'Sequence ends with \\'
       const code = seq[i + 1]
-      if (code === 'f') {
-        const d = seq[i + 2]
-        if (d !== undefined && /^[0-9]$/.test(d)) {
-          if (d === '0') return '\\f0 is not valid — field numbers start at 1'
-          i += 3
-        } else {
-          i += 2
-        }
+      if (code === 'v') {
+        if (seq[i + 2] !== '{') return '\\v must be followed by {custom field name}'
+        const end = seq.indexOf('}', i + 3)
+        if (end < 0) return '\\v{custom field name} must end with }'
+        i = end + 1
       } else if (code === 'w' || code === 'W') {
         let j = i + 2, count = 0
         while (j < seq.length && count < 3 && /^[0-9]$/.test(seq[j])) { j++; count++ }

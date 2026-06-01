@@ -55,6 +55,17 @@ test.describe('Autofill sequence — edit form', () => {
     await expect(page.getByRole('button', { name: 'Save' })).not.toBeDisabled()
   })
 
+  test('legacy \\fN custom field code is unsupported', async ({ page }) => {
+    await createVault(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    await page.getByPlaceholder('e.g. Bank of America').fill('Test')
+    await page.locator('input.mono').first().fill('pass')
+    await switchToRawMode(page)
+    await page.locator('.autotype-input').fill('\\f1')
+    await expect(page.locator('.banner-warn')).toContainText('\\f')
+    await expect(page.getByRole('button', { name: 'Save' })).not.toBeDisabled()
+  })
+
   test('trailing backslash blocks Save and shows error', async ({ page }) => {
     await createVault(page)
     await page.getByRole('button', { name: 'New', exact: true }).click()
@@ -66,15 +77,15 @@ test.describe('Autofill sequence — edit form', () => {
     await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled()
   })
 
-  test('\\f0 blocks Save and shows error', async ({ page }) => {
+  test('\\v without braces blocks Save and shows error', async ({ page }) => {
     await createVault(page)
     await page.getByRole('button', { name: 'New', exact: true }).click()
     await page.getByPlaceholder('e.g. Bank of America').fill('Test')
     await page.locator('input.mono').first().fill('pass')
     await switchToRawMode(page)
-    await page.locator('.autotype-input').fill('\\f0')
+    await page.locator('.autotype-input').fill('\\vPIN')
     await expect(page.locator('.banner-error')).toBeVisible()
-    await expect(page.locator('.banner-error')).toContainText('\\f0')
+    await expect(page.locator('.banner-error')).toContainText('\\v')
     await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled()
   })
 
@@ -115,7 +126,7 @@ test.describe('Autofill sequence — edit form', () => {
     await page.getByPlaceholder('e.g. Bank of America').fill('Test')
     await page.locator('input.mono').first().fill('pass')
     await switchToRawMode(page)
-    await page.locator('.autotype-input').fill('\\f0')
+    await page.locator('.autotype-input').fill('\\v{PIN')
     await expect(page.locator('.banner-error')).toBeVisible()
     await page.locator('.autotype-input').fill('\\u\\p')
     await expect(page.locator('.banner-error')).toHaveCount(0)
@@ -187,7 +198,7 @@ test.describe('Autofill sequence — round-trip persistence', () => {
     await switchToRawMode(page)
     for (const seq of [
       '\\u', '\\p', '\\t', '\\n', '\\m', '\\2', '\\s', '\\\\',
-      '\\f', '\\f1', '\\f9',
+      '\\v{PIN}', '\\v{Card number}',
       '\\w1', '\\w100', '\\w999', '\\W1', '\\W999',
       '\\u\\t\\p\\n', 'abc', '\\u\\tabc123\\t\\p',
     ]) {

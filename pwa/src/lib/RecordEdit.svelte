@@ -251,14 +251,11 @@
       if (seq[i] !== '\\') { i++; continue }
       if (i + 1 >= seq.length) return 'Sequence ends with \\'
       const code = seq[i + 1]
-      if (code === 'f') {
-        const d = seq[i + 2]
-        if (d !== undefined && /^[0-9]$/.test(d)) {
-          if (d === '0') return '\\f0 is not valid — field numbers start at 1'
-          i += 3
-        } else {
-          i += 2
-        }
+      if (code === 'v') {
+        if (seq[i + 2] !== '{') return '\\v must be followed by {custom field name}'
+        const end = seq.indexOf('}', i + 3)
+        if (end < 0) return '\\v{custom field name} must end with }'
+        i = end + 1
       } else if (code === 'w' || code === 'W') {
         let j = i + 2, count = 0
         while (j < seq.length && count < 3 && /^[0-9]$/.test(seq[j])) { j++; count++ }
@@ -274,16 +271,16 @@
   // Returns a warning string (non-blocking) for codes Portpass doesn't support.
   function warnAutotype(seq) {
     if (!seq) return ''
-    const supported = new Set(['u', 'p', 't', 'n', 'm', '2', 's', '\\', 'f', 'w', 'W'])
+    const supported = new Set(['u', 'p', 't', 'n', 'm', '2', 's', '\\', 'v', 'w', 'W'])
     const unknown = new Set()
     let i = 0
     while (i < seq.length) {
       if (seq[i] !== '\\') { i++; continue }
       if (i + 1 >= seq.length) break
       const code = seq[i + 1]
-      if (code === 'f') {
-        const d = seq[i + 2]
-        d !== undefined && /^[0-9]$/.test(d) ? (i += 3) : (i += 2)
+      if (code === 'v' && seq[i + 2] === '{') {
+        const end = seq.indexOf('}', i + 3)
+        i = end < 0 ? seq.length : end + 1
       } else if (code === 'w' || code === 'W') {
         let j = i + 2, count = 0
         while (j < seq.length && count < 3 && /^[0-9]$/.test(seq[j])) { j++; count++ }
@@ -323,17 +320,17 @@
       else if (c === 't') { toks.push({ type: 'nav', label: 'Tab', suffix: '→', raw: '\\t' }); i += 2 }
       else if (c === 's') { toks.push({ type: 'nav', label: 'Shift-Tab', suffix: '←', raw: '\\s' }); i += 2 }
       else if (c === 'n') { toks.push({ type: 'nav', label: 'Enter', suffix: '↵', raw: '\\n' }); i += 2 }
-      else if (c === 'f') {
-        const d = seq[i + 2]
-        if (d !== undefined && /^[0-9]$/.test(d)) {
-          if (d === '0') {
-            toks.push({ type: 'error', raw: '\\f0', label: '\\f0 invalid', message: '\\f0 is not valid — field numbers start at 1' }); i += 3
-          } else {
-            const n = parseInt(d)
-            toks.push({ type: 'field', label: cf?.[n - 1]?.Name?.trim() || `Custom ${n}`, raw: `\\f${d}` }); i += 3
-          }
+      else if (c === 'v') {
+        if (seq[i + 2] !== '{') {
+          toks.push({ type: 'error', raw: '\\v', label: '\\v missing {', message: '\\v must be followed by {custom field name}' }); i += 2
         } else {
-          toks.push({ type: 'field', label: cf?.[0]?.Name?.trim() || 'Custom 1', raw: '\\f' }); i += 2
+          const end = seq.indexOf('}', i + 3)
+          if (end < 0) {
+            toks.push({ type: 'error', raw: seq.slice(i), label: '\\v missing }', message: '\\v{custom field name} must end with }' }); i = seq.length
+          } else {
+            const name = seq.slice(i + 3, end)
+            toks.push({ type: 'field', label: name || 'Custom field', raw: seq.slice(i, end + 1) }); i = end + 1
+          }
         }
       } else if (c === 'w' || c === 'W') {
         let j = i + 2, cnt = 0
@@ -644,9 +641,9 @@
               <button type="button" class="palette-btn palette-field" onclick={() => addRaw('\\p')}>+ Password</button>
               <button type="button" class="palette-btn palette-field" onclick={() => addRaw('\\m')}>+ Email</button>
               <button type="button" class="palette-btn palette-field" onclick={() => addRaw('\\2')}>+ One-time code</button>
-              {#each customFields as cf, cfi}
+              {#each customFields as cf}
                 {#if cf.Name.trim()}
-                  <button type="button" class="palette-btn palette-field" onclick={() => addRaw(`\\f${cfi + 1}`)}>+ {cf.Name.trim()}</button>
+                  <button type="button" class="palette-btn palette-field" onclick={() => addRaw(`\\v{${cf.Name}}`)}>+ {cf.Name.trim()}</button>
                 {/if}
               {/each}
             </div>
@@ -709,7 +706,7 @@
             <span><span class="raw-code">\p</span> Password</span>
             <span><span class="raw-code">\m</span> Email</span>
             <span><span class="raw-code">\2</span> OTP</span>
-            <span><span class="raw-code">\fN</span> Custom N</span>
+            <span><span class="raw-code">\v{name}</span> Custom field</span>
           </div>
           <div class="raw-legend-row">
             <span class="raw-legend-cat muted">Navigate</span>
