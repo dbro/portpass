@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -129,26 +130,19 @@ func (db V3) ListByGroup(group string) []string {
 // removed, trailing slash removed.
 // E.g. "https://www.Bank.com/Login/?ref=1#top" → "bank.com/login"
 func CanonicalURL(rawURL string) string {
-	s := rawURL
-	for _, pfx := range []string{"https://", "http://"} {
-		if len(s) >= len(pfx) && strings.ToLower(s[:len(pfx)]) == pfx {
-			s = s[len(pfx):]
-			break
-		}
+	s := strings.TrimSpace(rawURL)
+	if s == "" {
+		return ""
 	}
-	if i := strings.IndexByte(s, '#'); i >= 0 {
-		s = s[:i]
+	if !strings.Contains(s, "://") {
+		s = "https://" + s
 	}
-	if i := strings.IndexByte(s, '?'); i >= 0 {
-		s = s[:i]
+	parsed, err := url.Parse(s)
+	if err != nil || parsed.Host == "" {
+		return ""
 	}
-	s = strings.ToLower(s)
-	if slash := strings.IndexByte(s, '/'); slash >= 0 {
-		s = strings.TrimPrefix(s[:slash], "www.") + s[slash:]
-	} else {
-		s = strings.TrimPrefix(s, "www.")
-	}
-	return strings.TrimRight(s, "/")
+	host := strings.TrimPrefix(strings.ToLower(parsed.Host), "www.")
+	return strings.TrimRight(host+strings.ToLower(parsed.EscapedPath()), "/")
 }
 
 // Search returns UUIDs of records matching query.
@@ -161,6 +155,9 @@ func CanonicalURL(rawURL string) string {
 func (db V3) Search(query string, mode int) []string {
 	if mode == 2 {
 		canonical := CanonicalURL(query)
+		if canonical == "" {
+			return nil
+		}
 		var results []string
 		for key, rec := range db.Records {
 			if CanonicalURL(rec.URL) == canonical {

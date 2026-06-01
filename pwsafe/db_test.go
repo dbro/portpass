@@ -82,6 +82,8 @@ func TestCanonicalURL(t *testing.T) {
 		{"example.com", "example.com"},
 		{"example.com/path", "example.com/path"},
 		{"https://sub.example.com/a/b/", "sub.example.com/a/b"},
+		{"https://bank.com@evil.example/login", "evil.example/login"},
+		{"https://user:pass@www.example.com:8443/Login/?ref=1", "example.com:8443/login"},
 		{"", ""},
 	}
 	for _, c := range cases {
@@ -102,6 +104,9 @@ func TestSearchModeURL(t *testing.T) {
 
 	hits = db.Search("https://www.bank.com/login/", 2)
 	assert.Len(t, hits, 1, "full URL query should match")
+
+	hits = db.Search("", 2)
+	assert.Len(t, hits, 0, "blank URL query should not match blank record URLs")
 }
 
 func TestSearchModeAllIncludesCustomFields(t *testing.T) {

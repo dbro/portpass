@@ -147,19 +147,17 @@
   // Autofill utilities
   // ---------------------------------------------------------------------------
 
-  // Mirror of Go's CanonicalURL: strip scheme, www., query, fragment, trailing slash.
+  // Mirror of Go's CanonicalURL: parse authority, then strip scheme, userinfo, www.,
+  // query, fragment, and trailing slash.
   function canonicalURL(href) {
-    let s = href || ''
-    for (const p of ['https://', 'http://']) {
-      if (s.toLowerCase().startsWith(p)) { s = s.slice(p.length); break }
+    const s = (href || '').trim()
+    if (!s) return ''
+    try {
+      const parsed = new URL(s.includes('://') ? s : `https://${s}`)
+      return (parsed.host.replace(/^www\./i, '') + parsed.pathname).toLowerCase().replace(/\/+$/, '')
+    } catch {
+      return ''
     }
-    const hash = s.indexOf('#'); if (hash >= 0) s = s.slice(0, hash)
-    const qs   = s.indexOf('?'); if (qs >= 0)   s = s.slice(0, qs)
-    s = s.toLowerCase()
-    const slash = s.indexOf('/')
-    if (slash >= 0) s = s.slice(0, slash).replace(/^www\./, '') + s.slice(slash)
-    else s = s.replace(/^www\./, '')
-    return s.replace(/\/+$/, '')
   }
 
   function levenshtein(a, b) {
@@ -178,6 +176,7 @@
   // (≤5 distance, up to 5 results). Each entry: { uuid, vaultUuid, title, existingUrl, isCurrent }.
   function autofillFindRecords(queryUrl) {
     const canonical = canonicalURL(queryUrl)
+    if (!canonical) return []
     const allVaults = [
       { uuid: dbKey, items: get(dbItems), readonly: get(selectedFile)?.readonly || false },
       ...get(secondaryVaults).map(v => ({ uuid: v.uuid, items: v.items || [], readonly: v.readonly || false })),
@@ -438,7 +437,8 @@
         if (msg.msgType === 'fill-uuid') {
           try {
             const rec = getRecordData(msg.vaultUuid || dbKey, msg.uuid)
-            if (canonicalURL(rec.URL || '') !== canonicalURL(msg.url || '')) {
+            const savedUrl = canonicalURL(rec.URL || '')
+            if (!savedUrl || savedUrl !== canonicalURL(msg.url || '')) {
               if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo, error: 'Credentials require an exact saved URL match' }))
               return
             }
@@ -456,7 +456,8 @@
         if (msg.msgType === 'field-value') {
           try {
             const rec = getRecordData(msg.vaultUuid || dbKey, msg.uuid)
-            if (canonicalURL(rec.URL || '') !== canonicalURL(msg.url || '')) {
+            const savedUrl = canonicalURL(rec.URL || '')
+            if (!savedUrl || savedUrl !== canonicalURL(msg.url || '')) {
               if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo, error: 'Credentials require an exact saved URL match' }))
               return
             }

@@ -132,18 +132,14 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, R
   // ── DOM / autotype helpers ───────────────────────────────────────────────
 
   function canonicalURL(href) {
-    var s = href || ''
-    var pfxs = ['https://', 'http://']
-    for (var i = 0; i < pfxs.length; i++) {
-      if (s.toLowerCase().indexOf(pfxs[i]) === 0) { s = s.slice(pfxs[i].length); break }
+    var s = (href || '').trim()
+    if (!s) return ''
+    try {
+      var parsed = new URL(s.indexOf('://') >= 0 ? s : 'https://' + s)
+      return (parsed.host.replace(/^www\./i, '') + parsed.pathname).toLowerCase().replace(/\/+$/, '')
+    } catch (_) {
+      return ''
     }
-    var h = s.indexOf('#'); if (h >= 0) s = s.slice(0, h)
-    var q = s.indexOf('?'); if (q >= 0) s = s.slice(0, q)
-    s = s.toLowerCase()
-    var sl = s.indexOf('/')
-    if (sl >= 0) s = s.slice(0, sl).replace(/^www\./, '') + s.slice(sl)
-    else s = s.replace(/^www\./, '')
-    return s.replace(/\/+$/, '')
   }
 
   function parseAutotype(seq) {

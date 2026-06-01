@@ -223,6 +223,18 @@ test.describe('Bookmarklet — autofill popup phases', () => {
     await expect(popup.locator('.pp-arm')).toContainText('Click where to start Autofill')
   })
 
+  test('userinfo in page URL cannot override the browser destination host', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await createRecord(portpass, {
+      title: 'Actual Host', username: 'alice', password: 'hunter2',
+      autotype: '\\u\\t\\p', url: LOGIN_URL,
+    })
+    await login.goto(`http://bank.example@localhost:5173${LOGIN_PATH}`)
+
+    const popup = await activateBookmarklet(login, bookmarkletUrl)
+    await expect(popup.locator('.selected-record-row')).toContainText('Actual Host')
+  })
+
   test('\\u\\t\\p fills username, tabs to password, fills password', async ({ context }) => {
     const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
     await createRecord(portpass, {
