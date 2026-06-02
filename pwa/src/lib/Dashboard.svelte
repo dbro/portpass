@@ -1529,6 +1529,8 @@
   }
 
   $effect(() => {
+    if (!isDesktop) return
+
     const searchText = debouncedQuery.trim()
     const hasSearch = !!searchText
 
