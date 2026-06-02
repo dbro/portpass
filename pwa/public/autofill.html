@@ -570,8 +570,11 @@ body {
         showDone()
       }
     } else if (msg.type === 'fill-error') {
-      sendError(msg.error || 'Destination field changed during autofill')
-      showErrorPhase(detectErrorPhase(msg.error || ''))
+      if (msg.fieldCode === 'p' || msg.fieldCode === '2') {
+        showDestinationFieldError(msg.fieldCode)
+      } else {
+        sendError(msg.error || 'Destination field changed during autofill')
+      }
     }
   }
 
@@ -996,8 +999,9 @@ body {
             cleanup()
           }
         }).catch(function(err) {
-          try { pp.postMessage({ type: 'fill-error', capability: capability, error: err && err.message || 'Autofill stopped' }, PORTPASS_ORIGIN) } catch(_) {}
-          cleanup()
+          startEl = null
+          document.addEventListener('click', onFieldClick, true)
+          try { pp.postMessage({ type: 'fill-error', capability: capability, error: err && err.message || 'Autofill stopped', fieldCode: err && err.fieldCode || null }, PORTPASS_ORIGIN) } catch(_) {}
         })
       } else if (msg.type === 'cancel') {
         cleanup()
@@ -1141,8 +1145,14 @@ body {
       validatePage()
       if (!isUsableInput(el)) throw new Error('Destination field changed or is not visible')
       if (startForm && el.closest('form') !== startForm) throw new Error('Destination form changed during autofill')
-      if (code === 'p' && el.type !== 'password') throw new Error('Password destination is not a password field')
-      if (code === '2' && ['text', 'tel', 'number'].indexOf(el.type) < 0) throw new Error('One-time code destination is not suitable')
+      if (code === 'p' && el.type !== 'password') throw fieldError('Password destination is not a password field', code)
+      if (code === '2' && ['text', 'tel', 'number'].indexOf(el.type) < 0) throw fieldError('One-time code destination is not suitable', code)
+    }
+
+    function fieldError(message, fieldCode) {
+      var err = new Error(message)
+      err.fieldCode = fieldCode
+      return err
     }
 
     function fillField(el, value) {
@@ -1730,6 +1740,49 @@ body {
     close.className = 'btn btn-primary'; close.textContent = 'Close'
     close.onclick = function() { window.close() }
     actions.appendChild(close); card.appendChild(actions); $content.appendChild(card)
+  }
+
+  function showDestinationFieldError(fieldCode) {
+    if (otpRefreshTimer) { clearInterval(otpRefreshTimer); otpRefreshTimer = null }
+    hideSearchUI(); $subheader.style.display = 'none'; $content.innerHTML = ''
+    fieldClicked = false
+    pendingFillMode = null
+    armedCode = fieldCode
+    var field = fieldByCode(fieldCode)
+    if (field && field.sensitive) {
+      delete field.value
+      field.revealed = false
+    }
+
+    var card = document.createElement('div')
+    card.className = 'pp-security-card'
+    var title = document.createElement('div')
+    title.className = 'pp-security-title'
+    title.textContent = fieldCode === 'p' ? 'Password field not recognized' : 'One-time code field not recognized'
+    var body = document.createElement('div')
+    body.className = 'pp-security-body'
+    body.textContent = fieldCode === 'p'
+      ? 'Portpass stopped before inserting your password because the selected field is not marked as a password field.'
+      : 'Portpass stopped because the selected field does not appear suitable for a one-time code.'
+    card.appendChild(title); card.appendChild(body)
+
+    var actions = document.createElement('div')
+    actions.className = 'pp-security-actions'
+    var retry = document.createElement('button')
+    retry.className = 'btn btn-primary'
+    retry.textContent = 'Try another field'
+    retry.onclick = function() { showWaiting(pendingCredentials) }
+    var cancel = document.createElement('button')
+    cancel.className = 'btn'
+    cancel.textContent = 'Cancel'
+    cancel.onclick = function() {
+      if (window.opener && bookmarkletOrigin) {
+        try { window.opener.postMessage({ type: 'cancel', capability: popupCapability }, bookmarkletOrigin) } catch(_) {}
+      }
+      window.close()
+    }
+    actions.appendChild(retry); actions.appendChild(cancel)
+    card.appendChild(actions); $content.appendChild(card)
   }
 
   function makeSelectedRecordRow(rec) {

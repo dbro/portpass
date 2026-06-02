@@ -66,8 +66,9 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, R
           cleanup()
         }
       }).catch(function(err) {
-        try { pp.postMessage({ type: 'fill-error', capability: capability, error: err && err.message || 'Autofill stopped' }, PORTPASS_ORIGIN) } catch(_) {}
-        cleanup()
+        startEl = null
+        document.addEventListener('click', onFieldClick, true)
+        try { pp.postMessage({ type: 'fill-error', capability: capability, error: err && err.message || 'Autofill stopped', fieldCode: err && err.fieldCode || null }, PORTPASS_ORIGIN) } catch(_) {}
       })
     } else if (msg.type === 'cancel') {
       cleanup()
@@ -211,8 +212,14 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, R
     validatePage()
     if (!isUsableInput(el)) throw new Error('Destination field changed or is not visible')
     if (startForm && el.closest('form') !== startForm) throw new Error('Destination form changed during autofill')
-    if (code === 'p' && el.type !== 'password') throw new Error('Password destination is not a password field')
-    if (code === '2' && ['text', 'tel', 'number'].indexOf(el.type) < 0) throw new Error('One-time code destination is not suitable')
+    if (code === 'p' && el.type !== 'password') throw fieldError('Password destination is not a password field', code)
+    if (code === '2' && ['text', 'tel', 'number'].indexOf(el.type) < 0) throw fieldError('One-time code destination is not suitable', code)
+  }
+
+  function fieldError(message, fieldCode) {
+    var err = new Error(message)
+    err.fieldCode = fieldCode
+    return err
   }
 
   function fillField(el, value) {

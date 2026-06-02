@@ -309,6 +309,41 @@ test.describe('Bookmarklet — autofill popup phases', () => {
     await expect(login.locator('#user')).toHaveValue('')
   })
 
+  test('password insertion explains an invalid destination and allows retry', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await createRecord(portpass, {
+      title: 'Password Retry', password: 'mypassword', autotype: '\\p', url: LOGIN_URL,
+    })
+
+    const popup = await activateBookmarklet(login, bookmarkletUrl)
+    await login.locator('#user').click()
+    await expect(popup.locator('.pp-security-title')).toHaveText('Password field not recognized')
+    await expect(popup.locator('.pp-security-body')).toContainText('not marked as a password field')
+    await expect(login.locator('#user')).toHaveValue('')
+    await popup.getByRole('button', { name: 'Try another field' }).click()
+    await expect(popup.locator('.pp-field-row.active')).toContainText('Click where to insert Password')
+    await login.locator('#pass').click()
+    await expect(login.locator('#pass')).toHaveValue('mypassword')
+  })
+
+  test('one-time code insertion explains an invalid destination and allows retry', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await createRecord(portpass, {
+      title: 'OTP Retry', password: 'hunter2', autotype: '\\2', url: LOGIN_URL,
+      totpSecret: 'JBSWY3DPEHPK3PXP',
+    })
+
+    const popup = await activateBookmarklet(login, bookmarkletUrl)
+    await login.locator('#pass').click()
+    await expect(popup.locator('.pp-security-title')).toHaveText('One-time code field not recognized')
+    await expect(popup.locator('.pp-security-body')).toContainText('does not appear suitable')
+    await expect(login.locator('#pass')).toHaveValue('')
+    await popup.getByRole('button', { name: 'Try another field' }).click()
+    await expect(popup.locator('.pp-field-row.active')).toContainText('Click where to insert One-time code')
+    await login.locator('#user').click()
+    await expect(login.locator('#user')).toHaveValue(/^[0-9]{6}$/)
+  })
+
   test('\\t skips non-input elements (e.g. show-password button) to reach password field', async ({ context }) => {
     const formWithButton = `<!doctype html><html><body>
 <form id="f">
