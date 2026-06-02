@@ -268,7 +268,7 @@ test.describe('Bookmarklet — autofill popup phases', () => {
   test('\\u\\t\\p\\n fills both fields and submits the form', async ({ context }) => {
     const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
     await createRecord(portpass, {
-      title: 'My Bank', username: 'alice', password: 'hunter2', autotype: '\\u\\t\\p\\n',
+      title: 'My Bank', username: 'alice', password: 'hunter2', autotype: '\\u\\t\\p\\n', url: LOGIN_URL,
     })
 
     let submitted = false
@@ -382,6 +382,159 @@ test.describe('Bookmarklet — autofill popup phases', () => {
     await expect(popup.locator('.rec-row')).toHaveCount(0)
     await expect(popup.locator('.selected-record-row')).toBeVisible()
     await expect(popup.locator('.pp-autofill-summary')).toBeVisible()
+  })
+
+  test('different-origin record shows warning with highlighted URL differences', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await createRecord(portpass, {
+      title: 'Other Bank', username: 'alice', password: 'hunter2',
+      autotype: '\\u\\t\\p', url: 'https://accounts.example.com/login',
+    })
+
+    const popup = await activateBookmarklet(login, bookmarkletUrl, { confirmOverride: false })
+    await expect(popup.locator('.pp-security-title')).toHaveText('Fill on a different site?')
+    await expect(popup.locator('.pp-origin-del')).toBeVisible()
+    await expect(popup.locator('.pp-origin-add')).toBeVisible()
+    await expect(popup.getByRole('button', { name: 'Fill once anyway' })).toBeVisible()
+    await expect(popup.getByRole('button', { name: 'Update saved address in Portpass' })).toBeVisible()
+  })
+
+  test('different-origin one-time fill never submits automatically', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await createRecord(portpass, {
+      title: 'Other Bank', username: 'alice', password: 'hunter2',
+      autotype: '\\u\\t\\p\\n', url: 'https://accounts.example.com/login',
+    })
+    let submitted = false
+    await login.exposeFunction('__ppSubmitted', () => { submitted = true })
+    await login.evaluate(() => {
+      document.getElementById('f')!.addEventListener('submit', () => (window as any).__ppSubmitted())
+    })
+
+    const popup = await activateBookmarklet(login, bookmarkletUrl, { confirmOverride: false })
+    await popup.getByRole('button', { name: 'Fill once anyway' }).click()
+    await expect(popup.locator('.pp-autofill-summary')).toBeVisible()
+    await login.locator('#user').click()
+    await expect(login.locator('#user')).toHaveValue('alice')
+    await expect(login.locator('#pass')).toHaveValue('hunter2')
+    expect(submitted).toBe(false)
+  })
+
+  test('address update stages a dashboard edit without saving it', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await createRecord(portpass, {
+      title: 'Other Bank', username: 'alice', password: 'hunter2',
+      autotype: '\\u\\t\\p', url: 'https://accounts.example.com/login',
+    })
+
+    const popup = await activateBookmarklet(login, bookmarkletUrl, { confirmOverride: false })
+    await popup.getByRole('button', { name: 'Update saved address in Portpass' }).click()
+    await expect(popup.locator('.pp-security-title')).toHaveText('Review the change in Portpass')
+    await expect(portpass.getByLabel('URL')).toHaveValue(LOGIN_URL)
+    await portpass.getByRole('button', { name: 'Cancel' }).click()
+    await expect(portpass.getByText('https://accounts.example.com/login')).toBeVisible()
+  })
+
+  test('HTTP pages are blocked even on a development-style origin', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await login.route('http://localhost:5173/insecure-login', route =>
+      route.fulfill({ contentType: 'text/html', body: LOGIN_FORM_HTML })
+    )
+    await login.goto('http://localhost:5173/insecure-login')
+    await createRecord(portpass, {
+      title: 'Insecure Login', username: 'alice', password: 'hunter2',
+      autotype: '\\u\\t\\p', url: 'http://localhost:5173/insecure-login',
+    })
+
+    const popup = await activateBookmarklet(login, bookmarkletUrl)
+    await expect(popup.locator('.pp-error-title')).toHaveText('Insecure page — blocked')
+    await expect(login.locator('#user')).toHaveValue('')
+    await expect(login.locator('#pass')).toHaveValue('')
+  })
+
+  test('popup hard-blocks a claimed page origin that differs from the browser origin', async ({ context }) => {
+    const { login } = await setupAutofillTest(context)
+    const popupPromise = context.waitForEvent('page')
+    await login.evaluate((url) => new Promise<void>(resolve => {
+      const popup = window.open(url, 'portpass_autofill')
+      function onMessage(event: MessageEvent) {
+        if (event.source !== popup || event.data?.type !== 'ready') return
+        window.removeEventListener('message', onMessage)
+        popup?.postMessage({
+          type: 'init',
+          capability: event.data.capability,
+          pageUrl: 'https://evil.test/login',
+          saveUrl: 'https://evil.test/login',
+        }, 'http://localhost:5173')
+        resolve()
+      }
+      window.addEventListener('message', onMessage)
+    }), PORTPASS_URL + 'autofill.html')
+    const popup = await popupPromise
+    await expect(popup.locator('.pp-security-title')).toHaveText("Couldn't verify this page")
+    await expect(popup.locator('.pp-origin-add')).toBeVisible()
+    await expect(popup.locator('.pp-origin-del')).toBeVisible()
+    await expect(popup.getByRole('button', { name: 'Close' })).toBeVisible()
+    await expect(popup.getByRole('button', { name: 'Fill once anyway' })).toHaveCount(0)
+  })
+
+  test('popup ignores opener messages without its capability nonce', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await createRecord(portpass, {
+      title: 'Nonce Site', username: 'alice', password: 'hunter2',
+      autotype: '\\u', url: LOGIN_URL,
+    })
+    const popup = await activateBookmarklet(login, bookmarkletUrl)
+
+    await login.evaluate(() => {
+      ;(window as any).__ppRunning = true
+      for (const win of [window.open('', 'portpass_autofill')]) {
+        win?.postMessage({ type: 'fill', autotype: '\\u', fields: { u: 'forged' } }, 'http://localhost:5173')
+      }
+    })
+    await login.waitForTimeout(100)
+    await expect(login.locator('#user')).toHaveValue('')
+    expect(popup.isClosed()).toBe(false)
+  })
+
+  test('autofill aborts when the clicked destination field is replaced during a delay', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await createRecord(portpass, {
+      title: 'Race Site', username: 'alice', password: 'hunter2',
+      autotype: '\\w50\\u', url: LOGIN_URL,
+    })
+    const popup = await activateBookmarklet(login, bookmarkletUrl)
+    await login.evaluate(() => {
+      document.getElementById('user')!.addEventListener('click', () => {
+        setTimeout(() => {
+          const replacement = document.createElement('input')
+          replacement.id = 'replacement'
+          document.getElementById('user')!.replaceWith(replacement)
+        }, 10)
+      })
+    })
+    await login.locator('#user').click()
+    await expect(popup.locator('.pp-error-title')).toHaveText('Autofill failed')
+    await expect(login.locator('#replacement')).toHaveValue('')
+  })
+
+  test('autofill skips transparent fields inserted into tab traversal', async ({ context }) => {
+    const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
+    await login.evaluate(() => {
+      const trap = document.createElement('input')
+      trap.id = 'trap'
+      trap.style.opacity = '0'
+      document.getElementById('pass')!.before(trap)
+    })
+    await createRecord(portpass, {
+      title: 'Visible Fields', username: 'alice', password: 'hunter2',
+      autotype: '\\u\\t\\p', url: LOGIN_URL,
+    })
+    await activateBookmarklet(login, bookmarkletUrl)
+    await login.locator('#user').click()
+    await expect(login.locator('#user')).toHaveValue('alice')
+    await expect(login.locator('#trap')).toHaveValue('')
+    await expect(login.locator('#pass')).toHaveValue('hunter2')
   })
 
   test('same-origin path match row shows URL text and clicking transitions to waiting', async ({ context }) => {
@@ -635,7 +788,7 @@ test.describe('Bookmarklet — autofill popup phases', () => {
       return popup.locator('.pp-field-row', { hasText: 'One-time code' }).locator('.pp-field-value').textContent()
     }, { timeout: 35000 }).not.toBe(initial)
     await popup.locator('.pp-field-row', { hasText: 'One-time code' }).click()
-    await login.locator('#pass').click()
+    await login.locator('#user').click()
     await expect(popup.locator('.pp-field-row', { hasText: 'One-time code' })).toContainText('••••••••')
   })
 

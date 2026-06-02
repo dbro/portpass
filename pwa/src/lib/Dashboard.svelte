@@ -41,6 +41,7 @@
   let sheetOpen              = $state(false)
   let isDirty                = $state(false)
   let editDirty              = $state(false)
+  let autofillStagedEdit     = $state(false)
   let vaultDirty             = $state(false)
   let dbName   = $state('')
   let dbKey        = $state('')
@@ -323,6 +324,7 @@
       throw new Error('Autofill destination could not be verified')
     loadRecordSelection(uuid, vaultUuid || null)
     record = { ...getRecordData(v, uuid), URL: destination.origin + destination.pathname }
+    autofillStagedEdit = true
     sheetOpen = false
     vaultDirty = false
     isNew = false
@@ -796,6 +798,10 @@
       selectedUUID = null
       isNew = false
     }
+    if (autofillStagedEdit && selectedUUID) {
+      record = getRecordData(selectedVaultUuid || dbKey, selectedUUID)
+    }
+    autofillStagedEdit = false
     isEditing = false
     editDirty = false
   }
@@ -886,6 +892,7 @@
       const uuid = updateRecordFields(targetVault, isNew ? null : selectedUUID, draft)
       selectedUUID = uuid ?? selectedUUID
       record = getRecordData(targetVault, selectedUUID)
+      autofillStagedEdit = false
       isNew = false
       isEditing = false
       editDirty = false

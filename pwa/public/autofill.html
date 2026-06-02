@@ -547,7 +547,10 @@ body {
     if (!msg || msg.capability !== popupCapability) return
     if (msg.type === 'field-clicked') {
       try {
-        if (new URL(msg.pageUrl).origin !== bookmarkletOrigin) { showVerificationFailure(bookmarkletOrigin, new URL(msg.pageUrl).origin); return }
+        if (new URL(msg.pageUrl).origin !== bookmarkletOrigin || msg.pageUrl !== currentUrl) {
+          showVerificationFailure(bookmarkletOrigin, new URL(msg.pageUrl).origin)
+          return
+        }
       } catch (_) { showVerificationFailure(bookmarkletOrigin, 'Invalid URL'); return }
       fieldClicked = true
       pendingFill()
@@ -1982,7 +1985,7 @@ body {
     if (/cannot connect|websocket relay|no subscriber/.test(lm))             return 'noconn'
     if (/vault.*lock|is locked/.test(lm) || /open a record/.test(lm))       return 'locked'
     if (/autofill sequence|no autofill|autotype|could not parse/.test(lm))   return 'noseq'
-    if (/non-https|insecure|sensitive.*http/.test(lm))                       return 'http'
+    if (/non-https|insecure|sensitive.*http|only autofilled on https|cannot be filled on http/.test(lm)) return 'http'
     return 'other'
   }
 
