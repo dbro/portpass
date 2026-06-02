@@ -232,6 +232,16 @@ body {
   font-size:12px; flex-shrink:0; cursor:pointer;
 }
 .pp-autofill-summary.active { background:var(--accent-soft); border-left:3px solid var(--accent); padding-left:14px }
+.pp-security-card { margin:16px; padding:14px; border:1px solid var(--border); border-radius:10px; background:var(--bg-alt) }
+.pp-security-title { font-weight:800; font-size:15px; margin-bottom:8px }
+.pp-security-body { color:var(--muted); font-size:13px; line-height:1.45; margin-bottom:12px }
+.pp-origin-row { display:grid; grid-template-columns:72px 1fr; gap:8px; padding:8px 0; border-top:1px solid var(--border); font-size:12px }
+.pp-origin-label { color:var(--muted); font-size:10px; font-weight:800; letter-spacing:.05em }
+.pp-origin-value { font-family:monospace; overflow-wrap:anywhere }
+.pp-origin-add,.pp-origin-del { background:var(--red-bg); color:var(--red); font-weight:800 }
+.pp-origin-del { text-decoration:line-through }
+.pp-security-actions { display:flex; flex-direction:column; gap:8px; margin-top:14px }
+.pp-security-actions button { min-height:36px }
 .pp-autofill-label { font-weight:800; letter-spacing:.04em; color:var(--text); flex-shrink:0 }
 .pp-sequence { margin-left:auto; color:var(--accent); text-align:right; line-height:1.35 }
 .pp-sequence.warn { color:var(--orange) }
@@ -375,6 +385,7 @@ body {
   var pingNonce = crypto.randomUUID()
   var ch = pairMode ? null : new BroadcastChannel('portpass-autofill')
   var bookmarkletOrigin = null
+  var popupCapability = crypto.randomUUID()
   var isSecure = false
   var currentUrl = ''
   var saveUrl = ''
@@ -409,6 +420,7 @@ body {
   var _pendingSearch = null  // resolve fn for an in-flight search
   var _pendingFill = null    // resolve fn for an in-flight fill-uuid
   var _pendingValue = null   // resolve fn for an in-flight lazy field fetch
+  var _pendingStage = null   // resolve fn for a staged dashboard edit
 
   // Phase state
   var chosen = null           // the selected record object
@@ -418,6 +430,7 @@ body {
   var fieldClicked = false    // bookmarklet reported a field was clicked
   var armedCode = 'sequence'  // null, 'sequence', or one field code
   var pendingFillMode = null  // compatibility fallback for older installed bookmarklets
+  var oneTimeOriginOverride = false
   var didInsertionsHappen = false
   var otpRefreshTimer = null
   var idleCloseTimer = null
@@ -480,7 +493,7 @@ body {
     return crypto.subtle.exportKey('spki', kp.publicKey)
   }).then(function(spki) {
     cpEcdhSpkiB64 = btoa(String.fromCharCode.apply(null, new Uint8Array(spki)))
-    if (window.opener) window.opener.postMessage({ type: 'ready' }, '*')
+    if (window.opener) window.opener.postMessage({ type: 'ready', capability: popupCapability }, '*')
     window.addEventListener('message', onOpenerMessage)
     // Also listen for fill-related messages from bookmarklet (field-clicked, fill-done, fill-error)
     window.addEventListener('message', onBookmarkletMessage)
@@ -499,13 +512,13 @@ body {
   function onOpenerMessage(event) {
     if (!window.opener || event.source !== window.opener) return
     var msg = event.data
-    if (!msg || msg.type !== 'init') return
+    if (!msg || msg.type !== 'init' || msg.capability !== popupCapability) return
     window.removeEventListener('message', onOpenerMessage)
 
     bookmarkletOrigin = event.origin
-    currentUrl = msg.url || ''
+    currentUrl = msg.pageUrl || ''
     saveUrl = msg.saveUrl || currentUrl
-    isSecure = !!msg.isSecure
+    isSecure = event.origin.indexOf('https://') === 0
     delegateId = msg.delegateId || null
     if (msg.relayUrl) wsRelayUrl = msg.relayUrl.replace(/^http/, 'ws').replace(/\/ws$/, '') + '/ws'
 
@@ -513,9 +526,7 @@ body {
 
     if (currentUrl) {
       try {
-        var sentHost = canonicalURL(currentUrl).split('/')[0]
-        var evHost = new URL(event.origin).host.replace(/^www\./, '').toLowerCase()
-        if (!sentHost || !evHost || sentHost !== evHost) { sendError('URL mismatch — security check failed'); return }
+        if (new URL(currentUrl).origin !== event.origin) { showVerificationFailure(event.origin, new URL(currentUrl).origin); return }
       } catch(_) { sendError('URL mismatch — security check failed'); return }
     }
 
@@ -531,10 +542,13 @@ body {
 
   // ── Messages from bookmarklet (field-clicked, fill-done, fill-error) ──────
   function onBookmarkletMessage(event) {
-    if (!window.opener || event.source !== window.opener) return
+    if (!window.opener || event.source !== window.opener || event.origin !== bookmarkletOrigin) return
     var msg = event.data
-    if (!msg) return
+    if (!msg || msg.capability !== popupCapability) return
     if (msg.type === 'field-clicked') {
+      try {
+        if (new URL(msg.pageUrl).origin !== bookmarkletOrigin) { showVerificationFailure(bookmarkletOrigin, new URL(msg.pageUrl).origin); return }
+      } catch (_) { showVerificationFailure(bookmarkletOrigin, 'Invalid URL'); return }
       fieldClicked = true
       pendingFill()
     } else if (msg.type === 'fill-done') {
@@ -553,6 +567,7 @@ body {
         showDone()
       }
     } else if (msg.type === 'fill-error') {
+      sendError(msg.error || 'Destination field changed during autofill')
       showErrorPhase(detectErrorPhase(msg.error || ''))
     }
   }
@@ -634,6 +649,7 @@ body {
         return cpSignAndSend('view-near-matches', { url: currentUrl })
       },
       saveUrl: function(uuid, vu) { wsSaveUrl(uuid, vu) },
+      stageUrl: function() { return Promise.reject(new Error('Address updates are only available in same-profile mode')) },
       notifyFilled: function() { wsNotifyFilled() }
     }
   }
@@ -648,7 +664,7 @@ body {
     if (bcCount > 1 || wsCount > 1) {
       showErrorPhase('multiinstance')
       if (window.opener && bookmarkletOrigin) {
-        try { window.opener.postMessage({ type: 'cancel' }, bookmarkletOrigin) } catch(_) {}
+        try { window.opener.postMessage({ type: 'cancel', capability: popupCapability }, bookmarkletOrigin) } catch(_) {}
       }
       return
     }
@@ -925,15 +941,20 @@ body {
 
   function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, RELAY_URL) {
     'use strict'
+
     if (window.__ppRunning) return
     window.__ppRunning = true
-    var isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost'
-    var currentCanonical = canonicalURL(window.location.href)
+
+    var initialOrigin = window.location.origin
+    var currentPageUrl = window.location.href
+    var initialPageUrl = currentPageUrl
+    var currentCanonical = canonicalURL(currentPageUrl)
     var saveUrl = window.location.origin + window.location.pathname
     var AUTOFILL_URL = PORTPASS_URL + 'autofill.html'
     var pp = null
-    var startEl = null
+    var startEl = null   // element the user clicked in the host page during the waiting phase
     var cleanedUp = false
+    var capability = null
 
     function cleanup() {
       if (cleanedUp) return
@@ -942,22 +963,28 @@ body {
       window.removeEventListener('message', onPopupMessage)
       window.__ppRunning = false
     }
+
     function onFieldClick(e) {
       var target = e.target
       if (!isUsableInput(target)) return
       e.preventDefault()
       startEl = target
-      try { pp.postMessage({ type: 'field-clicked' }, PORTPASS_ORIGIN) } catch(_) {}
+      try { pp.postMessage({ type: 'field-clicked', capability: capability, pageUrl: window.location.href }, PORTPASS_ORIGIN) } catch(_) {}
     }
+
     function onPopupMessage(e) {
-      if (!pp || e.source !== pp) return
+      if (!pp || e.source !== pp || e.origin !== PORTPASS_ORIGIN) return
       var msg = e.data
-      if (!msg) return
+      if (!msg || msg.capability !== capability) return
       if (msg.type === 'fill') {
+        // Autofill popup has chosen an action and the user has clicked a field.
+        // Remove the field-click listener so it doesn't fire again mid-fill.
         document.removeEventListener('click', onFieldClick, true)
         var el = startEl
-        executeAutotype(el, msg.autotype, msg.fields).then(function() {
-          try { pp.postMessage({ type: 'fill-done', mode: msg.mode }, PORTPASS_ORIGIN) } catch(_) {}
+        executeAutotype(el, msg.autotype, msg.fields, msg.allowSubmit !== false).then(function() {
+          try { pp.postMessage({ type: 'fill-done', capability: capability, mode: msg.mode }, PORTPASS_ORIGIN) } catch(_) {}
+          // Focus the autofill popup from the main-window context so the done state is visible.
+          // (window.focus() from within autofill.html is blocked; pp.focus() from the opener works.)
           try { pp.focus() } catch(_) {}
           if (msg.mode === 'single') {
             startEl = null
@@ -965,34 +992,60 @@ body {
           } else {
             cleanup()
           }
+        }).catch(function(err) {
+          try { pp.postMessage({ type: 'fill-error', capability: capability, error: err && err.message || 'Autofill stopped' }, PORTPASS_ORIGIN) } catch(_) {}
+          cleanup()
         })
-      } else if (msg.type === 'cancel') cleanup()
+      } else if (msg.type === 'cancel') {
+        cleanup()
+      }
     }
+
     ;(async function run() {
       try {
         var ppW = 380, ppH = 480
         var ppLeft = screen.width - ppW - 24
-        pp = window.open(AUTOFILL_URL, 'portpass_autofill', 'popup=yes,width=' + ppW + ',height=' + ppH + ',left=' + ppLeft + ',top=24')
+        pp = window.open(AUTOFILL_URL, 'portpass_autofill',
+          'popup=yes,width=' + ppW + ',height=' + ppH + ',left=' + ppLeft + ',top=24')
         if (!pp) { cleanup(); return }
+
         var readyMsg
         try { readyMsg = await recv(pp, ['ready', 'error'], 10000) }
-        catch (_) { try { pp.close() } catch (_2) {}; cleanup(); return }
+        catch (_) {
+          try { pp.close() } catch (_2) {}
+          cleanup()
+          return
+        }
         if (readyMsg.type === 'error') { cleanup(); return }
+        capability = readyMsg.capability
+        if (!capability) { cleanup(); return }
+
         pp.postMessage({
           type: 'init',
+          capability: capability,
           url: currentCanonical,
+          pageUrl: currentPageUrl,
           saveUrl: saveUrl,
-          isSecure: isSecure,
           delegateId: DELEGATE_ID,
           relayUrl: RELAY_URL,
         }, PORTPASS_ORIGIN)
+
+        // Register field-click listener (host page) and message handler (popup).
         window.addEventListener('message', onPopupMessage)
         document.addEventListener('click', onFieldClick, true)
+
+        // Clean up when popup is closed by the user.
         var closeCheck = setInterval(function() {
           if (pp && pp.closed) { clearInterval(closeCheck); cleanup() }
         }, 500)
-      } catch (e) { cleanup() }
+
+      } catch (e) {
+        cleanup()
+      }
     })()
+
+    // ── Messaging helpers ────────────────────────────────────────────────────
+
     function recv(target, types, timeout) {
       timeout = timeout || 5000
       return new Promise(function(resolve, reject) {
@@ -1001,7 +1054,7 @@ body {
           reject('timeout')
         }, timeout)
         function handler(e) {
-          if (e.source !== target) return
+          if (e.source !== target || e.origin !== PORTPASS_ORIGIN) return
           if (types.indexOf(e.data && e.data.type) >= 0) {
             clearTimeout(t)
             window.removeEventListener('message', handler)
@@ -1011,6 +1064,9 @@ body {
         window.addEventListener('message', handler)
       })
     }
+
+    // ── DOM / autotype helpers ───────────────────────────────────────────────
+
     function canonicalURL(href) {
       var s = (href || '').trim()
       if (!s) return ''
@@ -1021,14 +1077,18 @@ body {
         return ''
       }
     }
+
     function parseAutotype(seq) {
-      var tokens = [], lit = '', i = 0
+      var tokens = []
+      var lit = ''
+      var i = 0
       while (i < seq.length) {
         if (seq[i] !== '\\') { lit += seq[i]; i++; continue }
         var code = seq[i + 1]
         if (!code) break
-        if (code === '\\') { lit += '\\'; i += 2 }
-        else if (code === 'v' && seq[i + 2] === '{') {
+        if (code === '\\') {
+          lit += '\\'; i += 2
+        } else if (code === 'v' && seq[i + 2] === '{') {
           if (lit) { tokens.push({ type: 'lit', text: lit }); lit = '' }
           var end = seq.indexOf('}', i + 3)
           if (end < 0) break
@@ -1037,61 +1097,103 @@ body {
           if (lit) { tokens.push({ type: 'lit', text: lit }); lit = '' }
           var j = i + 2, count = 0
           while (j < seq.length && count < 3 && /^[0-9]$/.test(seq[j])) { j++; count++ }
-          tokens.push({ type: 'delay', ms: (parseInt(seq.slice(i + 2, j)) || 0) * (code === 'W' ? 1000 : 1) }); i = j
+          var ms = (parseInt(seq.slice(i + 2, j)) || 0) * (code === 'W' ? 1000 : 1)
+          tokens.push({ type: 'delay', ms: ms }); i = j
         } else if ('uptmn2s'.indexOf(code) >= 0) {
           if (lit) { tokens.push({ type: 'lit', text: lit }); lit = '' }
           tokens.push({ type: 'code', code: code }); i += 2
-        } else i += 2
+        } else {
+          i += 2
+        }
       }
       if (lit) tokens.push({ type: 'lit', text: lit })
       return tokens
     }
+
     function isUsableInput(el) {
       if (!el) return false
       var tag = el.tagName
       if (tag !== 'INPUT' && tag !== 'TEXTAREA') return false
       if (el.disabled || el.type === 'hidden') return false
-      if (['submit', 'button', 'reset', 'image', 'checkbox', 'radio'].indexOf(el.type) >= 0) return false
+      var bad = ['submit', 'button', 'reset', 'image', 'checkbox', 'radio']
+      if (bad.indexOf(el.type) >= 0) return false
+      if (!el.isConnected) return false
       var s = getComputedStyle(el)
-      return s.display !== 'none' && s.visibility !== 'hidden'
+      if (s.display === 'none' || s.visibility === 'hidden' || Number(s.opacity) < 0.1) return false
+      var r = el.getBoundingClientRect()
+      if (r.width < 2 || r.height < 2 || r.bottom <= 0 || r.right <= 0 ||
+          r.top >= window.innerHeight || r.left >= window.innerWidth) return false
+      var x = Math.max(0, Math.min(window.innerWidth - 1, r.left + r.width / 2))
+      var y = Math.max(0, Math.min(window.innerHeight - 1, r.top + r.height / 2))
+      var top = document.elementFromPoint(x, y)
+      return !!top && (top === el || el.contains(top))
     }
+
+    function validatePage() {
+      if (window.location.origin !== initialOrigin || window.location.href !== initialPageUrl)
+        throw new Error('Page changed during autofill')
+    }
+
+    function validateField(el, code, startForm) {
+      validatePage()
+      if (!isUsableInput(el)) throw new Error('Destination field changed or is not visible')
+      if (startForm && el.closest('form') !== startForm) throw new Error('Destination form changed during autofill')
+      if (code === 'p' && el.type !== 'password') throw new Error('Password destination is not a password field')
+      if (code === '2' && ['text', 'tel', 'number'].indexOf(el.type) < 0) throw new Error('One-time code destination is not suitable')
+    }
+
     function fillField(el, value) {
-      var proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+      var proto  = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
       var setter = Object.getOwnPropertyDescriptor(proto, 'value')
       if (setter && setter.set) setter.set.call(el, value)
-      el.dispatchEvent(new Event('input', { bubbles: true }))
+      el.dispatchEvent(new Event('input',  { bubbles: true }))
       el.dispatchEvent(new Event('change', { bubbles: true }))
     }
+
     function focusableList() {
-      var q = 'input:not([disabled]):not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]):not([type=image]):not([type=checkbox]):not([type=radio]),textarea:not([disabled])'
+      var q = 'input:not([disabled]):not([type=hidden]):not([type=submit]):not([type=button])' +
+              ':not([type=reset]):not([type=image]):not([type=checkbox]):not([type=radio]),' +
+              'textarea:not([disabled])'
       var all = Array.from(document.querySelectorAll(q)).filter(function(e) {
         var s = getComputedStyle(e)
-        return e.tabIndex >= 0 && s.display !== 'none' && s.visibility !== 'hidden'
+        return e.tabIndex >= 0 && isUsableInput(e)
       })
-      return all.filter(function(e) { return e.tabIndex > 0 }).sort(function(a, b) { return a.tabIndex - b.tabIndex }).concat(all.filter(function(e) { return e.tabIndex === 0 }))
+      var pos  = all.filter(function(e) { return e.tabIndex > 0 })
+                 .sort(function(a, b) { return a.tabIndex - b.tabIndex })
+      var zero = all.filter(function(e) { return e.tabIndex === 0 })
+      return pos.concat(zero)
     }
+
     function nextFocusable(el) {
       var sorted = focusableList()
       var i = sorted.indexOf(el)
       return i >= 0 ? sorted[i + 1] || null : null
     }
+
     function prevFocusable(el) {
       var sorted = focusableList()
       var i = sorted.indexOf(el)
       return i > 0 ? sorted[i - 1] : null
     }
-    async function executeAutotype(startEl, sequence, fields) {
+
+    async function executeAutotype(startEl, sequence, fields, allowSubmit) {
       var tokens = parseAutotype(sequence)
       var el = startEl
+      var startForm = startEl && startEl.closest('form')
+      validateField(el, null, startForm)
       for (var i = 0; i < tokens.length; i++) {
         var tok = tokens[i]
-        if (tok.type === 'delay') await new Promise(function(r) { setTimeout(r, tok.ms) })
-        else if (tok.type === 'lit' || tok.type === 'v') {
-          if (el) fillField(el, tok.type === 'v' ? (fields['v{' + tok.name + '}'] || '') : tok.text)
+        if (tok.type === 'delay') {
+          await new Promise(function(r) { setTimeout(r, tok.ms) })
+        } else if (tok.type === 'lit' || tok.type === 'v') {
+          if (el) {
+            validateField(el, null, startForm)
+            fillField(el, tok.type === 'v' ? (fields['v{' + tok.name + '}'] || '') : tok.text)
+          }
         } else {
           var code = tok.code
           if (code === 'u' || code === 'p' || code === 'm' || code === '2') {
-            if (el) fillField(el, fields[code] || '')
+            if (el) { validateField(el, code, startForm); fillField(el, fields[code] || '') }
           } else if (code === 't') {
             var next = nextFocusable(el)
             if (next) { if (el) el.dispatchEvent(new Event('blur', { bubbles: true })); next.focus(); el = next }
@@ -1099,17 +1201,30 @@ body {
             var prev = prevFocusable(el)
             if (prev) { if (el) el.dispatchEvent(new Event('blur', { bubbles: true })); prev.focus(); el = prev }
           } else if (code === 'n') {
-            if (el) ['keydown', 'keypress', 'keyup'].forEach(function(evType) {
-              el.dispatchEvent(new KeyboardEvent(evType, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }))
-            })
+            if (!allowSubmit) continue
+            validateField(el, null, startForm)
+            if (el) {
+              ['keydown', 'keypress', 'keyup'].forEach(function(evType) {
+                el.dispatchEvent(new KeyboardEvent(evType, {
+                  key: 'Enter', code: 'Enter', keyCode: 13, which: 13,
+                  bubbles: true, cancelable: true
+                }))
+              })
+            }
             var form = el && el.closest('form')
-            var submitBtn = (form && form.querySelector('[type=submit]')) || (form && form.querySelector('[default-button]'))
+            var submitBtn = (form && form.querySelector('[type=submit]')) ||
+                            (form && form.querySelector('[default-button]'))
             if (!submitBtn && form) {
               var btns = Array.from(form.querySelectorAll('button:not([type=reset])'))
               if (btns.length === 1) submitBtn = btns[0]
             }
-            if (submitBtn) submitBtn.click()
-            else if (form) try { form.requestSubmit() } catch (_) { try { form.submit() } catch (_2) {} }
+            if (submitBtn) {
+              submitBtn.click()
+            } else if (form) {
+              try { form.requestSubmit() } catch (_) {
+                try { form.submit() } catch (_2) {}
+              }
+            }
           }
         }
       }
@@ -1399,8 +1514,17 @@ body {
     fieldClicked = false
     pendingCredentials = null
     armedCode = 'sequence'
+    oneTimeOriginOverride = false
+    if (recordOrigin(rec) !== verifiedOrigin()) {
+      showOriginWarning(rec)
+      return
+    }
+    loadSelectedRecord(rec)
+  }
+
+  function loadSelectedRecord(rec) {
     showWaiting(null)
-    $transport.fill(rec.uuid, rec.vaultUuid).then(function(cred) {
+    $transport.fill(rec.uuid, rec.vaultUuid, oneTimeOriginOverride).then(function(cred) {
       if (chosen !== rec) return
       if (!cred) { sendError('Could not get credentials'); return }
       pendingCredentials = cred
@@ -1416,7 +1540,7 @@ body {
     var field = fieldByCode(code)
     if (!field) return Promise.resolve('')
     if (code !== '2' && Object.prototype.hasOwnProperty.call(field, 'value')) return Promise.resolve(field.value || '')
-    return $transport.fieldValue(chosen.uuid, chosen.vaultUuid || null, code).then(function(result) {
+    return $transport.fieldValue(chosen.uuid, chosen.vaultUuid || null, code, oneTimeOriginOverride).then(function(result) {
       field.value = result && Object.prototype.hasOwnProperty.call(result, 'value') ? result.value : ''
       if (code === '2') {
         field.seconds = result && result.seconds
@@ -1488,7 +1612,7 @@ body {
       var autotype = armedCode === 'sequence' ? pendingCredentials.autotype : '\\' + armedCode
       if (window.opener && bookmarkletOrigin) {
         pendingFillMode = armedCode === 'sequence' ? 'sequence' : 'single'
-        window.opener.postMessage({ type: 'fill', mode: pendingFillMode, autotype: autotype, fields: fields }, bookmarkletOrigin)
+        window.opener.postMessage({ type: 'fill', capability: popupCapability, mode: pendingFillMode, autotype: autotype, fields: fields, allowSubmit: !oneTimeOriginOverride }, bookmarkletOrigin)
       }
     } catch(e) {
       sendError(e.message || 'Could not get credentials')
@@ -1496,6 +1620,114 @@ body {
   }
 
   // ── Phase rendering ────────────────────────────────────────────────────────
+
+  function verifiedOrigin() {
+    try { return new URL(currentUrl).origin } catch (_) { return '' }
+  }
+
+  function recordOrigin(rec) {
+    try { return new URL(rec.existingUrl && rec.existingUrl.indexOf('://') >= 0 ? rec.existingUrl : 'https://' + (rec.existingUrl || '')).origin }
+    catch (_) { return '' }
+  }
+
+  function appendOriginDiff(el, before, after, mode) {
+    var prefix = 0
+    while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) prefix++
+    var suffix = 0
+    while (suffix < before.length - prefix && suffix < after.length - prefix &&
+           before[before.length - 1 - suffix] === after[after.length - 1 - suffix]) suffix++
+    el.appendChild(document.createTextNode((mode === 'del' ? before : after).slice(0, prefix)))
+    var changed = document.createElement('span')
+    changed.className = mode === 'del' ? 'pp-origin-del' : 'pp-origin-add'
+    changed.textContent = (mode === 'del' ? before : after).slice(prefix, (mode === 'del' ? before.length : after.length) - suffix)
+    el.appendChild(changed)
+    if (suffix) el.appendChild(document.createTextNode((mode === 'del' ? before : after).slice(-suffix)))
+  }
+
+  function appendOriginRow(card, label, before, after, mode) {
+    var row = document.createElement('div')
+    row.className = 'pp-origin-row'
+    var lab = document.createElement('div')
+    lab.className = 'pp-origin-label'
+    lab.textContent = label
+    var value = document.createElement('div')
+    value.className = 'pp-origin-value'
+    appendOriginDiff(value, before, after, mode)
+    row.appendChild(lab); row.appendChild(value); card.appendChild(row)
+  }
+
+  function showVerificationFailure(addressBarOrigin, claimedOrigin) {
+    if (otpRefreshTimer) { clearInterval(otpRefreshTimer); otpRefreshTimer = null }
+    hideSearchUI(); $subheader.style.display = 'none'; $content.innerHTML = ''
+    var card = document.createElement('div')
+    card.className = 'pp-security-card'
+    var title = document.createElement('div')
+    title.className = 'pp-security-title'
+    title.textContent = "Couldn't verify this page"
+    var body = document.createElement('div')
+    body.className = 'pp-security-body'
+    body.textContent = "The page asking for autofill doesn't match your browser's address bar. Portpass stopped before filling anything."
+    card.appendChild(title); card.appendChild(body)
+    appendOriginRow(card, 'ADDRESS BAR', claimedOrigin, addressBarOrigin, 'add')
+    appendOriginRow(card, 'PAGE ASKED', claimedOrigin, addressBarOrigin, 'del')
+    var actions = document.createElement('div')
+    actions.className = 'pp-security-actions'
+    var close = document.createElement('button')
+    close.className = 'btn'
+    close.textContent = 'Close'
+    close.onclick = function() { window.close() }
+    actions.appendChild(close); card.appendChild(actions); $content.appendChild(card)
+  }
+
+  function showOriginWarning(rec) {
+    hideSearchUI(); $subheader.style.display = 'none'; $content.innerHTML = ''
+    var saved = recordOrigin(rec), filling = verifiedOrigin()
+    var card = document.createElement('div')
+    card.className = 'pp-security-card'
+    var title = document.createElement('div')
+    title.className = 'pp-security-title'
+    title.textContent = 'Fill on a different site?'
+    var body = document.createElement('div')
+    body.className = 'pp-security-body'
+    body.textContent = "This isn't the site you saved this login for. Whatever Portpass fills, this site can read."
+    card.appendChild(title); card.appendChild(body)
+    appendOriginRow(card, 'SAVED FOR', saved, filling, 'del')
+    appendOriginRow(card, 'FILLING ON', saved, filling, 'add')
+    var actions = document.createElement('div')
+    actions.className = 'pp-security-actions'
+    var cancel = document.createElement('button')
+    cancel.className = 'btn btn-primary'
+    cancel.textContent = 'Cancel'
+    cancel.onclick = goBack
+    var once = document.createElement('button')
+    once.className = 'btn'
+    once.textContent = 'Fill once anyway'
+    once.onclick = function() { oneTimeOriginOverride = true; loadSelectedRecord(rec) }
+    actions.appendChild(cancel); actions.appendChild(once)
+    if (!rec.readonly) {
+      var update = document.createElement('button')
+      update.className = 'btn'
+      update.textContent = 'Update saved address in Portpass'
+      update.onclick = function() {
+        $transport.stageUrl(rec.uuid, rec.vaultUuid || null).then(showStagedURL).catch(function(e) { sendError(e.message || 'Could not open Portpass') })
+      }
+      actions.appendChild(update)
+    }
+    card.appendChild(actions); $content.appendChild(card)
+  }
+
+  function showStagedURL() {
+    hideSearchUI(); $subheader.style.display = 'none'; $content.innerHTML = ''
+    var card = document.createElement('div')
+    card.className = 'pp-security-card'
+    card.innerHTML = '<div class="pp-security-title">Review the change in Portpass</div><div class="pp-security-body">The verified address is ready in your Portpass record editor. Review and save it there, then start autofill again.</div>'
+    var actions = document.createElement('div')
+    actions.className = 'pp-security-actions'
+    var close = document.createElement('button')
+    close.className = 'btn btn-primary'; close.textContent = 'Close'
+    close.onclick = function() { window.close() }
+    actions.appendChild(close); card.appendChild(actions); $content.appendChild(card)
+  }
 
   function makeSelectedRecordRow(rec) {
     var row = document.createElement('div')
@@ -1738,7 +1970,7 @@ body {
     if (document.hasFocus()) return
     idleCloseTimer = setTimeout(function() {
       if (window.opener && bookmarkletOrigin) {
-        try { window.opener.postMessage({ type: 'cancel' }, bookmarkletOrigin) } catch(_) {}
+        try { window.opener.postMessage({ type: 'cancel', capability: popupCapability }, bookmarkletOrigin) } catch(_) {}
       }
       window.close()
     }, 60000)
@@ -1932,48 +2164,14 @@ body {
       return row
     }
 
-    // Non-exact: muted URL + optional pencil
+    // Non-exact: muted URL. Persistent changes are staged from the warning screen.
     var urlEl = document.createElement('div')
     urlEl.className = 'rec-url'
     urlEl.textContent = storedCanonical
     urlEl.title = storedCanonical
 
-    var pencilEl = null
-    if (!rec.readonly) {
-      var urlSaved = false
-      pencilEl = document.createElement('button')
-      pencilEl.className = 'rec-pencil'
-      pencilEl.title = 'Save ' + currentUrl + ' to this password'
-      pencilEl.innerHTML = SVG_PENCIL
-      pencilEl.onclick = function(e) {
-        e.stopPropagation()
-        if (!urlSaved) {
-          urlSaved = true
-          pencilEl.className = 'rec-pencil pencil-saved'
-          pencilEl.title = 'Undo URL change'
-          pencilEl.innerHTML = SVG_UNDO
-          urlEl.className = 'rec-url url-saved'
-          urlEl.textContent = currentUrl + ' ✓'
-          urlEl.title = currentUrl
-          doSaveUrl(rec.uuid, rec.vaultUuid || null)
-        } else {
-          urlSaved = false
-          pencilEl.className = 'rec-pencil'
-          pencilEl.title = 'Save ' + currentUrl + ' to this password'
-          pencilEl.innerHTML = SVG_PENCIL
-          urlEl.className = 'rec-url'
-          urlEl.textContent = storedCanonical
-          urlEl.title = storedCanonical
-        }
-      }
-    }
-
-    row.onclick = function(e) {
-      if (pencilEl && (e.target === pencilEl || pencilEl.contains(e.target))) return
-      onFill(rec)
-    }
+    row.onclick = function() { onFill(rec) }
     row.appendChild(marker); row.appendChild(nameEl); row.appendChild(urlEl)
-    if (pencilEl) row.appendChild(pencilEl)
     return row
   }
 
@@ -2174,23 +2372,26 @@ body {
           ch.postMessage({ type: 'search', query: q, nonce: nonce })
         })
       },
-      fill: function(uuid, vu) {
+      fill: function(uuid, vu, allowOriginOverride) {
         return new Promise(function(resolve) {
           _pendingFill = resolve
-          ch.postMessage({ type: 'query', uuid: uuid, vaultUuid: vu || null, nonce: nonce })
+          ch.postMessage({ type: 'query', uuid: uuid, vaultUuid: vu || null, url: currentUrl, allowOriginOverride: !!allowOriginOverride, nonce: nonce })
         })
       },
-      fieldValue: function(uuid, vu, code) {
+      fieldValue: function(uuid, vu, code, allowOriginOverride) {
         return new Promise(function(resolve) {
           _pendingValue = resolve
-          ch.postMessage({ type: 'field-value', uuid: uuid, vaultUuid: vu || null, code: code, nonce: nonce })
+          ch.postMessage({ type: 'field-value', uuid: uuid, vaultUuid: vu || null, code: code, url: currentUrl, allowOriginOverride: !!allowOriginOverride, nonce: nonce })
         })
       },
       viewRecord: function(uuid, vu) {
         ch.postMessage({ type: 'view-record', uuid: uuid, vaultUuid: vu || null, nonce: nonce })
       },
-      saveUrl: function(uuid, vu) {
-        ch.postMessage({ type: 'save-url', uuid: uuid, vaultUuid: vu || null, url: saveUrl, nonce: nonce })
+      stageUrl: function(uuid, vu) {
+        return new Promise(function(resolve) {
+          _pendingStage = resolve
+          ch.postMessage({ type: 'stage-url', uuid: uuid, vaultUuid: vu || null, url: saveUrl, nonce: nonce })
+        })
       },
       notifyFilled: function() {
         ch.postMessage({ type: 'fill-done' })
@@ -2236,7 +2437,10 @@ body {
       }
       return
     }
-    if (msg.type === 'url-saved') return
+    if (msg.type === 'url-staged') {
+      if (_pendingStage) { var staged = _pendingStage; _pendingStage = null; staged() }
+      return
+    }
     if (msg.type === 'search-results') {
       if (_pendingSearch) { var res = _pendingSearch; _pendingSearch = null; res(msg.records) }
       else if (searchOpen) showPickerSearchResults(msg.records)
@@ -2253,7 +2457,7 @@ body {
     showErrorPhase(phase, message)
     // Also forward to bookmarklet so it can clean up, but no overlay.
     if (window.opener && bookmarkletOrigin) {
-      try { window.opener.postMessage({ type: 'cancel' }, bookmarkletOrigin) } catch(_) {}
+      try { window.opener.postMessage({ type: 'cancel', capability: popupCapability }, bookmarkletOrigin) } catch(_) {}
     }
   }
 

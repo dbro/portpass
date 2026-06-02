@@ -160,6 +160,34 @@
     }
   }
 
+  function autofillURL(href) {
+    const s = (href || '').trim()
+    if (!s) return null
+    try { return new URL(s.includes('://') ? s : `https://${s}`) }
+    catch { return null }
+  }
+
+  function autofillOrigin(href) {
+    return autofillURL(href)?.origin || ''
+  }
+
+  function autofillAuthorizeRecord(uuid, vaultUuid, destinationUrl, allowOriginOverride = false) {
+    const rec = getRecordData(vaultUuid || dbKey, uuid)
+    const saved = autofillURL(rec.URL || '')
+    const destination = autofillURL(destinationUrl || '')
+    if (!destination) throw new Error('Autofill destination could not be verified')
+    if (destination.protocol !== 'https:') throw new Error('Passwords are only autofilled on HTTPS pages')
+    if (!saved) {
+      if (!allowOriginOverride) throw new Error('Fill requires confirmation for a different website')
+      return rec
+    }
+    if (saved.protocol === 'https:' && destination.protocol !== 'https:')
+      throw new Error('Passwords saved for HTTPS cannot be filled on HTTP pages')
+    if (saved.origin !== destination.origin && !allowOriginOverride)
+      throw new Error('Fill requires confirmation for a different website')
+    return rec
+  }
+
   function levenshtein(a, b) {
     const m = a.length, n = b.length
     const dp = Array.from({length: m + 1}, (_, i) =>
@@ -284,24 +312,21 @@
     }
   }
 
-  // Update a record's URL field and save the vault to disk.
-  async function autofillSaveURL(uuid, vaultUuid, newUrl) {
+  function autofillStageURL(uuid, vaultUuid, newUrl) {
     const v = vaultUuid || dbKey
-    updateRecordFields(v, uuid, { URL: newUrl })
-    if (!vaultUuid) {
-      dbItems.set(getDatabaseData(dbKey))
-      isDirty = true
-      await saveFile(true)
-    } else {
-      const sv = get(secondaryVaults).find(s => s.uuid === vaultUuid)
-      if (!sv) throw new Error('Vault not found')
-      const items = getDatabaseData(v)
-      secondaryVaults.update(vs => vs.map(s => s.uuid === vaultUuid
-        ? { ...s, items: items.map(i => ({ ...i, vaultUuid })) } : s))
-      const data = saveDatabase(v)
-      const w = await sv.handle.createWritable()
-      await w.write(data); await w.close()
-    }
+    const readonly = vaultUuid
+      ? !!get(secondaryVaults).find(s => s.uuid === vaultUuid)?.readonly
+      : !!get(selectedFile)?.readonly
+    if (readonly) throw new Error('This vault is read-only')
+    const destination = autofillURL(newUrl)
+    if (!destination || destination.protocol !== 'https:')
+      throw new Error('Autofill destination could not be verified')
+    loadRecordSelection(uuid, vaultUuid || null)
+    record = { ...getRecordData(v, uuid), URL: destination.origin + destination.pathname }
+    sheetOpen = false
+    vaultDirty = false
+    isNew = false
+    isEditing = true
   }
 
   // ── Cross-profile autofill intent handler ────────────────────────────────
@@ -422,11 +447,6 @@
         }
         if (msg.msgType === 'view-near-matches') {
           showAutofillNearMatches(msg.url || '')
-          if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo }))
-          return
-        }
-        if (msg.msgType === 'save-url') {
-          try { await autofillSaveURL(msg.uuid, msg.vaultUuid || null, msg.url) } catch {}
           if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo }))
           return
         }
@@ -602,7 +622,7 @@
         }
 
         // URL search
-        if (msg.url !== undefined) {
+        if (msg.url !== undefined && !msg.uuid) {
           ch.postMessage({ type: 'records', records: autofillFindRecords(msg.url), nonce: msg.nonce, theme: localStorage.getItem('theme') || 'dark', accent: localStorage.getItem('accent') || 'amber' })
           return
         }
@@ -615,6 +635,7 @@
           return
         }
         try {
+          autofillAuthorizeRecord(uuid, vaultUuid, msg.url, !!msg.allowOriginOverride)
           const result = await autofillEncryptData(sessionKey, autofillRecordMeta(uuid, vaultUuid))
           ch.postMessage({ type: 'record', ...result, nonce: msg.nonce })
         } catch (e) {
@@ -629,6 +650,7 @@
           return
         }
         try {
+          autofillAuthorizeRecord(msg.uuid, msg.vaultUuid || null, msg.url, !!msg.allowOriginOverride)
           const result = await autofillEncryptData(sessionKey, {
             code: msg.code || '', ...autofillFieldData(msg.uuid, msg.vaultUuid || null, msg.code || ''),
           })
@@ -639,14 +661,14 @@
         return
       }
 
-      if (msg.type === 'save-url') {
+      if (msg.type === 'stage-url') {
         if (!sessionKey) {
           ch.postMessage({ type: 'error', message: 'No secure session', nonce: msg.nonce })
           return
         }
         try {
-          await autofillSaveURL(msg.uuid, msg.vaultUuid || null, msg.url)
-          ch.postMessage({ type: 'url-saved', nonce: msg.nonce })
+          autofillStageURL(msg.uuid, msg.vaultUuid || null, msg.url)
+          ch.postMessage({ type: 'url-staged', nonce: msg.nonce })
         } catch (e) {
           ch.postMessage({ type: 'error', message: e.message, nonce: msg.nonce })
         }

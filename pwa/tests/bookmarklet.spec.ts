@@ -3,8 +3,9 @@ import { makeDelegateBookmarkletUrl } from '../src/lib/bookmarklet.js'
 
 const PORTPASS_URL    = 'http://localhost:5173/portpass/'
 const PORTPASS_ORIGIN = 'http://localhost:5173'
+const LOGIN_ORIGIN    = 'https://login.test'
 const LOGIN_PATH      = '/login-test'
-const LOGIN_URL       = PORTPASS_ORIGIN + LOGIN_PATH
+const LOGIN_URL       = LOGIN_ORIGIN + LOGIN_PATH
 
 const LOGIN_FORM_HTML = `<!doctype html><html><body>
 <form id="f">
@@ -65,7 +66,7 @@ async function setupAutofillTest(context: BrowserContext): Promise<{ login: Page
   const bookmarkletUrl = await createDelegateBookmarklet(portpass)
 
   const login = await context.newPage()
-  await login.route(LOGIN_PATH, route =>
+  await login.route('**' + LOGIN_PATH, route =>
     route.fulfill({ contentType: 'text/html', body: LOGIN_FORM_HTML })
   )
   await login.goto(LOGIN_URL)
@@ -110,9 +111,9 @@ async function createRecord(portpass: Page, opts: {
 // In the new flow the popup stays open (waiting phase) until the user clicks a form
 // field; there is no page-level overlay injected into the host page.
 async function activateBookmarklet(
-  login: Page, bookmarkletUrl: string, opts: { clickRow?: boolean } = {}
+  login: Page, bookmarkletUrl: string, opts: { clickRow?: boolean, confirmOverride?: boolean } = {}
 ): Promise<Page> {
-  const { clickRow = true } = opts
+  const { clickRow = true, confirmOverride = true } = opts
   const context = login.context()
   const popupPromise = context.waitForEvent('page')
 
@@ -128,6 +129,7 @@ async function activateBookmarklet(
     popup.locator('.rec-row').first().waitFor({ timeout: 10000 }).then(() => 'picker').catch(() => 'timeout'),
     popup.locator('.selected-record-row').first().waitFor({ timeout: 10000 }).then(() => 'waiting').catch(() => 'timeout'),
     popup.locator('.pp-notice').first().waitFor({ timeout: 10000 }).then(() => 'no-match').catch(() => 'timeout'),
+    popup.locator('.pp-security-title').first().waitFor({ timeout: 10000 }).then(() => 'security').catch(() => 'timeout'),
     popup.waitForEvent('close', { timeout: 10000 }).then(() => 'closed').catch(() => 'timeout'),
   ])
 
@@ -135,6 +137,12 @@ async function activateBookmarklet(
     await popup.locator('.rec-row').first().click()
     // Popup transitions to waiting phase (stays open — fill fires only after field click).
     await popup.locator('.selected-record-row').waitFor({ timeout: 5000 }).catch(() => {})
+  }
+  if (confirmOverride && await popup.getByRole('button', { name: 'Fill once anyway' }).isVisible().catch(() => false)) {
+    await popup.getByRole('button', { name: 'Fill once anyway' }).click()
+    await popup.locator('.selected-record-row').waitFor({ timeout: 5000 }).catch(async e => {
+      throw new Error(`${e.message}\nPopup text: ${await popup.locator('body').innerText()}`)
+    })
   }
 
   await login.evaluate(() => new Promise(r => requestAnimationFrame(r)))
@@ -238,7 +246,7 @@ test.describe('Bookmarklet — autofill popup phases', () => {
       title: 'Actual Host', username: 'alice', password: 'hunter2',
       autotype: '\\u\\t\\p', url: LOGIN_URL,
     })
-    await login.goto(`http://bank.example@localhost:5173${LOGIN_PATH}`)
+    await login.goto(`https://bank.example@login.test${LOGIN_PATH}`)
 
     const popup = await activateBookmarklet(login, bookmarkletUrl)
     await expect(popup.locator('.selected-record-row')).toContainText('Actual Host')
@@ -314,10 +322,10 @@ test.describe('Bookmarklet — autofill popup phases', () => {
 
     const { login: _login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
     const login = _login
-    await login.route('/login-button-test', route =>
+    await login.route('**/login-button-test', route =>
       route.fulfill({ contentType: 'text/html', body: formWithButton })
     )
-    await login.goto('http://localhost:5173/login-button-test')
+    await login.goto('https://login.test/login-button-test')
 
     await createRecord(portpass, {
       title: 'Button Site', username: 'alice', password: 'secret', autotype: '\\u\\t\\p',
@@ -376,17 +384,16 @@ test.describe('Bookmarklet — autofill popup phases', () => {
     await expect(popup.locator('.pp-autofill-summary')).toBeVisible()
   })
 
-  test('fuzzy match row shows URL text and pencil; clicking transitions to waiting', async ({ context }) => {
+  test('same-origin path match row shows URL text and clicking transitions to waiting', async ({ context }) => {
     const { login, portpass, bookmarkletUrl } = await setupAutofillTest(context)
     await createRecord(portpass, {
       title: 'Other Page', autotype: '\\u\\t\\p',
-      url: 'http://localhost:5173/different-path',
+      url: 'https://login.test/different-path',
     })
 
     const popup = await activateBookmarklet(login, bookmarkletUrl, { clickRow: false })
     await popup.locator('.rec-row').first().waitFor({ timeout: 5000 })
     await expect(popup.locator('.rec-url').first()).toBeVisible()
-    await expect(popup.locator('.rec-pencil').first()).toBeVisible()
     // Clicking the row transitions to waiting.
     await popup.locator('.rec-row').first().click()
     await expect(popup.locator('.selected-record-row')).toBeVisible({ timeout: 5000 })
@@ -400,7 +407,7 @@ test.describe('Bookmarklet — autofill popup phases', () => {
     await createRecord(portpass, {
       title: 'A Very Long Record Name That Will Overflow The Column',
       autotype: '\\u\\t\\p',
-      url: 'http://localhost:5173/a-very-long-path-that-will-overflow',
+      url: 'https://login.test/a-very-long-path-that-will-overflow',
     })
 
     const popup = await activateBookmarklet(login, bookmarkletUrl, { clickRow: false })
