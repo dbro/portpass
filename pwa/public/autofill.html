@@ -1002,6 +1002,7 @@ body {
           startEl = null
           document.addEventListener('click', onFieldClick, true)
           try { pp.postMessage({ type: 'fill-error', capability: capability, error: err && err.message || 'Autofill stopped', fieldCode: err && err.fieldCode || null }, PORTPASS_ORIGIN) } catch(_) {}
+          try { pp.focus() } catch(_) {}
         })
       } else if (msg.type === 'cancel') {
         cleanup()
