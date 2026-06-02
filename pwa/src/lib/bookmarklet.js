@@ -26,7 +26,6 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, R
   var AUTOFILL_URL = PORTPASS_URL + 'autofill.html'
   var pp = null
   var startEl = null   // element the user clicked in the host page during the waiting phase
-  var expectedClickCode = null
   var cleanedUp = false
   var capability = null
 
@@ -42,15 +41,6 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, R
     var target = e.target
     if (!isUsableInput(target)) return
     e.preventDefault()
-    try {
-      validateExpectedClick(target, expectedClickCode)
-    } catch (err) {
-      startEl = null
-      try { pp.postMessage({ type: 'fill-error', capability: capability, error: err && err.message || 'Autofill stopped', fieldCode: err && err.fieldCode || null }, PORTPASS_ORIGIN) } catch(_) {}
-      try { pp.focus() } catch(_) {}
-      setTimeout(function() { try { pp.focus() } catch(_) {} }, 0)
-      return
-    }
     startEl = target
     try { pp.postMessage({ type: 'field-clicked', capability: capability, pageUrl: window.location.href }, PORTPASS_ORIGIN) } catch(_) {}
   }
@@ -59,9 +49,7 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, R
     if (!pp || e.source !== pp || e.origin !== PORTPASS_ORIGIN) return
     var msg = e.data
     if (!msg || msg.capability !== capability) return
-    if (msg.type === 'arm-field') {
-      expectedClickCode = msg.fieldCode || null
-    } else if (msg.type === 'fill') {
+    if (msg.type === 'fill') {
       // Autofill popup has chosen an action and the user has clicked a field.
       // Remove the field-click listener so it doesn't fire again mid-fill.
       document.removeEventListener('click', onFieldClick, true)
@@ -81,7 +69,6 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, R
         startEl = null
         document.addEventListener('click', onFieldClick, true)
         try { pp.postMessage({ type: 'fill-error', capability: capability, error: err && err.message || 'Autofill stopped', fieldCode: err && err.fieldCode || null }, PORTPASS_ORIGIN) } catch(_) {}
-        try { pp.focus() } catch(_) {}
       })
     } else if (msg.type === 'cancel') {
       cleanup()
@@ -225,11 +212,6 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, R
     validatePage()
     if (!isUsableInput(el)) throw new Error('Destination field changed or is not visible')
     if (startForm && el.closest('form') !== startForm) throw new Error('Destination form changed during autofill')
-    if (code === 'p' && el.type !== 'password') throw fieldError('Password destination is not a password field', code)
-    if (code === '2' && ['text', 'tel', 'number'].indexOf(el.type) < 0) throw fieldError('One-time code destination is not suitable', code)
-  }
-
-  function validateExpectedClick(el, code) {
     if (code === 'p' && el.type !== 'password') throw fieldError('Password destination is not a password field', code)
     if (code === '2' && ['text', 'tel', 'number'].indexOf(el.type) < 0) throw fieldError('One-time code destination is not suitable', code)
   }
