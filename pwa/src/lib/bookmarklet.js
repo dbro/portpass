@@ -48,6 +48,7 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, R
       startEl = null
       try { pp.postMessage({ type: 'fill-error', capability: capability, error: err && err.message || 'Autofill stopped', fieldCode: err && err.fieldCode || null }, PORTPASS_ORIGIN) } catch(_) {}
       try { pp.focus() } catch(_) {}
+      setTimeout(function() { try { pp.focus() } catch(_) {} }, 0)
       return
     }
     startEl = target
