@@ -959,6 +959,7 @@ body {
     var AUTOFILL_URL = PORTPASS_URL + 'autofill.html'
     var pp = null
     var startEl = null   // element the user clicked in the host page during the waiting phase
+    var expectedClickCode = null
     var cleanedUp = false
     var capability = null
 
@@ -974,6 +975,14 @@ body {
       var target = e.target
       if (!isUsableInput(target)) return
       e.preventDefault()
+      try {
+        validateExpectedClick(target, expectedClickCode)
+      } catch (err) {
+        startEl = null
+        try { pp.postMessage({ type: 'fill-error', capability: capability, error: err && err.message || 'Autofill stopped', fieldCode: err && err.fieldCode || null }, PORTPASS_ORIGIN) } catch(_) {}
+        try { pp.focus() } catch(_) {}
+        return
+      }
       startEl = target
       try { pp.postMessage({ type: 'field-clicked', capability: capability, pageUrl: window.location.href }, PORTPASS_ORIGIN) } catch(_) {}
     }
@@ -982,7 +991,9 @@ body {
       if (!pp || e.source !== pp || e.origin !== PORTPASS_ORIGIN) return
       var msg = e.data
       if (!msg || msg.capability !== capability) return
-      if (msg.type === 'fill') {
+      if (msg.type === 'arm-field') {
+        expectedClickCode = msg.fieldCode || null
+      } else if (msg.type === 'fill') {
         // Autofill popup has chosen an action and the user has clicked a field.
         // Remove the field-click listener so it doesn't fire again mid-fill.
         document.removeEventListener('click', onFieldClick, true)
@@ -1146,6 +1157,11 @@ body {
       validatePage()
       if (!isUsableInput(el)) throw new Error('Destination field changed or is not visible')
       if (startForm && el.closest('form') !== startForm) throw new Error('Destination form changed during autofill')
+      if (code === 'p' && el.type !== 'password') throw fieldError('Password destination is not a password field', code)
+      if (code === '2' && ['text', 'tel', 'number'].indexOf(el.type) < 0) throw fieldError('One-time code destination is not suitable', code)
+    }
+
+    function validateExpectedClick(el, code) {
       if (code === 'p' && el.type !== 'password') throw fieldError('Password destination is not a password field', code)
       if (code === '2' && ['text', 'tel', 'number'].indexOf(el.type) < 0) throw fieldError('One-time code destination is not suitable', code)
     }
@@ -1593,6 +1609,22 @@ body {
     showWaiting(pendingCredentials)
   }
 
+  function expectedClickCode() {
+    if (!armedCode) return null
+    if (armedCode !== 'sequence') return armedCode
+    var tokens = parseAutotypeTokens(pendingCredentials && pendingCredentials.autotype || '')
+    for (var i = 0; i < tokens.length; i++) {
+      if (tokens[i].type === 'field') return tokens[i].code
+      if (tokens[i].type !== 'wait') return null
+    }
+    return null
+  }
+
+  function syncExpectedClickCode() {
+    if (!window.opener || !bookmarkletOrigin) return
+    try { window.opener.postMessage({ type: 'arm-field', capability: popupCapability, fieldCode: expectedClickCode() }, bookmarkletOrigin) } catch(_) {}
+  }
+
   function updateOtpRefresh() {
     if (otpRefreshTimer) { clearInterval(otpRefreshTimer); otpRefreshTimer = null }
     var otp = fieldByCode('2')
@@ -1937,6 +1969,7 @@ body {
       loading.className = 'pp-status'
       loading.textContent = 'Loading password…'
       $content.appendChild(loading)
+      syncExpectedClickCode()
       return
     }
     var panel = document.createElement('div')
@@ -1977,6 +2010,7 @@ body {
     ;(cred.fields || []).forEach(function(field) { panel.appendChild(makeFieldRow(field)) })
     $content.appendChild(panel)
     updateOtpRefresh()
+    syncExpectedClickCode()
   }
 
   function showDone() {

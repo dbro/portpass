@@ -320,6 +320,7 @@ test.describe('Bookmarklet — autofill popup phases', () => {
     await expect(popup.locator('.pp-security-title')).toHaveText('Password field not recognized')
     await expect(popup.locator('.pp-security-body')).toContainText('not marked as a password field')
     await expect(login.locator('#user')).toHaveValue('')
+    await expect.poll(() => popup.evaluate(() => document.hasFocus())).toBe(true)
     await popup.getByRole('button', { name: 'Try another field' }).click()
     await expect(popup.locator('.pp-field-row.active')).toContainText('Click where to insert Password')
     await login.locator('#pass').click()
