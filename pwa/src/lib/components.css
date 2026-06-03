@@ -72,6 +72,7 @@
 }
 .vault-app .btn-text.primary { color: var(--accent); font-weight: 600; }
 .vault-app .btn-text.accent  { color: var(--accent); font-weight: 500; }
+.vault-app .btn-text.danger  { color: var(--danger); font-weight: 600; }
 .vault-app .btn-text:disabled { opacity: 0.4; cursor: not-allowed; }
 .vault-app .btn-text.small { font-size: 13px; padding: 4px 0; }
 

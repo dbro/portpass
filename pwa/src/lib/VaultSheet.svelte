@@ -9,7 +9,7 @@
   import { createPairedAutofillProfile, removePairedAutofillProfile, parsePairingToken } from './pairedAutofill.js'
   import Icon from './Icon.svelte'
 
-  let { isDesktop, bookmarkletsSupported = false, onback, onlock, onlockall, onlocksecondary, onunlockadditional, ondbsave, onsvdbsave, ondirtychange, theme, accent, ontheme, onaccent } = $props()
+  let { isDesktop, bookmarkletsSupported = false, onback, onlock, onlockall, onlocksecondary, onunlockadditional, onforgetprofile, ondbsave, onsvdbsave, ondirtychange, theme, accent, ontheme, onaccent } = $props()
 
   // ── Biometric ──────────────────────────────────────────────────────────────
   let biometricAvailable = $state(false)
@@ -54,6 +54,11 @@
     setupPassword = ''
     setupError = ''
     showSetupPw = false
+  }
+
+  function forgetProfileData() {
+    if (!confirm('Forget this browser profile?\n\nThis removes remembered vaults, biometric/PIN unlock, secondary vault links, autofill pairings, and local preferences from this browser profile. It does not delete your vault files.')) return
+    onforgetprofile?.()
   }
 
   function focusOnMount(node) {
@@ -530,7 +535,10 @@
               <span class="delegate-name">{d.name}</span>
               <span class="delegate-meta muted">Created {fmtDate(d.created)}{d.displayCode ? ' · ' + d.displayCode : ''} · {total} {total === 1 ? 'autofill use' : 'autofill uses'} ({mode}){lastTs ? ' · Last used ' + fmtRelative(lastTs) : ''}</span>
             </div>
-            <button class="delegate-revoke" onclick={() => revokeOne(d.id)}>Revoke</button>
+            <button class="delegate-revoke" onclick={() => revokeOne(d.id)}>
+              <Icon name="trash" size={13}/>
+              <span>Revoke</span>
+            </button>
           </div>
         {/each}
       </div>
@@ -655,15 +663,22 @@
     </div>
   </div>
 
-  <!-- About -->
+  <!-- Application -->
   <div class="vault-section">
-    <div class="vault-section-title">ABOUT</div>
+    <div class="vault-section-title">APPLICATION</div>
     <div class="about-row">
       <img src="{import.meta.env.BASE_URL}icon.svg" alt="Portpass" class="about-icon" />
       <div class="about-info">
         <div class="about-name">Portpass <span class="about-version muted">{appVersion}</span></div>
         <a class="about-url muted" href="https://dbro.github.io/portpass" target="_blank" rel="noreferrer">dbro.github.io/portpass</a>
       </div>
+    </div>
+    <div class="app-reset">
+      <button class="btn-text danger app-reset-action" onclick={forgetProfileData}>
+        <Icon name="trash" size={14}/>
+        <span>RESET PORTPASS CONFIGURATION</span>
+      </button>
+      <div class="app-reset-copy muted">Removes remembered vaults, biometric unlock, secondary vault links, autofill pairings, and local preferences. Vault files are not deleted.</div>
     </div>
   </div>
 
@@ -1352,6 +1367,27 @@
 
   .about-url:hover { color: var(--accent); }
 
+  .app-reset {
+    margin-top: 18px;
+  }
+
+  .app-reset-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-align: left;
+  }
+
+  .app-reset-copy {
+    max-width: 560px;
+    margin-top: 6px;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
   /* ── Autofill delegates ──────────────────────────────────────────────────── */
   .delegate-list {
     display: flex;
@@ -1391,6 +1427,9 @@
   }
 
   .delegate-revoke {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
     background: none;
     border: none;
     cursor: pointer;

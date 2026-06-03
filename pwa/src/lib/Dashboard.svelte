@@ -1,6 +1,7 @@
 <script>
   import { onMount, untrack } from 'svelte'
   import { get } from 'svelte/store'
+  import { clear as clearIDBKeyval } from 'idb-keyval'
   import { selectedFile, dbItems, secondaryVaults, toast, clipboardSession, clipboardContext, switchboardUrl, switchboardConnected, crossProfileEnabled, delegatesVersion } from '../store.js'
   import {
     openDatabase,
@@ -1309,6 +1310,67 @@
     vaultDirty = false
   }
 
+  function clearPortpassLocalStorage() {
+    const exact = new Set(['theme', 'accent', 'genOpts'])
+    const prefixes = ['groups-', 'biometric-offered-']
+    for (const key of Object.keys(localStorage)) {
+      if (exact.has(key) || prefixes.some(prefix => key.startsWith(prefix))) {
+        localStorage.removeItem(key)
+      }
+    }
+  }
+
+  async function clearPortpassCaches() {
+    if (!window.caches) return
+    const names = await caches.keys()
+    await Promise.all(names
+      .filter(name => name.toLowerCase().includes('portpass'))
+      .map(name => caches.delete(name)))
+  }
+
+  async function unregisterPortpassServiceWorkers() {
+    if (!navigator.serviceWorker?.getRegistrations) return
+    const basePath = new URL(import.meta.env.BASE_URL, location.origin).pathname
+    const regs = await navigator.serviceWorker.getRegistrations()
+    await Promise.all(regs
+      .filter(reg => {
+        try { return new URL(reg.scope).pathname.startsWith(basePath) }
+        catch { return false }
+      })
+      .map(reg => reg.unregister()))
+  }
+
+  async function forgetProfileData() {
+    try {
+      get(secondaryVaults).forEach(v => closeDatabase(v.uuid))
+      closeDatabase(dbKey)
+      secondaryVaults.set([])
+      dbItems.set([])
+      selectedFile.set(null)
+      sheetOpen = false
+      vaultDirty = false
+      editDirty = false
+      record = null
+      selectedUUID = null
+      selectedVaultUuid = null
+      isEditing = false
+      isNew = false
+      autofillStagedEdit = false
+      autofillStagedUrl = ''
+      if (clearTimer) { clearTimeout(clearTimer); clearTimer = null }
+      clipHash = null
+      clipboardSession.set(null)
+      clipboardContext.set(null)
+      clearPortpassLocalStorage()
+      await clearIDBKeyval()
+      await clearPortpassCaches()
+      await unregisterPortpassServiceWorkers()
+      onclosed()
+    } catch (e) {
+      showToast('Could not forget profile data: ' + (e.message || e))
+    }
+  }
+
   function lockVault() {
     get(secondaryVaults).forEach(v => closeDatabase(v.uuid))
     closeDatabase(dbKey)
@@ -1865,6 +1927,7 @@
       onlockall={lockAllVaults}
       onlocksecondary={lockSecondaryVault}
       onunlockadditional={unlockAdditionalVault}
+      onforgetprofile={forgetProfileData}
       ondbsave={saveDBFields}
       onsvdbsave={saveSecondaryDBFields}
       ondirtychange={(d) => vaultDirty = d}

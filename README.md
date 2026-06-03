@@ -220,6 +220,8 @@ It is possible to autofill while running Portpass in a separate clean profile, f
 
 **Cross-profile**: To protect against malicious browser extensions, you can run Portpass in a separate browser profile with no extensions installed. The filling profile pairs its `autofill.html` popup with the clean Portpass profile using a short-lived copy/paste token. A helper service called **[switchboard](https://github.com/dbro/switchboard)** then provides a local message relay between the two profiles. No data leaves your machine. The relay is treated as untrusted: requests are signed by the paired popup, replies are encrypted to that popup's per-session key, replayed requests are rejected, and credentials are released only for exact authorized URL matches.
 
+Private or incognito windows behave like a separate temporary browser profile. They cannot use a same-profile setup that has Portpass open in a normal browser window; use the cross-profile relay and pair the private window instead. Because private-window storage is temporary, pairing must be repeated after the private session closes.
+
 See [SECURITY.md](SECURITY.md) for setup instructions.
 
 Note that while Portpass should run in Chrome or Safari, the bookmarklet can run in Chrome, Safari, and Firefox. More than one bookmarklet can be created and used by Portpass, allowing fine-grained control for people who use multiple browsers and profiles.
