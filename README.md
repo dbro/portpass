@@ -6,19 +6,26 @@
 
 **Free and open source. Try it: [https://dbro.github.io/portpass](https://dbro.github.io/portpass)**
 
-Portpass is for people who want full control of their passwords. Portpass is a password manager app that runs on mobile and desktop devices, storing the encrypted information in a single file using the pwsafe v3 format invented by cryptographer [Bruce Schneier](https://www.schneier.com/) in the 1990s, which is open source and audited.
+Portpass is for people who want full control of their passwords. Portpass is a password manager app that runs offline on mobile and desktop devices, storing the encrypted information in a single file using the pwsafe v3 format invented by cryptographer [Bruce Schneier](https://www.schneier.com/) in the 1990s, which is open source and audited.
 
-_No cloud required, no browser extensions required, no proprietary synchronization methods, no new encryption methods._
+Portpass is different from other password managers:
+
+* _No cloud required. Portpass runs offline using a local vault file_
+* _No browser extensions involved_
+* _No proprietary synchronization methods_
+* _No new encryption methods_
+* _No subscription fees or upsells_
+* _No lock-in_
 
 You decide where to store your vault file: on-device, self-hosted, or in a cloud storage service that you trust. You can allow other people to read or write to your vault files using cloud service file sharing settings. You can open your password vault file with any app that supports the pwsafe v3 format. You can enable your web browser to fill-in website login forms with usernames and passwords from your vault.
 
 ## What Portpass does
 
-* works fully **offline**, no network connection required after initial installation. Can also work with cloud-hosted files if you choose.
+* works fully **offline**, no network connection required after initial installation. Portpass runs locally, and never sends your vault file contents anywhere.
 * runs on all your devices: **mobile, tablet, and desktop**
 * stores each vault as a file on your device, for easy **sync/backup/sharing**
 * unlocks vault files using WebAuthn methods: **fingerprint, face recognition, and PIN**
-* **fills login forms on websites** using a bookmarklet picker (desktop only). No browser extension with excessive permissions, no copying secrets to the system clipboard
+* **fills login forms on websites** using a bookmarklet you click on (desktop only). No browser extension with excessive permissions, no copying secrets to the system clipboard
 * generates strong passwords
 * keeps a history of previous password values
 * generates **one-time codes (TOTP)** for two-factor authentication (2FA)
@@ -27,6 +34,7 @@ You decide where to store your vault file: on-device, self-hosted, or in a cloud
 * organizes password records into groups for browsing
 * encrypts your vault using an established open source format (pwsafe v3)
 * opens **multiple vaults simultaneously** (eg. personal, work, family), supports sharing vaults with other people
+* (optionally) works files that are synced with a network file share or cloud storage provider of your choosing (Dropbox, Google Drive, etc.).
 * respects read-only file permissions for each vault
 * has a mobile-first design with both light and dark modes
 
@@ -99,12 +107,12 @@ Portpass reads and writes the [Password Safe v3](https://github.com/pwsafe/pwsaf
 
 **Features in Password Safe not currently supported by Portpass:**
 
-- Autofill into native desktop apps (Portpass autofills into desktop browsers)
+- Autofill into native desktop apps (Portpass autofills into desktop browsers only)
 - Automatic vault lock after an idle timeout
 - Password strength indicator and breach alerts
-- Password entry aliases (re-using a password across multiple entries)
+- Aliases and linked entries (re-using a password across multiple entries)
 - Passphrase generation (diceware / word lists)
-- Multiple password generation policies (Portpass uses the same adjustable policy for all vaults and entries)
+- Site-specific password generation policies (Portpass uses the same adjustable policy for all vaults and entries)
 - File attachments and passkeys stored in the vault
 - Export and import in other vault file formats
 - SSH agent integration
@@ -116,6 +124,7 @@ Portpass reads and writes the [Password Safe v3](https://github.com/pwsafe/pwsaf
 - Runs on mobile, desktop, and tablet devices
 - Modern mobile-first design with touch-friendly interface
 - Biometric/PIN unlock via fingerprint, face recognition, PIN, or hardware security key (WebAuthn PRF — YubiKey series 5+ may work but is untested)
+- Autofill inserts single-field values (as well as a configurable sequence of fields also supported by Password Safe)
 - Opens multiple vault files simultaneously, especially useful for sharing passwords
 - Light/dark themes with selectable accent colors
 
@@ -233,13 +242,12 @@ Portpass's threat model, known limitations, and guidance on protecting yourself 
 ## Roadmap
 
 Possible future improvements:
-* Allow changing vault's master password and the number of key stretching rounds 
-* Import/Export other vault file formats
 * Automatically lock vault after an amount of time or system event (eg screen lock)
 * Companion mobile keyboard app to autofill values
 * Display and store attachments in the vault (one for each password)
+* Import/Export other vault file formats
 
-Some of these capabilitites can be done today using other apps that read and write pwsafe v3 files (change master password, import/export).
+Some of these capabilitites can be done today using other apps that read and write pwsafe v3 files (mobile keyboard app, import/export).
 
 ## Credits
 
