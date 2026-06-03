@@ -9,11 +9,11 @@
     updateRecordFields, updateDBFields, deleteRecord as wasmDeleteRecord,
     searchRecords, searchRecordResults, closeDatabase, loadVaultFile,
     copyFieldToClipboard, copyCustomFieldToClipboard, copyTOTP as wasmCopyTOTP,
-    getTOTP, getFieldValue, getCustomFieldValue,
+    getTOTP, getFieldValue, getCustomFieldValue, changeMasterPassword,
   } from '../wasm.js'
-  import { addSecondaryCredential, updateSecondaryHandle, removeSecondaryCredential } from './secondaryVaults.js'
+  import { addSecondaryCredential, getSecondaryCredentials, updateSecondaryHandle, removeSecondaryCredential } from './secondaryVaults.js'
   import { getSwitchboardUrl, getCrossProfileEnabled } from './delegates.js'
-  import { isBiometricEnrolledForFile, unlockWithBiometric } from './biometric.js'
+  import { clearBiometric, isBiometricEnrolledForFile, unlockWithBiometric } from './biometric.js'
   import { getDelegates, verifyDelegateById, recordFill } from './delegates.js'
   import Icon from './Icon.svelte'
   import RecordList from './RecordList.svelte'
@@ -1302,6 +1302,64 @@
     }
   }
 
+  async function saveVaultPasswordChange(uuid, currentPassword, newPassword, iterations) {
+    const isPrimaryVault = uuid === dbKey
+    try {
+      if (isPrimaryVault) {
+        if (!await checkPrimaryConflict()) return false
+        const secondaryCreds = await getSecondaryCredentials(dbKey).catch(() => [])
+        changeMasterPassword(uuid, currentPassword, newPassword, iterations)
+        if (await saveFile(true)) {
+          for (const cred of secondaryCreds) {
+            await addSecondaryCredential(dbKey, cred.filename, cred.vaultUuid, cred.masterPassword, cred.handle)
+          }
+          await clearBiometric(dbKey).catch(() => {})
+          showToast('Master password updated')
+          return true
+        }
+        return false
+      }
+
+      const sv = get(secondaryVaults).find(v => v.uuid === uuid)
+      if (!sv || sv.readonly) return false
+      if (sv.handle && secondaryModified[uuid] !== undefined) {
+        try {
+          const file = await sv.handle.getFile()
+          if (file.lastModified !== secondaryModified[uuid]) {
+            let realConflict = true
+            if (secondaryHead[uuid]) {
+              try {
+                const buf = await file.slice(72, 152).arrayBuffer()
+                realConflict = !sameHead(new Uint8Array(buf), secondaryHead[uuid])
+              } catch {}
+            }
+            if (realConflict && !confirm(`"${sv.name || sv.filename}" was modified since it was loaded.\n\nSaving will overwrite those changes. Save anyway?`)) return false
+          }
+        } catch {}
+      }
+
+      changeMasterPassword(uuid, currentPassword, newPassword, iterations)
+      const data = saveDatabase(uuid)
+      if (sv.handle) {
+        const w = await sv.handle.createWritable()
+        await w.write(data)
+        await w.close()
+        secondaryHead[uuid] = data.slice(72, 152)
+        try { secondaryModified[uuid] = (await sv.handle.getFile()).lastModified } catch {}
+        try { await addSecondaryCredential(dbKey, sv.filename, uuid, newPassword, sv.handle) } catch {}
+        showToast('Master password updated')
+        return true
+      }
+      await saveSecondaryAs(sv, data)
+      try { await addSecondaryCredential(dbKey, sv.filename, uuid, newPassword, sv.handle) } catch {}
+      showToast('Master password updated')
+      return true
+    } catch (e) {
+      if (e.name !== 'AbortError') showToast('Failed to update password: ' + e.message)
+      throw e
+    }
+  }
+
   function closeVaultSheet() {
     if (vaultDirty) {
       if (!confirm('Discard unsaved changes?')) return
@@ -1930,6 +1988,7 @@
       onforgetprofile={forgetProfileData}
       ondbsave={saveDBFields}
       onsvdbsave={saveSecondaryDBFields}
+      onpasswordchange={saveVaultPasswordChange}
       ondirtychange={(d) => vaultDirty = d}
       {ontheme}
       {onaccent}

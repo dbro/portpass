@@ -77,6 +77,10 @@ export function getDatabaseInfo(vaultUuid) {
     return parseOrThrow(window.getDBInfo(vaultUuid))
 }
 
+export function getStretchLimits() {
+    return parseOrThrow(window.getStretchLimits())
+}
+
 export function saveDatabase(vaultUuid) {
     const res = window.saveDB(vaultUuid)
     if (typeof res === 'string') throw new Error(res)
@@ -98,6 +102,11 @@ export function updateDBFields(vaultUuid, fields) {
     const args = [vaultUuid]
     for (const [k, v] of Object.entries(fields)) args.push(k, String(v ?? ''))
     const err = window.UpdateDBFields(...args)
+    if (err) throw new Error(err)
+}
+
+export function changeMasterPassword(vaultUuid, currentPassword, newPassword, iterations) {
+    const err = window.changeMasterPassword(vaultUuid, currentPassword, newPassword, Number(iterations))
     if (err) throw new Error(err)
 }
 

@@ -268,6 +268,14 @@ func getDBInfo(this js.Value, args []js.Value) interface{} {
 	return string(jsonData)
 }
 
+func getStretchLimits(this js.Value, args []js.Value) interface{} {
+	result, _ := json.Marshal(map[string]uint32{
+		"default": pwsafe.DefaultStretchIterations(),
+		"max":     pwsafe.MaxStretchIterations(),
+	})
+	return string(result)
+}
+
 func updateRecordFields(this js.Value, args []js.Value) interface{} {
 	db, _, ok := getDB(args)
 	if !ok {
@@ -411,6 +419,29 @@ func updateDBFields(this js.Value, args []js.Value) interface{} {
 		default:
 			return fmt.Sprintf("unknown field: %s", field)
 		}
+	}
+	return nil
+}
+
+func changeMasterPassword(this js.Value, args []js.Value) interface{} {
+	db, _, ok := getDB(args)
+	if !ok {
+		return "vault not open"
+	}
+	if len(args) != 4 {
+		return "invalid arguments: expected (vaultUuid, currentPassword, newPassword, iterations)"
+	}
+	currentPassword := args[1].String()
+	newPassword := args[2].String()
+	iter := uint32(args[3].Int())
+	if newPassword == "" {
+		return "New password is required"
+	}
+	if !db.VerifyPassword(currentPassword) {
+		return "Current password is incorrect"
+	}
+	if err := db.SetPasswordWithIterations(newPassword, iter); err != nil {
+		return err.Error()
 	}
 	return nil
 }
@@ -883,10 +914,12 @@ func main() {
 	js.Global().Set("getRecord", js.FuncOf(getRecord))
 	js.Global().Set("createDatabase", js.FuncOf(createDatabase))
 	js.Global().Set("getDBInfo", js.FuncOf(getDBInfo))
+	js.Global().Set("getStretchLimits", js.FuncOf(getStretchLimits))
 	js.Global().Set("saveDB", js.FuncOf(saveDB))
 	js.Global().Set("UpdateRecordFields", js.FuncOf(updateRecordFields))
 	js.Global().Set("deleteRecord", js.FuncOf(deleteRecord))
 	js.Global().Set("UpdateDBFields", js.FuncOf(updateDBFields))
+	js.Global().Set("changeMasterPassword", js.FuncOf(changeMasterPassword))
 	js.Global().Set("searchRecords", js.FuncOf(searchRecords))
 	js.Global().Set("searchRecordResults", js.FuncOf(searchRecordResults))
 	js.Global().Set("getSuggestion", js.FuncOf(getSuggestion))

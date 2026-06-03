@@ -654,6 +654,7 @@ test.describe('Bookmarklet — autofill popup phases', () => {
     await expect(popup.locator('.pp-autofill-summary')).not.toHaveClass(/active/)
     await expect(popup.locator('.pp-arm')).toHaveCount(0)
     await expect(popup.locator('.pp-field-row', { hasText: 'Password' })).toContainText('••••••••')
+    await expect(popup.locator('.pp-field-row', { hasText: 'Password' }).locator('.pp-field-filled')).toBeVisible()
     expect(popup.isClosed()).toBe(false)
 
     await popup.locator('.pp-autofill-summary').click()

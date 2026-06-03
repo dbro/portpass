@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { get } from 'svelte/store'
-  import { getDatabaseInfo, openDatabase, updateDBFields } from '../wasm.js'
+  import { getDatabaseInfo, getStretchLimits, openDatabase, updateDBFields } from '../wasm.js'
   import { selectedFile, dbItems, secondaryVaults, switchboardUrl, switchboardConnected, crossProfileEnabled, delegatesVersion } from '../store.js'
   import { isBiometricSupported, isBiometricEnrolled, enrollBiometric, clearBiometric } from './biometric.js'
   import { makeDelegateBookmarkletUrl } from './bookmarklet.js'
@@ -9,7 +9,7 @@
   import { createPairedAutofillProfile, removePairedAutofillProfile, parsePairingToken } from './pairedAutofill.js'
   import Icon from './Icon.svelte'
 
-  let { isDesktop, bookmarkletsSupported = false, onback, onlock, onlockall, onlocksecondary, onunlockadditional, onforgetprofile, ondbsave, onsvdbsave, ondirtychange, theme, accent, ontheme, onaccent } = $props()
+  let { isDesktop, bookmarkletsSupported = false, onback, onlock, onlockall, onlocksecondary, onunlockadditional, onforgetprofile, ondbsave, onsvdbsave, onpasswordchange, ondirtychange, theme, accent, ontheme, onaccent } = $props()
 
   // ── Biometric ──────────────────────────────────────────────────────────────
   let biometricAvailable = $state(false)
@@ -131,10 +131,18 @@
   // ── Navigation ─────────────────────────────────────────────────────────────
   // null = main settings page, 'primary' = primary vault detail, uuid = secondary detail
   let selectedDetailVault = $state(null)
-  let techOpen = $state(false)
+  let passwordModalOpen = $state(false)
+  let passwordCurrent = $state('')
+  let passwordNext = $state('')
+  let passwordConfirm = $state('')
+  let passwordIterations = $state('')
+  let passwordError = $state('')
+  let passwordBusy = $state(false)
+  let showPasswordCurrent = $state(false)
+  let showPasswordNext = $state(false)
+  let showPasswordConfirm = $state(false)
 
   function openPrimaryDetail() {
-    techOpen = false
     selectedDetailVault = 'primary'
   }
 
@@ -154,8 +162,74 @@
     svDetailDraftDesc = svDetailInfo?.description ?? ''
     svDetailOrigName  = svDetailDraftName
     svDetailOrigDesc  = svDetailDraftDesc
-    techOpen = false
     selectedDetailVault = sv.uuid
+  }
+
+  function refreshDetailInfo(uuid) {
+    try {
+      if (uuid === 'primary') info = getDatabaseInfo(_vaultUuid)
+      else svDetailInfo = getDatabaseInfo(uuid)
+    } catch {}
+  }
+
+  function openPasswordModal() {
+    const detailInfo = selectedDetailVault === 'primary' ? info : svDetailInfo
+    const limits = getStretchLimits()
+    const defaultIterations = limits?.default ?? 262144
+    const currentIterations = detailInfo?.iter ?? defaultIterations
+    passwordModalOpen = true
+    passwordCurrent = ''
+    passwordNext = ''
+    passwordConfirm = ''
+    passwordIterations = String(Math.min(currentIterations, defaultIterations))
+    passwordError = ''
+    passwordBusy = false
+    showPasswordCurrent = false
+    showPasswordNext = false
+    showPasswordConfirm = false
+  }
+
+  function closePasswordModal() {
+    if (passwordBusy) return
+    passwordModalOpen = false
+    passwordCurrent = ''
+    passwordNext = ''
+    passwordConfirm = ''
+    passwordError = ''
+  }
+
+  let passwordIterationsNumber = $derived(Number(passwordIterations))
+  let stretchLimits = $derived(getStretchLimits())
+  let maxStretchIterations = $derived(stretchLimits?.max ?? 10000000)
+  let passwordFormValid = $derived(
+    !!passwordCurrent
+    && !!passwordNext
+    && passwordNext === passwordConfirm
+    && Number.isInteger(passwordIterationsNumber)
+    && passwordIterationsNumber >= 1
+    && passwordIterationsNumber <= maxStretchIterations
+  )
+
+  async function commitPasswordChange() {
+    if (!passwordFormValid || passwordBusy) return
+    passwordBusy = true
+    passwordError = ''
+    const detailUuid = selectedDetailVault === 'primary' ? _vaultUuid : selectedDetailVault
+    try {
+      const ok = await onpasswordchange?.(detailUuid, passwordCurrent, passwordNext, passwordIterationsNumber)
+      if (ok === false) {
+        passwordBusy = false
+        return
+      }
+      refreshDetailInfo(selectedDetailVault)
+      if (selectedDetailVault === 'primary') biometricEnrolled = false
+      passwordBusy = false
+      closePasswordModal()
+    } catch (e) {
+      passwordError = e.message || 'Failed to update password'
+    } finally {
+      passwordBusy = false
+    }
   }
 
   function saveSvAndBack() {
@@ -531,6 +605,9 @@
           {@const lastTs  = Math.max(d.bcLastUsed ?? 0, d.relayLastUsed ?? 0) || null}
           {@const mode    = delegateFillMode(d)}
           <div class="delegate-row">
+            <div class="delegate-row-icon">
+              <Icon name="check" size={20}/>
+            </div>
             <div class="delegate-info">
               <span class="delegate-name">{d.name}</span>
               <span class="delegate-meta muted">Created {fmtDate(d.created)}{d.displayCode ? ' · ' + d.displayCode : ''} · {total} {total === 1 ? 'autofill use' : 'autofill uses'} ({mode}){lastTs ? ' · Last used ' + fmtRelative(lastTs) : ''}</span>
@@ -767,10 +844,28 @@
     </div>
   {/if}
 
-  <!-- Security (primary vault only) -->
-  {#if isPrimary && biometricAvailable}
-    <div class="vault-section">
-      <div class="vault-section-title">SECURITY</div>
+  <!-- Lock action -->
+  <div class="vault-section vault-detail-lock-section">
+    {#if isPrimary}
+      <button class="btn btn-ghost vault-lock-full-btn" onclick={secondaryCount > 0 ? onlockall : onlock}>
+        <Icon name="lock" size={16}/> {secondaryCount > 0 ? 'Lock all vaults' : 'Lock vault'}
+      </button>
+      {#if secondaryCount > 0}
+        <p class="vault-lock-caption muted">Remembers secondary vaults — they unlock automatically next session.</p>
+      {/if}
+    {:else}
+      <button class="btn btn-ghost vault-lock-full-btn" onclick={() => onlocksecondary?.(selectedDetailVault)}>
+        <Icon name="lock" size={16}/> Lock this vault
+      </button>
+      <p class="vault-lock-caption muted">Closes this vault and removes it from future sessions.</p>
+    {/if}
+  </div>
+
+  <!-- Security -->
+  <div class="vault-section">
+    <div class="vault-section-title">SECURITY</div>
+    <div class="vault-security-body">
+      {#if isPrimary && biometricAvailable}
       <div class="vault-toggle">
         <div class="vault-toggle-label">
           <span class="vault-toggle-name">Biometric/PIN unlock</span>
@@ -785,44 +880,27 @@
           aria-label="Biometric/PIN unlock"
         ></button>
       </div>
-    </div>
-  {/if}
-
-  <!-- Technical details (collapsible) -->
-  <div class="vault-section">
-    <button class="vault-tech-header" onclick={() => techOpen = !techOpen}>
-      <Icon name={techOpen ? 'chevron-down' : 'chevron-right'} size={16}/>
-      <span>Technical details</span>
-    </button>
-    {#if techOpen}
-      <div class="vault-file-row" style="margin-top:12px">
-        <div class="vault-file">
-          <span class="vault-file-label">Format</span>
-          <span class="vault-file-value">{detailInfo?.version ?? '—'}</span>
-        </div>
-        <div class="vault-file">
-          <span class="vault-file-label">Key strength</span>
-          <span class="vault-file-value">{detailInfo?.iter != null ? `${detailInfo.iter.toLocaleString()} iterations` : '—'}</span>
-        </div>
-      </div>
-    {/if}
-  </div>
-
-  <!-- Lock button -->
-  <div class="vault-lock-full">
-    {#if isPrimary}
-      <button class="btn btn-ghost vault-lock-full-btn" onclick={secondaryCount > 0 ? onlockall : onlock}>
-        <Icon name="lock" size={16}/> {secondaryCount > 0 ? 'Lock all vaults' : 'Lock vault'}
-      </button>
-      {#if secondaryCount > 0}
-        <p class="vault-lock-caption muted">Remembers secondary vaults — they unlock automatically next session.</p>
       {/if}
-    {:else}
-      <button class="btn btn-ghost vault-lock-full-btn" onclick={() => onlocksecondary?.(selectedDetailVault)}>
-        <Icon name="lock" size={16}/> Lock this vault
-      </button>
-      <p class="vault-lock-caption muted">Closes this vault and removes it from future sessions.</p>
-    {/if}
+      <div class="vault-detail-line">
+        <span class="vault-detail-line-label">Vault file format version</span>
+        <span class="vault-detail-line-value">{detailInfo?.version ?? '—'}</span>
+      </div>
+      <div class="vault-detail-line">
+        <span class="vault-detail-line-label">Unlock difficulty</span>
+        <span class="vault-detail-line-value">{detailInfo?.iter != null ? `${detailInfo.iter.toLocaleString()} rounds` : '—'}</span>
+      </div>
+      {#if !detailRO}
+        <div>
+          <button class="vault-password-action" onclick={openPasswordModal}>
+            <span class="vault-password-icons" aria-hidden="true">
+              <Icon name="refresh" size={18}/>
+              <Icon name="lock" size={18}/>
+            </span>
+            Change master password
+          </button>
+        </div>
+      {/if}
+    </div>
   </div>
 
 </div>
@@ -942,6 +1020,83 @@
       <div style="margin-top:12px">
         <button class="vs-close-btn vs-primary-modal-btn" disabled={pairDelegateBusy || !pairDelegateToken.trim()} onclick={commitPairDelegate}>
           {pairDelegateBusy ? 'Pairing…' : 'Pair everyday profile'}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- ── Master password modal ──────────────────────────────────────────────── -->
+{#if passwordModalOpen}
+  <div class="modal-overlay" role="presentation"
+    onclick={e => { e.stopPropagation(); closePasswordModal() }}
+    onkeydown={e => { if (e.key === 'Escape') closePasswordModal() }}>
+    <div class="modal" role="dialog" aria-modal="true" tabindex="-1" onclick={e => e.stopPropagation()} onkeydown={e => e.stopPropagation()}>
+      <div class="modal-title">Change master password</div>
+      <p class="modal-desc muted">This updates the password and unlock difficulty for this vault file.</p>
+      <label class="vault-field modal-field">
+        <span class="vault-label muted">Current password</span>
+        <div class="modal-pw">
+          <input
+            type={showPasswordCurrent ? 'text' : 'password'}
+            bind:value={passwordCurrent}
+            placeholder="Current master password"
+            use:focusOnMount
+          />
+          <button class="icon-btn-flat" onclick={() => showPasswordCurrent = !showPasswordCurrent} aria-label="Toggle visibility">
+            <Icon name={showPasswordCurrent ? 'eye-off' : 'eye'} size={18}/>
+          </button>
+        </div>
+      </label>
+      <label class="vault-field modal-field">
+        <span class="vault-label muted">New password</span>
+        <div class="modal-pw">
+          <input
+            type={showPasswordNext ? 'text' : 'password'}
+            bind:value={passwordNext}
+            placeholder="New master password"
+          />
+          <button class="icon-btn-flat" onclick={() => showPasswordNext = !showPasswordNext} aria-label="Toggle visibility">
+            <Icon name={showPasswordNext ? 'eye-off' : 'eye'} size={18}/>
+          </button>
+        </div>
+      </label>
+      <label class="vault-field modal-field">
+        <span class="vault-label muted">Confirm new password</span>
+        <div class="modal-pw">
+          <input
+            type={showPasswordConfirm ? 'text' : 'password'}
+            bind:value={passwordConfirm}
+            placeholder="Repeat new master password"
+            onkeydown={e => { if (e.key === 'Enter') commitPasswordChange() }}
+          />
+          <button class="icon-btn-flat" onclick={() => showPasswordConfirm = !showPasswordConfirm} aria-label="Toggle visibility">
+            <Icon name={showPasswordConfirm ? 'eye-off' : 'eye'} size={18}/>
+          </button>
+        </div>
+      </label>
+      <label class="vault-field modal-field">
+        <span class="vault-label muted">Unlock difficulty</span>
+        <input
+          class="input"
+          type="number"
+          min="1"
+          max={maxStretchIterations}
+          step="1"
+          bind:value={passwordIterations}
+        />
+      </label>
+      {#if passwordNext && passwordConfirm && passwordNext !== passwordConfirm}
+        <div class="unlock-error" style="font-size:13px">New passwords do not match.</div>
+      {/if}
+      {#if passwordIterations && (!Number.isInteger(passwordIterationsNumber) || passwordIterationsNumber < 1 || passwordIterationsNumber > maxStretchIterations)}
+        <div class="unlock-error" style="font-size:13px">Rounds must be between 1 and {maxStretchIterations.toLocaleString()}.</div>
+      {/if}
+      {#if passwordError}<div class="unlock-error" style="font-size:13px">{passwordError}</div>{/if}
+      <div class="modal-actions">
+        <button class="btn btn-ghost" disabled={passwordBusy} onclick={closePasswordModal}>Cancel</button>
+        <button class="btn btn-primary" disabled={!passwordFormValid || passwordBusy} onclick={commitPasswordChange}>
+          {passwordBusy ? 'Updating…' : 'Update password'}
         </button>
       </div>
     </div>
@@ -1190,20 +1345,60 @@
     }
   }
 
-  .vault-tech-header {
+  .vault-detail-lock-section {
+    margin-bottom: 28px;
+  }
+
+  .vault-security-body {
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .vault-detail-line {
+    display: flex;
+    align-items: baseline;
     gap: 6px;
+    flex-wrap: wrap;
+    font-size: 14px;
+    color: var(--text-muted);
+  }
+
+  .vault-detail-line-label {
+    color: var(--text-muted);
+  }
+
+  .vault-detail-line-value {
+    color: var(--text);
+    font-weight: 500;
+  }
+
+  .vault-password-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
     background: none;
     border: none;
     cursor: pointer;
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 500;
-    color: var(--text);
+    color: var(--accent);
     padding: 0;
+    text-align: left;
   }
 
-  .vault-tech-header:hover { color: var(--accent); }
+  .vault-password-action:hover { color: var(--accent-strong); }
+
+  .vault-password-icons {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    flex: 0 0 auto;
+  }
+
+  .modal-field {
+    margin-bottom: 12px;
+  }
 
   /* ── Shared ──────────────────────────────────────────────────────────────── */
   .vault-field {
@@ -1392,18 +1587,26 @@
   .delegate-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    margin-bottom: 14px;
+    gap: 10px;
+    margin-bottom: 12px;
   }
 
   .delegate-row {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 10px 14px;
+    gap: 14px;
+    padding: 16px;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--r-card);
+    box-shadow: var(--shadow);
+  }
+
+  .delegate-row-icon {
+    flex-shrink: 0;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
   }
 
   .delegate-info {
@@ -1415,15 +1618,16 @@
   }
 
   .delegate-name {
-    font-size: 14px;
-    font-weight: 600;
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1.3;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
   .delegate-meta {
-    font-size: 12px;
+    font-size: 13px;
   }
 
   .delegate-revoke {
@@ -1452,18 +1656,16 @@
 
   .vs-autofill-setup-toggle {
     display: block;
-    margin: 0;
-    padding: 0;
-    border: none;
     background: none;
-    color: var(--accent);
+    border: none;
     cursor: pointer;
-    font: inherit;
-    font-size: 14px;
-    font-weight: 700;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--accent);
+    padding: 12px 0 0;
     text-align: left;
   }
-  .vs-autofill-setup-toggle:hover { text-decoration: underline; }
+  .vs-autofill-setup-toggle:hover { color: var(--accent-strong); }
 
   .delegate-advanced-body {
     margin-top: 12px;

@@ -37,6 +37,14 @@ const (
 	maxStretchIterations     uint32 = 10_000_000
 )
 
+func DefaultStretchIterations() uint32 {
+	return defaultStretchIterations
+}
+
+func MaxStretchIterations() uint32 {
+	return maxStretchIterations
+}
+
 // NewV3 - create and initialize a new pwsafe.V3 db
 func NewV3(name, password string) *V3 {
 	var db V3
@@ -337,14 +345,29 @@ func (db V3) sortUUIDsForRecordList(uuids []string) []string {
 
 // SetPassword Sets the password that will be used to encrypt the file on next save
 func (db *V3) SetPassword(pw string) error {
+	return db.SetPasswordWithIterations(pw, defaultStretchIterations)
+}
+
+// SetPasswordWithIterations sets the password and stretch count used on next save.
+func (db *V3) SetPasswordWithIterations(pw string, iter uint32) error {
+	if err := validateStretchIterations(iter); err != nil {
+		return err
+	}
 	// First recalculate the Salt and set iter
-	db.Iter = defaultStretchIterations
+	db.Iter = iter
 	if _, err := rand.Read(db.Salt[:]); err != nil {
 		return err
 	}
 	db.calculateStretchKey(pw)
 	db.LastMod = time.Now()
 	return nil
+}
+
+func (db *V3) VerifyPassword(pw string) bool {
+	check := V3{Salt: db.Salt, Iter: db.Iter}
+	check.calculateStretchKey(pw)
+	defer wipeBytes(check.StretchedKey[:])
+	return hmac.Equal(check.StretchedKey[:], db.StretchedKey[:])
 }
 
 func validateStretchIterations(iter uint32) error {

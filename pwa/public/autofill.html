@@ -263,7 +263,8 @@ body {
 .pp-field-main {
   min-height:41px; display:flex; align-items:center; gap:10px;
 }
-.pp-field-label { color:var(--text); font-size:13px; font-weight:700; flex:1; min-width:0 }
+.pp-field-label { color:var(--text); font-size:13px; font-weight:700; flex:1; min-width:0; display:flex; align-items:center; gap:5px }
+.pp-field-filled { color:var(--accent); display:inline-flex; align-items:center; flex-shrink:0 }
 .pp-field-value {
   color:var(--text-muted); font:12px ui-monospace,monospace; max-width:190px;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
@@ -430,6 +431,7 @@ body {
   var fieldClicked = false    // bookmarklet reported a field was clicked
   var armedCode = 'sequence'  // null, 'sequence', or one field code
   var pendingFillMode = null  // compatibility fallback for older installed bookmarklets
+  var pendingFillCode = null
   var oneTimeOriginOverride = false
   var didInsertionsHappen = false
   var otpRefreshTimer = null
@@ -558,8 +560,12 @@ body {
       notifyFilledOnce()
       startIdleCloseTimer()
       var mode = msg.mode || pendingFillMode
+      var filledCode = pendingFillCode
       pendingFillMode = null
+      pendingFillCode = null
       if (mode === 'single') {
+        var filledField = filledCode && fieldByCode(filledCode)
+        if (filledField) filledField.inserted = true
         ;(pendingCredentials.fields || []).forEach(function(field) {
           if (field.sensitive) field.revealed = false
         })
@@ -1626,6 +1632,7 @@ body {
       var autotype = armedCode === 'sequence' ? pendingCredentials.autotype : '\\' + armedCode
       if (window.opener && bookmarkletOrigin) {
         pendingFillMode = armedCode === 'sequence' ? 'sequence' : 'single'
+        pendingFillCode = pendingFillMode === 'single' ? armedCode : null
         window.opener.postMessage({ type: 'fill', capability: popupCapability, mode: pendingFillMode, autotype: autotype, fields: fields, allowSubmit: !oneTimeOriginOverride }, bookmarkletOrigin)
       }
     } catch(e) {
@@ -1898,6 +1905,13 @@ body {
     var label = document.createElement('div')
     label.className = 'pp-field-label'
     label.textContent = field.label
+    if (field.inserted) {
+      var filled = document.createElement('span')
+      filled.className = 'pp-field-filled'
+      filled.title = 'Inserted'
+      filled.innerHTML = SVG_CHECK_SM
+      label.appendChild(filled)
+    }
     var value = document.createElement('div')
     value.className = 'pp-field-value' + (field.notes ? ' pp-notes-value' : '')
     value.textContent = field.sensitive && !field.revealed ? '••••••••' : (field.value || '')
