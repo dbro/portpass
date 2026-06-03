@@ -42,6 +42,7 @@
   let isDirty                = $state(false)
   let editDirty              = $state(false)
   let autofillStagedEdit     = $state(false)
+  let autofillStagedUrl      = $state('')
   let vaultDirty             = $state(false)
   let dbName   = $state('')
   let dbKey        = $state('')
@@ -314,7 +315,6 @@
   }
 
   function autofillStageURL(uuid, vaultUuid, newUrl) {
-    const v = vaultUuid || dbKey
     const readonly = vaultUuid
       ? !!get(secondaryVaults).find(s => s.uuid === vaultUuid)?.readonly
       : !!get(selectedFile)?.readonly
@@ -323,12 +323,13 @@
     if (!destination || destination.protocol !== 'https:')
       throw new Error('Autofill destination could not be verified')
     loadRecordSelection(uuid, vaultUuid || null)
-    record = { ...getRecordData(v, uuid), URL: destination.origin + destination.pathname }
+    autofillStagedUrl = destination.origin + destination.pathname
     autofillStagedEdit = true
     sheetOpen = false
     vaultDirty = false
     isNew = false
     isEditing = true
+    setTimeout(() => { try { window.focus() } catch {} }, 0)
   }
 
   // ── Cross-profile autofill intent handler ────────────────────────────────
@@ -734,6 +735,8 @@
     isEditing = false
     isNew = false
     editDirty = false
+    autofillStagedEdit = false
+    autofillStagedUrl = ''
     try {
       loadRecordSelection(uuid, vaultUuid)
     } catch (e) {
@@ -767,10 +770,14 @@
     isEditing = false
     isNew = false
     editDirty = false
+    autofillStagedEdit = false
+    autofillStagedUrl = ''
     loadRecordSelection(null)
   }
 
   function startEdit() {
+    autofillStagedEdit = false
+    autofillStagedUrl = ''
     isEditing = true
   }
 
@@ -802,6 +809,7 @@
       record = getRecordData(selectedVaultUuid || dbKey, selectedUUID)
     }
     autofillStagedEdit = false
+    autofillStagedUrl = ''
     isEditing = false
     editDirty = false
   }
@@ -893,6 +901,7 @@
       selectedUUID = uuid ?? selectedUUID
       record = getRecordData(targetVault, selectedUUID)
       autofillStagedEdit = false
+      autofillStagedUrl = ''
       isNew = false
       isEditing = false
       editDirty = false
@@ -1870,6 +1879,7 @@
       {bookmarkletsSupported}
       {hasDelegates}
       vaultUuid={isNew ? (newRecordVaultUuid || dbKey) : (selectedVaultUuid || dbKey)}
+      stagedUrl={autofillStagedUrl}
       {rwVaults}
       vaultReadonly={editVaultReadonly}
       onvaultchange={(uuid) => newRecordVaultUuid = uuid}

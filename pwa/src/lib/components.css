@@ -313,6 +313,10 @@
   transition: border-color .12s var(--ease), box-shadow .12s var(--ease);
 }
 .vault-app .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.vault-app .input.modified {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
 .vault-app .input-wrap {
   display: flex; align-items: center;
   background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-input);

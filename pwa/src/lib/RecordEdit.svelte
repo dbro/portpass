@@ -25,7 +25,7 @@
     return { secret: secret.toUpperCase().replace(/[\s-]/g, ''), digits, period }
   }
 
-  let { record, isNew, isDesktop, bookmarkletsSupported = false, hasDelegates = false, vaultUuid, rwVaults = [], vaultReadonly = false, onvaultchange, oncancel, onsave, ondelete, ondirtychange } = $props()
+  let { record, isNew, isDesktop, bookmarkletsSupported = false, hasDelegates = false, vaultUuid, stagedUrl = '', rwVaults = [], vaultReadonly = false, onvaultchange, oncancel, onsave, ondelete, ondirtychange } = $props()
 
   let vaultDropOpen = $state(false)
 
@@ -187,6 +187,19 @@
   })
 
   function set(k, v) { draft = { ...draft, [k]: v } }
+
+  let urlInput = $state(null)
+  let appliedStagedUrl = ''
+  $effect(() => {
+    if (!stagedUrl || stagedUrl === appliedStagedUrl) return
+    appliedStagedUrl = stagedUrl
+    set('URL', stagedUrl)
+    setTimeout(() => {
+      urlInput?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+      urlInput?.focus?.()
+      urlInput?.select?.()
+    }, 0)
+  })
 
   // Returns just the suffix to append, or '' if no useful suggestion
   function ghostFor(field, value) {
@@ -568,7 +581,13 @@
 
     <label class="field">
       <span class="field-label muted">URL</span>
-      <input class="input" value={draft.URL} oninput={e => set('URL', e.target.value)}/>
+      <input
+        class="input"
+        class:modified={!!stagedUrl && draft.URL !== (record?.URL ?? '')}
+        bind:this={urlInput}
+        value={draft.URL}
+        oninput={e => set('URL', e.target.value)}
+      />
     </label>
 
     {#if bookmarkletsSupported}
