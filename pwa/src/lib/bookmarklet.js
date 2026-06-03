@@ -18,13 +18,16 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, R
   if (window.__ppRunning) return
   window.__ppRunning = true
 
-  var isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost'
-  var currentCanonical = canonicalURL(window.location.href)
+  var initialOrigin = window.location.origin
+  var currentPageUrl = window.location.href
+  var initialPageUrl = currentPageUrl
+  var currentCanonical = canonicalURL(currentPageUrl)
   var saveUrl = window.location.origin + window.location.pathname
   var AUTOFILL_URL = PORTPASS_URL + 'autofill.html'
   var pp = null
   var startEl = null   // element the user clicked in the host page during the waiting phase
   var cleanedUp = false
+  var capability = null
 
   function cleanup() {
     if (cleanedUp) return
@@ -39,20 +42,20 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, R
     if (!isUsableInput(target)) return
     e.preventDefault()
     startEl = target
-    try { pp.postMessage({ type: 'field-clicked' }, PORTPASS_ORIGIN) } catch(_) {}
+    try { pp.postMessage({ type: 'field-clicked', capability: capability, pageUrl: window.location.href }, PORTPASS_ORIGIN) } catch(_) {}
   }
 
   function onPopupMessage(e) {
-    if (!pp || e.source !== pp) return
+    if (!pp || e.source !== pp || e.origin !== PORTPASS_ORIGIN) return
     var msg = e.data
-    if (!msg) return
+    if (!msg || msg.capability !== capability) return
     if (msg.type === 'fill') {
       // Autofill popup has chosen an action and the user has clicked a field.
       // Remove the field-click listener so it doesn't fire again mid-fill.
       document.removeEventListener('click', onFieldClick, true)
       var el = startEl
-      executeAutotype(el, msg.autotype, msg.fields).then(function() {
-        try { pp.postMessage({ type: 'fill-done', mode: msg.mode }, PORTPASS_ORIGIN) } catch(_) {}
+      executeAutotype(el, msg.autotype, msg.fields, msg.allowSubmit !== false).then(function() {
+        try { pp.postMessage({ type: 'fill-done', capability: capability, mode: msg.mode }, PORTPASS_ORIGIN) } catch(_) {}
         // Focus the autofill popup from the main-window context so the done state is visible.
         // (window.focus() from within autofill.html is blocked; pp.focus() from the opener works.)
         try { pp.focus() } catch(_) {}
@@ -62,6 +65,11 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, R
         } else {
           cleanup()
         }
+      }).catch(function(err) {
+        startEl = null
+        document.addEventListener('click', onFieldClick, true)
+        try { pp.postMessage({ type: 'fill-error', capability: capability, error: err && err.message || 'Autofill stopped', fieldCode: err && err.fieldCode || null }, PORTPASS_ORIGIN) } catch(_) {}
+        try { pp.focus() } catch(_) {}
       })
     } else if (msg.type === 'cancel') {
       cleanup()
@@ -84,12 +92,15 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, R
         return
       }
       if (readyMsg.type === 'error') { cleanup(); return }
+      capability = readyMsg.capability
+      if (!capability) { cleanup(); return }
 
       pp.postMessage({
         type: 'init',
+        capability: capability,
         url: currentCanonical,
+        pageUrl: currentPageUrl,
         saveUrl: saveUrl,
-        isSecure: isSecure,
         delegateId: DELEGATE_ID,
         relayUrl: RELAY_URL,
       }, PORTPASS_ORIGIN)
@@ -118,7 +129,7 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, R
         reject('timeout')
       }, timeout)
       function handler(e) {
-        if (e.source !== target) return
+        if (e.source !== target || e.origin !== PORTPASS_ORIGIN) return
         if (types.indexOf(e.data && e.data.type) >= 0) {
           clearTimeout(t)
           window.removeEventListener('message', handler)
@@ -132,18 +143,14 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, R
   // ── DOM / autotype helpers ───────────────────────────────────────────────
 
   function canonicalURL(href) {
-    var s = href || ''
-    var pfxs = ['https://', 'http://']
-    for (var i = 0; i < pfxs.length; i++) {
-      if (s.toLowerCase().indexOf(pfxs[i]) === 0) { s = s.slice(pfxs[i].length); break }
+    var s = (href || '').trim()
+    if (!s) return ''
+    try {
+      var parsed = new URL(s.indexOf('://') >= 0 ? s : 'https://' + s)
+      return (parsed.host.replace(/^www\./i, '') + parsed.pathname).toLowerCase().replace(/\/+$/, '')
+    } catch (_) {
+      return ''
     }
-    var h = s.indexOf('#'); if (h >= 0) s = s.slice(0, h)
-    var q = s.indexOf('?'); if (q >= 0) s = s.slice(0, q)
-    s = s.toLowerCase()
-    var sl = s.indexOf('/')
-    if (sl >= 0) s = s.slice(0, sl).replace(/^www\./, '') + s.slice(sl)
-    else s = s.replace(/^www\./, '')
-    return s.replace(/\/+$/, '')
   }
 
   function parseAutotype(seq) {
@@ -156,11 +163,11 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, R
       if (!code) break
       if (code === '\\') {
         lit += '\\'; i += 2
-      } else if (code === 'f') {
+      } else if (code === 'v' && seq[i + 2] === '{') {
         if (lit) { tokens.push({ type: 'lit', text: lit }); lit = '' }
-        var d = seq[i + 2]
-        if (d && /^[1-9]$/.test(d)) { tokens.push({ type: 'f', n: parseInt(d) }); i += 3 }
-        else { tokens.push({ type: 'f', n: 1 }); i += 2 }
+        var end = seq.indexOf('}', i + 3)
+        if (end < 0) break
+        tokens.push({ type: 'v', name: seq.slice(i + 3, end) }); i = end + 1
       } else if (code === 'w' || code === 'W') {
         if (lit) { tokens.push({ type: 'lit', text: lit }); lit = '' }
         var j = i + 2, count = 0
@@ -185,8 +192,35 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, R
     if (el.disabled || el.type === 'hidden') return false
     var bad = ['submit', 'button', 'reset', 'image', 'checkbox', 'radio']
     if (bad.indexOf(el.type) >= 0) return false
+    if (!el.isConnected) return false
     var s = getComputedStyle(el)
-    return s.display !== 'none' && s.visibility !== 'hidden'
+    if (s.display === 'none' || s.visibility === 'hidden' || Number(s.opacity) < 0.1) return false
+    var r = el.getBoundingClientRect()
+    if (r.width < 2 || r.height < 2 || r.bottom <= 0 || r.right <= 0 ||
+        r.top >= window.innerHeight || r.left >= window.innerWidth) return false
+    var x = Math.max(0, Math.min(window.innerWidth - 1, r.left + r.width / 2))
+    var y = Math.max(0, Math.min(window.innerHeight - 1, r.top + r.height / 2))
+    var top = document.elementFromPoint(x, y)
+    return !!top && (top === el || el.contains(top))
+  }
+
+  function validatePage() {
+    if (window.location.origin !== initialOrigin || window.location.href !== initialPageUrl)
+      throw new Error('Page changed during autofill')
+  }
+
+  function validateField(el, code, startForm) {
+    validatePage()
+    if (!isUsableInput(el)) throw new Error('Destination field changed or is not visible')
+    if (startForm && el.closest('form') !== startForm) throw new Error('Destination form changed during autofill')
+    if (code === 'p' && el.type !== 'password') throw fieldError('Password destination is not a password field', code)
+    if (code === '2' && ['text', 'tel', 'number'].indexOf(el.type) < 0) throw fieldError('One-time code destination is not suitable', code)
+  }
+
+  function fieldError(message, fieldCode) {
+    var err = new Error(message)
+    err.fieldCode = fieldCode
+    return err
   }
 
   function fillField(el, value) {
@@ -203,7 +237,7 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, R
             'textarea:not([disabled])'
     var all = Array.from(document.querySelectorAll(q)).filter(function(e) {
       var s = getComputedStyle(e)
-      return e.tabIndex >= 0 && s.display !== 'none' && s.visibility !== 'hidden'
+      return e.tabIndex >= 0 && isUsableInput(e)
     })
     var pos  = all.filter(function(e) { return e.tabIndex > 0 })
                .sort(function(a, b) { return a.tabIndex - b.tabIndex })
@@ -223,19 +257,24 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, R
     return i > 0 ? sorted[i - 1] : null
   }
 
-  async function executeAutotype(startEl, sequence, fields) {
+  async function executeAutotype(startEl, sequence, fields, allowSubmit) {
     var tokens = parseAutotype(sequence)
     var el = startEl
+    var startForm = startEl && startEl.closest('form')
+    validateField(el, null, startForm)
     for (var i = 0; i < tokens.length; i++) {
       var tok = tokens[i]
       if (tok.type === 'delay') {
         await new Promise(function(r) { setTimeout(r, tok.ms) })
-      } else if (tok.type === 'lit' || tok.type === 'f') {
-        if (el) fillField(el, tok.type === 'f' ? (fields['f' + tok.n] || '') : tok.text)
+      } else if (tok.type === 'lit' || tok.type === 'v') {
+        if (el) {
+          validateField(el, null, startForm)
+          fillField(el, tok.type === 'v' ? (fields['v{' + tok.name + '}'] || '') : tok.text)
+        }
       } else {
         var code = tok.code
         if (code === 'u' || code === 'p' || code === 'm' || code === '2') {
-          if (el) fillField(el, fields[code] || '')
+          if (el) { validateField(el, code, startForm); fillField(el, fields[code] || '') }
         } else if (code === 't') {
           var next = nextFocusable(el)
           if (next) { if (el) el.dispatchEvent(new Event('blur', { bubbles: true })); next.focus(); el = next }
@@ -243,6 +282,8 @@ function DELEGATE_BOOKMARKLET_IIFE(PORTPASS_URL, PORTPASS_ORIGIN, DELEGATE_ID, R
           var prev = prevFocusable(el)
           if (prev) { if (el) el.dispatchEvent(new Event('blur', { bubbles: true })); prev.focus(); el = prev }
         } else if (code === 'n') {
+          if (!allowSubmit) continue
+          validateField(el, null, startForm)
           if (el) {
             ['keydown', 'keypress', 'keyup'].forEach(function(evType) {
               el.dispatchEvent(new KeyboardEvent(evType, {

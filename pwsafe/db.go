@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -35,6 +36,14 @@ const (
 	defaultStretchIterations uint32 = 262144
 	maxStretchIterations     uint32 = 10_000_000
 )
+
+func DefaultStretchIterations() uint32 {
+	return defaultStretchIterations
+}
+
+func MaxStretchIterations() uint32 {
+	return maxStretchIterations
+}
 
 // NewV3 - create and initialize a new pwsafe.V3 db
 func NewV3(name, password string) *V3 {
@@ -129,26 +138,19 @@ func (db V3) ListByGroup(group string) []string {
 // removed, trailing slash removed.
 // E.g. "https://www.Bank.com/Login/?ref=1#top" → "bank.com/login"
 func CanonicalURL(rawURL string) string {
-	s := rawURL
-	for _, pfx := range []string{"https://", "http://"} {
-		if len(s) >= len(pfx) && strings.ToLower(s[:len(pfx)]) == pfx {
-			s = s[len(pfx):]
-			break
-		}
+	s := strings.TrimSpace(rawURL)
+	if s == "" {
+		return ""
 	}
-	if i := strings.IndexByte(s, '#'); i >= 0 {
-		s = s[:i]
+	if !strings.Contains(s, "://") {
+		s = "https://" + s
 	}
-	if i := strings.IndexByte(s, '?'); i >= 0 {
-		s = s[:i]
+	parsed, err := url.Parse(s)
+	if err != nil || parsed.Host == "" {
+		return ""
 	}
-	s = strings.ToLower(s)
-	if slash := strings.IndexByte(s, '/'); slash >= 0 {
-		s = strings.TrimPrefix(s[:slash], "www.") + s[slash:]
-	} else {
-		s = strings.TrimPrefix(s, "www.")
-	}
-	return strings.TrimRight(s, "/")
+	host := strings.TrimPrefix(strings.ToLower(parsed.Host), "www.")
+	return strings.TrimRight(host+strings.ToLower(parsed.EscapedPath()), "/")
 }
 
 // Search returns UUIDs of records matching query.
@@ -161,6 +163,9 @@ func CanonicalURL(rawURL string) string {
 func (db V3) Search(query string, mode int) []string {
 	if mode == 2 {
 		canonical := CanonicalURL(query)
+		if canonical == "" {
+			return nil
+		}
 		var results []string
 		for key, rec := range db.Records {
 			if CanonicalURL(rec.URL) == canonical {
@@ -340,14 +345,29 @@ func (db V3) sortUUIDsForRecordList(uuids []string) []string {
 
 // SetPassword Sets the password that will be used to encrypt the file on next save
 func (db *V3) SetPassword(pw string) error {
+	return db.SetPasswordWithIterations(pw, defaultStretchIterations)
+}
+
+// SetPasswordWithIterations sets the password and stretch count used on next save.
+func (db *V3) SetPasswordWithIterations(pw string, iter uint32) error {
+	if err := validateStretchIterations(iter); err != nil {
+		return err
+	}
 	// First recalculate the Salt and set iter
-	db.Iter = defaultStretchIterations
+	db.Iter = iter
 	if _, err := rand.Read(db.Salt[:]); err != nil {
 		return err
 	}
 	db.calculateStretchKey(pw)
 	db.LastMod = time.Now()
 	return nil
+}
+
+func (db *V3) VerifyPassword(pw string) bool {
+	check := V3{Salt: db.Salt, Iter: db.Iter}
+	check.calculateStretchKey(pw)
+	defer wipeBytes(check.StretchedKey[:])
+	return hmac.Equal(check.StretchedKey[:], db.StretchedKey[:])
 }
 
 func validateStretchIterations(iter uint32) error {

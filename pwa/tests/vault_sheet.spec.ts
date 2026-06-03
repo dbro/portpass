@@ -103,6 +103,44 @@ test.describe('VaultSheet per-vault editing', () => {
     await expect(header).toContainText('Vault settings')
   })
 
+  test('changing primary master password updates unlock difficulty and saved bytes', async ({ page }) => {
+    await openVault(page)
+    await page.locator('.vault-pill').click()
+    await page.locator('.vault-card').first().click()
+    await page.getByRole('button', { name: 'Change master password' }).click()
+    await expect(page.getByLabel('Unlock difficulty')).toHaveValue('2048')
+    await expect(page.getByLabel('Unlock difficulty')).toHaveAttribute('max', '10000000')
+
+    await page.getByPlaceholder('Current master password').fill('three3#;')
+    await page.getByPlaceholder('New master password', { exact: true }).fill('new-three-pass')
+    await page.getByPlaceholder('Repeat new master password').fill('new-three-pass')
+    await page.getByLabel('Unlock difficulty').fill('2048')
+    await page.getByRole('button', { name: 'Update password' }).click()
+
+    await expect(page.getByRole('button', { name: 'Change master password' })).toBeVisible({ timeout: 5000 })
+    await expect(page.locator('.vault-detail-line', { hasText: 'Unlock difficulty 2,048 rounds' })).toBeVisible()
+
+    const result = await page.evaluate(() => {
+      const bytes = (window as any).__lastWrittenVaultBytes
+      if (!bytes) return { saved: false }
+      const oldResult = (window as any).openDB(new Uint8Array(bytes), 'three3#;')
+      const newResult = (window as any).openDB(new Uint8Array(bytes), 'new-three-pass')
+      return { saved: true, oldResult, newResult }
+    })
+    expect(result.saved).toBe(true)
+    expect(String(result.oldResult)).toContain('failed to decrypt')
+    expect(JSON.parse(String(result.newResult)).uuid).toMatch(/^[0-9a-f]{32}$/)
+  })
+
+  test('read-only vault detail does not offer master password change', async ({ page }) => {
+    await openWithSecondary(page, true)
+    await page.locator('.vault-pill').click()
+    await page.locator('.vault-card').last().click()
+
+    await expect(page.locator('.vault-section-title', { hasText: 'SECURITY' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Change master password' })).not.toBeVisible()
+  })
+
 })
 
 test.describe('VaultSheet autofill installation UI', () => {
@@ -226,7 +264,7 @@ test.describe('VaultSheet autofill installation UI', () => {
     await page.locator('.vs-close-btn').click()
     await expect(page.locator('.modal-title', { hasText: 'New same-profile bookmarklet' })).not.toBeVisible()
     await expect(page.locator('.delegate-name', { hasText: 'Test' })).toBeVisible()
-    await expect(page.locator('.delegate-row', { hasText: 'Test' }).locator('.delegate-meta')).toContainText('0 pages filled (same profile)')
+    await expect(page.locator('.delegate-row', { hasText: 'Test' }).locator('.delegate-meta')).toContainText('0 autofill uses (same profile)')
   })
 
   test('bookmarklet is not visible on per-vault detail page', async ({ page }) => {

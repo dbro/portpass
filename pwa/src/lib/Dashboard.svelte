@@ -1,6 +1,7 @@
 <script>
   import { onMount, untrack } from 'svelte'
   import { get } from 'svelte/store'
+  import { clear as clearIDBKeyval } from 'idb-keyval'
   import { selectedFile, dbItems, secondaryVaults, toast, clipboardSession, clipboardContext, switchboardUrl, switchboardConnected, crossProfileEnabled, delegatesVersion } from '../store.js'
   import {
     openDatabase,
@@ -8,11 +9,11 @@
     updateRecordFields, updateDBFields, deleteRecord as wasmDeleteRecord,
     searchRecords, searchRecordResults, closeDatabase, loadVaultFile,
     copyFieldToClipboard, copyCustomFieldToClipboard, copyTOTP as wasmCopyTOTP,
-    getTOTP, getFieldValue, getCustomFieldValue,
+    getTOTP, getFieldValue, getCustomFieldValue, changeMasterPassword,
   } from '../wasm.js'
-  import { addSecondaryCredential, updateSecondaryHandle, removeSecondaryCredential } from './secondaryVaults.js'
+  import { addSecondaryCredential, getSecondaryCredentials, updateSecondaryHandle, removeSecondaryCredential } from './secondaryVaults.js'
   import { getSwitchboardUrl, getCrossProfileEnabled } from './delegates.js'
-  import { isBiometricEnrolledForFile, unlockWithBiometric } from './biometric.js'
+  import { clearBiometric, isBiometricEnrolledForFile, unlockWithBiometric } from './biometric.js'
   import { getDelegates, verifyDelegateById, recordFill } from './delegates.js'
   import Icon from './Icon.svelte'
   import RecordList from './RecordList.svelte'
@@ -41,6 +42,8 @@
   let sheetOpen              = $state(false)
   let isDirty                = $state(false)
   let editDirty              = $state(false)
+  let autofillStagedEdit     = $state(false)
+  let autofillStagedUrl      = $state('')
   let vaultDirty             = $state(false)
   let dbName   = $state('')
   let dbKey        = $state('')
@@ -147,19 +150,45 @@
   // Autofill utilities
   // ---------------------------------------------------------------------------
 
-  // Mirror of Go's CanonicalURL: strip scheme, www., query, fragment, trailing slash.
+  // Mirror of Go's CanonicalURL: parse authority, then strip scheme, userinfo, www.,
+  // query, fragment, and trailing slash.
   function canonicalURL(href) {
-    let s = href || ''
-    for (const p of ['https://', 'http://']) {
-      if (s.toLowerCase().startsWith(p)) { s = s.slice(p.length); break }
+    const s = (href || '').trim()
+    if (!s) return ''
+    try {
+      const parsed = new URL(s.includes('://') ? s : `https://${s}`)
+      return (parsed.host.replace(/^www\./i, '') + parsed.pathname).toLowerCase().replace(/\/+$/, '')
+    } catch {
+      return ''
     }
-    const hash = s.indexOf('#'); if (hash >= 0) s = s.slice(0, hash)
-    const qs   = s.indexOf('?'); if (qs >= 0)   s = s.slice(0, qs)
-    s = s.toLowerCase()
-    const slash = s.indexOf('/')
-    if (slash >= 0) s = s.slice(0, slash).replace(/^www\./, '') + s.slice(slash)
-    else s = s.replace(/^www\./, '')
-    return s.replace(/\/+$/, '')
+  }
+
+  function autofillURL(href) {
+    const s = (href || '').trim()
+    if (!s) return null
+    try { return new URL(s.includes('://') ? s : `https://${s}`) }
+    catch { return null }
+  }
+
+  function autofillOrigin(href) {
+    return autofillURL(href)?.origin || ''
+  }
+
+  function autofillAuthorizeRecord(uuid, vaultUuid, destinationUrl, allowOriginOverride = false) {
+    const rec = getRecordData(vaultUuid || dbKey, uuid)
+    const saved = autofillURL(rec.URL || '')
+    const destination = autofillURL(destinationUrl || '')
+    if (!destination) throw new Error('Autofill destination could not be verified')
+    if (destination.protocol !== 'https:') throw new Error('Passwords are only autofilled on HTTPS pages')
+    if (!saved) {
+      if (!allowOriginOverride) throw new Error('Fill requires confirmation for a different website')
+      return rec
+    }
+    if (saved.protocol === 'https:' && destination.protocol !== 'https:')
+      throw new Error('Passwords saved for HTTPS cannot be filled on HTTP pages')
+    if (saved.origin !== destination.origin && !allowOriginOverride)
+      throw new Error('Fill requires confirmation for a different website')
+    return rec
   }
 
   function levenshtein(a, b) {
@@ -178,6 +207,7 @@
   // (≤5 distance, up to 5 results). Each entry: { uuid, vaultUuid, title, existingUrl, isCurrent }.
   function autofillFindRecords(queryUrl) {
     const canonical = canonicalURL(queryUrl)
+    if (!canonical) return []
     const allVaults = [
       { uuid: dbKey, items: get(dbItems), readonly: get(selectedFile)?.readonly || false },
       ...get(secondaryVaults).map(v => ({ uuid: v.uuid, items: v.items || [], readonly: v.readonly || false })),
@@ -242,8 +272,8 @@
         rec.Password !== '' && rec.Password !== undefined ? { code: 'p', label: 'Password', sensitive: true } : null,
         rec.Email ? { code: 'm', label: 'Email', value: rec.Email } : null,
         rec.TwoFactorKey !== undefined ? { code: '2', label: 'One-time code', sensitive: true } : null,
-        ...(rec.CustomFields || []).slice(0, 9).filter(cf => cf.Value !== '').map((cf, i) => ({
-          code: 'f' + (i + 1), label: cf.Name, sensitive: !!cf.Sensitive,
+        ...(rec.CustomFields || []).slice(0, 9).filter(cf => cf.Value !== '').map(cf => ({
+          code: `v{${cf.Name}}`, label: cf.Name, sensitive: !!cf.Sensitive,
           ...(cf.Sensitive ? {} : { value: cf.Value }),
         })),
         rec.Notes !== '' && rec.Notes !== undefined ? { code: 'notes', label: 'Notes', sensitive: true, notes: true } : null,
@@ -259,8 +289,9 @@
     if (code === 'm') return rec.Email ?? ''
     if (code === '2') return getTOTP(v, uuid).code ?? ''
     if (code === 'notes') return getFieldValue(v, uuid, 'Notes') ?? ''
-    if (/^f[1-9]$/.test(code)) {
-      const cf = rec.CustomFields?.[parseInt(code.slice(1)) - 1]
+    const customFieldMatch = /^v\{([^}]*)\}$/.exec(code)
+    if (customFieldMatch) {
+      const cf = rec.CustomFields?.find(cf => cf.Name === customFieldMatch[1])
       return cf ? (cf.Value !== null ? cf.Value : (getCustomFieldValue(v, uuid, cf.Name) ?? '')) : ''
     }
     return ''
@@ -284,24 +315,22 @@
     }
   }
 
-  // Update a record's URL field and save the vault to disk.
-  async function autofillSaveURL(uuid, vaultUuid, newUrl) {
-    const v = vaultUuid || dbKey
-    updateRecordFields(v, uuid, { URL: newUrl })
-    if (!vaultUuid) {
-      dbItems.set(getDatabaseData(dbKey))
-      isDirty = true
-      await saveFile(true)
-    } else {
-      const sv = get(secondaryVaults).find(s => s.uuid === vaultUuid)
-      if (!sv) throw new Error('Vault not found')
-      const items = getDatabaseData(v)
-      secondaryVaults.update(vs => vs.map(s => s.uuid === vaultUuid
-        ? { ...s, items: items.map(i => ({ ...i, vaultUuid })) } : s))
-      const data = saveDatabase(v)
-      const w = await sv.handle.createWritable()
-      await w.write(data); await w.close()
-    }
+  function autofillStageURL(uuid, vaultUuid, newUrl) {
+    const readonly = vaultUuid
+      ? !!get(secondaryVaults).find(s => s.uuid === vaultUuid)?.readonly
+      : !!get(selectedFile)?.readonly
+    if (readonly) throw new Error('This vault is read-only')
+    const destination = autofillURL(newUrl)
+    if (!destination || destination.protocol !== 'https:')
+      throw new Error('Autofill destination could not be verified')
+    loadRecordSelection(uuid, vaultUuid || null)
+    autofillStagedUrl = destination.origin + destination.pathname
+    autofillStagedEdit = true
+    sheetOpen = false
+    vaultDirty = false
+    isNew = false
+    isEditing = true
+    setTimeout(() => { try { window.focus() } catch {} }, 0)
   }
 
   // ── Cross-profile autofill intent handler ────────────────────────────────
@@ -425,11 +454,6 @@
           if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo }))
           return
         }
-        if (msg.msgType === 'save-url') {
-          try { await autofillSaveURL(msg.uuid, msg.vaultUuid || null, msg.url) } catch {}
-          if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo }))
-          return
-        }
         if (msg.msgType === 'search') {
           try { await sbEncryptReply(msg.replyTo, msg.ecdh, [], { delegateId: verified.id, requestHash }) } catch {}
           return
@@ -437,7 +461,8 @@
         if (msg.msgType === 'fill-uuid') {
           try {
             const rec = getRecordData(msg.vaultUuid || dbKey, msg.uuid)
-            if (canonicalURL(rec.URL || '') !== canonicalURL(msg.url || '')) {
+            const savedUrl = canonicalURL(rec.URL || '')
+            if (!savedUrl || savedUrl !== canonicalURL(msg.url || '')) {
               if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo, error: 'Credentials require an exact saved URL match' }))
               return
             }
@@ -455,7 +480,8 @@
         if (msg.msgType === 'field-value') {
           try {
             const rec = getRecordData(msg.vaultUuid || dbKey, msg.uuid)
-            if (canonicalURL(rec.URL || '') !== canonicalURL(msg.url || '')) {
+            const savedUrl = canonicalURL(rec.URL || '')
+            if (!savedUrl || savedUrl !== canonicalURL(msg.url || '')) {
               if (_sbWs) _sbWs.send(JSON.stringify({ type: 'reply', replyTo: msg.replyTo, error: 'Credentials require an exact saved URL match' }))
               return
             }
@@ -503,14 +529,11 @@
       if (seq[i] !== '\\') { i++; continue }
       if (i + 1 >= seq.length) return 'Sequence ends with \\'
       const code = seq[i + 1]
-      if (code === 'f') {
-        const d = seq[i + 2]
-        if (d !== undefined && /^[0-9]$/.test(d)) {
-          if (d === '0') return '\\f0 is not valid — field numbers start at 1'
-          i += 3
-        } else {
-          i += 2
-        }
+      if (code === 'v') {
+        if (seq[i + 2] !== '{') return '\\v must be followed by {custom field name}'
+        const end = seq.indexOf('}', i + 3)
+        if (end < 0) return '\\v{custom field name} must end with }'
+        i = end + 1
       } else if (code === 'w' || code === 'W') {
         let j = i + 2, count = 0
         while (j < seq.length && count < 3 && /^[0-9]$/.test(seq[j])) { j++; count++ }
@@ -603,7 +626,7 @@
         }
 
         // URL search
-        if (msg.url !== undefined) {
+        if (msg.url !== undefined && !msg.uuid) {
           ch.postMessage({ type: 'records', records: autofillFindRecords(msg.url), nonce: msg.nonce, theme: localStorage.getItem('theme') || 'dark', accent: localStorage.getItem('accent') || 'amber' })
           return
         }
@@ -616,6 +639,7 @@
           return
         }
         try {
+          autofillAuthorizeRecord(uuid, vaultUuid, msg.url, !!msg.allowOriginOverride)
           const result = await autofillEncryptData(sessionKey, autofillRecordMeta(uuid, vaultUuid))
           ch.postMessage({ type: 'record', ...result, nonce: msg.nonce })
         } catch (e) {
@@ -630,6 +654,7 @@
           return
         }
         try {
+          autofillAuthorizeRecord(msg.uuid, msg.vaultUuid || null, msg.url, !!msg.allowOriginOverride)
           const result = await autofillEncryptData(sessionKey, {
             code: msg.code || '', ...autofillFieldData(msg.uuid, msg.vaultUuid || null, msg.code || ''),
           })
@@ -640,14 +665,14 @@
         return
       }
 
-      if (msg.type === 'save-url') {
+      if (msg.type === 'stage-url') {
         if (!sessionKey) {
           ch.postMessage({ type: 'error', message: 'No secure session', nonce: msg.nonce })
           return
         }
         try {
-          await autofillSaveURL(msg.uuid, msg.vaultUuid || null, msg.url)
-          ch.postMessage({ type: 'url-saved', nonce: msg.nonce })
+          autofillStageURL(msg.uuid, msg.vaultUuid || null, msg.url)
+          ch.postMessage({ type: 'url-staged', nonce: msg.nonce })
         } catch (e) {
           ch.postMessage({ type: 'error', message: e.message, nonce: msg.nonce })
         }
@@ -711,6 +736,8 @@
     isEditing = false
     isNew = false
     editDirty = false
+    autofillStagedEdit = false
+    autofillStagedUrl = ''
     try {
       loadRecordSelection(uuid, vaultUuid)
     } catch (e) {
@@ -744,10 +771,14 @@
     isEditing = false
     isNew = false
     editDirty = false
+    autofillStagedEdit = false
+    autofillStagedUrl = ''
     loadRecordSelection(null)
   }
 
   function startEdit() {
+    autofillStagedEdit = false
+    autofillStagedUrl = ''
     isEditing = true
   }
 
@@ -775,6 +806,11 @@
       selectedUUID = null
       isNew = false
     }
+    if (autofillStagedEdit && selectedUUID) {
+      record = getRecordData(selectedVaultUuid || dbKey, selectedUUID)
+    }
+    autofillStagedEdit = false
+    autofillStagedUrl = ''
     isEditing = false
     editDirty = false
   }
@@ -865,6 +901,8 @@
       const uuid = updateRecordFields(targetVault, isNew ? null : selectedUUID, draft)
       selectedUUID = uuid ?? selectedUUID
       record = getRecordData(targetVault, selectedUUID)
+      autofillStagedEdit = false
+      autofillStagedUrl = ''
       isNew = false
       isEditing = false
       editDirty = false
@@ -1264,12 +1302,131 @@
     }
   }
 
+  async function saveVaultPasswordChange(uuid, currentPassword, newPassword, iterations) {
+    const isPrimaryVault = uuid === dbKey
+    try {
+      if (isPrimaryVault) {
+        if (!await checkPrimaryConflict()) return false
+        const secondaryCreds = await getSecondaryCredentials(dbKey).catch(() => [])
+        changeMasterPassword(uuid, currentPassword, newPassword, iterations)
+        if (await saveFile(true)) {
+          for (const cred of secondaryCreds) {
+            await addSecondaryCredential(dbKey, cred.filename, cred.vaultUuid, cred.masterPassword, cred.handle)
+          }
+          await clearBiometric(dbKey).catch(() => {})
+          showToast('Master password updated')
+          return true
+        }
+        return false
+      }
+
+      const sv = get(secondaryVaults).find(v => v.uuid === uuid)
+      if (!sv || sv.readonly) return false
+      if (sv.handle && secondaryModified[uuid] !== undefined) {
+        try {
+          const file = await sv.handle.getFile()
+          if (file.lastModified !== secondaryModified[uuid]) {
+            let realConflict = true
+            if (secondaryHead[uuid]) {
+              try {
+                const buf = await file.slice(72, 152).arrayBuffer()
+                realConflict = !sameHead(new Uint8Array(buf), secondaryHead[uuid])
+              } catch {}
+            }
+            if (realConflict && !confirm(`"${sv.name || sv.filename}" was modified since it was loaded.\n\nSaving will overwrite those changes. Save anyway?`)) return false
+          }
+        } catch {}
+      }
+
+      changeMasterPassword(uuid, currentPassword, newPassword, iterations)
+      const data = saveDatabase(uuid)
+      if (sv.handle) {
+        const w = await sv.handle.createWritable()
+        await w.write(data)
+        await w.close()
+        secondaryHead[uuid] = data.slice(72, 152)
+        try { secondaryModified[uuid] = (await sv.handle.getFile()).lastModified } catch {}
+        try { await addSecondaryCredential(dbKey, sv.filename, uuid, newPassword, sv.handle) } catch {}
+        showToast('Master password updated')
+        return true
+      }
+      await saveSecondaryAs(sv, data)
+      try { await addSecondaryCredential(dbKey, sv.filename, uuid, newPassword, sv.handle) } catch {}
+      showToast('Master password updated')
+      return true
+    } catch (e) {
+      if (e.name !== 'AbortError') showToast('Failed to update password: ' + e.message)
+      throw e
+    }
+  }
+
   function closeVaultSheet() {
     if (vaultDirty) {
       if (!confirm('Discard unsaved changes?')) return
     }
     sheetOpen = false
     vaultDirty = false
+  }
+
+  function clearPortpassLocalStorage() {
+    const exact = new Set(['theme', 'accent', 'genOpts'])
+    const prefixes = ['groups-', 'biometric-offered-']
+    for (const key of Object.keys(localStorage)) {
+      if (exact.has(key) || prefixes.some(prefix => key.startsWith(prefix))) {
+        localStorage.removeItem(key)
+      }
+    }
+  }
+
+  async function clearPortpassCaches() {
+    if (!window.caches) return
+    const names = await caches.keys()
+    await Promise.all(names
+      .filter(name => name.toLowerCase().includes('portpass'))
+      .map(name => caches.delete(name)))
+  }
+
+  async function unregisterPortpassServiceWorkers() {
+    if (!navigator.serviceWorker?.getRegistrations) return
+    const basePath = new URL(import.meta.env.BASE_URL, location.origin).pathname
+    const regs = await navigator.serviceWorker.getRegistrations()
+    await Promise.all(regs
+      .filter(reg => {
+        try { return new URL(reg.scope).pathname.startsWith(basePath) }
+        catch { return false }
+      })
+      .map(reg => reg.unregister()))
+  }
+
+  async function forgetProfileData() {
+    try {
+      get(secondaryVaults).forEach(v => closeDatabase(v.uuid))
+      closeDatabase(dbKey)
+      secondaryVaults.set([])
+      dbItems.set([])
+      selectedFile.set(null)
+      sheetOpen = false
+      vaultDirty = false
+      editDirty = false
+      record = null
+      selectedUUID = null
+      selectedVaultUuid = null
+      isEditing = false
+      isNew = false
+      autofillStagedEdit = false
+      autofillStagedUrl = ''
+      if (clearTimer) { clearTimeout(clearTimer); clearTimer = null }
+      clipHash = null
+      clipboardSession.set(null)
+      clipboardContext.set(null)
+      clearPortpassLocalStorage()
+      await clearIDBKeyval()
+      await clearPortpassCaches()
+      await unregisterPortpassServiceWorkers()
+      onclosed()
+    } catch (e) {
+      showToast('Could not forget profile data: ' + (e.message || e))
+    }
   }
 
   function lockVault() {
@@ -1501,6 +1658,8 @@
   }
 
   $effect(() => {
+    if (!isDesktop) return
+
     const searchText = debouncedQuery.trim()
     const hasSearch = !!searchText
 
@@ -1826,8 +1985,10 @@
       onlockall={lockAllVaults}
       onlocksecondary={lockSecondaryVault}
       onunlockadditional={unlockAdditionalVault}
+      onforgetprofile={forgetProfileData}
       ondbsave={saveDBFields}
       onsvdbsave={saveSecondaryDBFields}
+      onpasswordchange={saveVaultPasswordChange}
       ondirtychange={(d) => vaultDirty = d}
       {ontheme}
       {onaccent}
@@ -1840,6 +2001,7 @@
       {bookmarkletsSupported}
       {hasDelegates}
       vaultUuid={isNew ? (newRecordVaultUuid || dbKey) : (selectedVaultUuid || dbKey)}
+      stagedUrl={autofillStagedUrl}
       {rwVaults}
       vaultReadonly={editVaultReadonly}
       onvaultchange={(uuid) => newRecordVaultUuid = uuid}

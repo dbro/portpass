@@ -133,19 +133,26 @@
       if (!msg?.type) return
 
       if (msg.type === 'hello') {
+        if (bookmarkletSource && (event.source !== bookmarkletSource || event.origin !== bookmarkletOrigin)) return
         bookmarkletSource = event.source
         bookmarkletOrigin = event.origin
         sessionNonce = crypto.randomUUID()
         ch.postMessage({ type: 'hello', pubkey: msg.pubkey, nonce: sessionNonce })
       } else if (msg.type === 'query' && sessionNonce) {
+        if (event.source !== bookmarkletSource || event.origin !== bookmarkletOrigin) return
         // Cross-validate the sent URL's hostname against the browser-provided event.origin.
         if (msg.url !== undefined) {
-          const sentHost = msg.url.split('/')[0]
-          const evHost = new URL(event.origin).host.replace(/^www\./, '').toLowerCase()
-          if (sentHost !== evHost) return
+          try {
+            const sentHost = new URL(`https://${msg.url}`).host.replace(/^www\./, '').toLowerCase()
+            const evHost = new URL(event.origin).host.replace(/^www\./, '').toLowerCase()
+            if (!sentHost || sentHost !== evHost) return
+          } catch {
+            return
+          }
         }
         ch.postMessage({ type: 'query', url: msg.url, uuid: msg.uuid, vaultUuid: msg.vaultUuid, nonce: sessionNonce })
       } else if (msg.type === 'save-url' && sessionNonce) {
+        if (event.source !== bookmarkletSource || event.origin !== bookmarkletOrigin) return
         ch.postMessage({ type: 'save-url', uuid: msg.uuid, vaultUuid: msg.vaultUuid, url: msg.url, nonce: sessionNonce })
       }
     })

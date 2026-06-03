@@ -30,14 +30,22 @@ export async function openVault(
   })
 
   await page.addInitScript((b64data: string) => {
-    const bytes = Uint8Array.from(atob(b64data), c => c.charCodeAt(0))
+    let bytes = Uint8Array.from(atob(b64data), c => c.charCodeAt(0))
+    ;(window as any).__lastWrittenVaultBytes = null
 
     ;(window as any).showOpenFilePicker = async () => [{
       name: 'three.dat',
       getFile:           async () => new File([bytes], 'three.dat', { lastModified: 1000000 }),
       queryPermission:   async () => 'granted',
       requestPermission: async () => 'granted',
-      createWritable:    async () => ({ write: async () => {}, close: async () => {}, abort: async () => {} }),
+      createWritable:    async () => ({
+        write: async (data: Uint8Array) => {
+          bytes = new Uint8Array(data)
+          ;(window as any).__lastWrittenVaultBytes = Array.from(bytes)
+        },
+        close: async () => {},
+        abort: async () => {},
+      }),
     }]
     ;(window as any).showSaveFilePicker = async () => ({
       name: 'test.psafe3',

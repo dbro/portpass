@@ -72,6 +72,7 @@
 }
 .vault-app .btn-text.primary { color: var(--accent); font-weight: 600; }
 .vault-app .btn-text.accent  { color: var(--accent); font-weight: 500; }
+.vault-app .btn-text.danger  { color: var(--danger); font-weight: 600; }
 .vault-app .btn-text:disabled { opacity: 0.4; cursor: not-allowed; }
 .vault-app .btn-text.small { font-size: 13px; padding: 4px 0; }
 
@@ -313,6 +314,10 @@
   transition: border-color .12s var(--ease), box-shadow .12s var(--ease);
 }
 .vault-app .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.vault-app .input.modified {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
 .vault-app .input-wrap {
   display: flex; align-items: center;
   background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-input);
